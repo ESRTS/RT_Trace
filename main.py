@@ -1,6 +1,7 @@
 import customtkinter
 import sys
 from TraceView import TraceView
+from PicoTrace import loadTraceBuffers
 
 class TraceApp(customtkinter.CTk):
     """
@@ -24,7 +25,7 @@ class TraceApp(customtkinter.CTk):
         self.sidebar_frame.grid_rowconfigure(4, weight=1)
 
         ''' Button to start recording a new trace from a target. '''
-        self.btn_recordTrace = customtkinter.CTkButton(self.sidebar_frame, text="Record Trace", command=self.button_function)
+        self.btn_recordTrace = customtkinter.CTkButton(self.sidebar_frame, text="Record Trace", command=self.button_record_function)
         self.btn_recordTrace.grid(row=0, column=0, padx=20, pady=(20, 5), sticky="ew")
         
         ''' Option to select the trace source. '''
@@ -51,8 +52,19 @@ class TraceApp(customtkinter.CTk):
         self.traceView = TraceView(self)
         self.traceView.grid(row=0, column=1, rowspan=3, columnspan=1, sticky="nswe", padx=5, pady=5)
 
+    def button_record_function(self):
+
+        self.btn_recordTrace.configure(state="disabled")
+        self.update()
+        print("Loading trace buffer for each core. Might take a few seconds...")
+        loadTraceBuffers(self)
+        
+
     def button_function(self):
-        print("button pressed")
+        print("Loading trace buffer for each core...")
+        traceData = loadTraceBuffers()
+        print("Size trace buffer core 0: " + str(len(traceData[0])) + "b")
+        print("Size trace buffer core 1: " + str(len(traceData[1])) + "b")
 
     def selectTraceSource(self, traceSource: str):
         print(traceSource)
