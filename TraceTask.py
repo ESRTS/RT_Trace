@@ -38,6 +38,15 @@ class TraceJob():
     def __str__(self) -> str:
         return self.task.name + "-" + str(self.id)
 
+    def printInfo(self):
+        if self.deadline is not None:
+            print("\tJob-" + str(self.id) + " Release: " + str(self.releaseTime) + " Abs. Deadline: " + str(self.deadline) + " Rel. Deadline: " + str(self.deadline - self.releaseTime))
+        else:
+            print("\tJob-" + str(self.id) + " Release: " + str(self.releaseTime) + " Abs. Deadline: - Rel. Deadline: -")
+
+        for seg in self.execIntervals:
+            print("\t\t" + str(seg))
+
     def getStartTime(self):
         """
         Returns the start time of the job, or None if there was no execution.
@@ -79,14 +88,28 @@ class TraceTask():
     The class implements a task used to store trace information.
     """
 
-    def __init__(self, name, color):
-        self.name = name        # Task name
-        self.taskColor = color  # Color of the task in the trace
-        self.jobs = []          # Jobs of the task
+    def __init__(self, id, name, priority, color):
+        self.id = id                # Task ID
+        self.name = name            # Task name
+        self.priority = priority    # Task priority
+        self.taskColor = color      # Color of the task in the trace
+        self.jobs = []              # Jobs of the task
         self.currentJob = None
 
     def __str__(self) -> str:
-        return self.name + str(len(self.jobs)) + " jobs"
+        return self.name + " (" + str(len(self.jobs)) + " jobs)"
+
+    def printInfo(self):
+        if self.priority == None:
+            print("Task: " + self.name + " ID: " + str(self.id) + " Priority: -")
+        else:
+            print("Task: " + self.name + " ID: " + str(self.id) + " Priority: " + str(self.priority))
+
+    def printAll(self):
+        self.printInfo()
+
+        for job in self.jobs:
+            job.printInfo()
 
     def newJob(self, releaseTime, deadline):
         """
@@ -95,6 +118,14 @@ class TraceTask():
         assert self.currentJob == None
 
         self.currentJob = TraceJob(self, len(self.jobs), releaseTime, deadline)
+
+    def setCurrentJobDeadline(self, deadline):
+        """
+        Set the deadline of the current job.
+        """
+        assert self.currentJob != None
+
+        self.currentJob.deadline = deadline
 
     def startExec(self, ts, core, type):
         """

@@ -2,6 +2,8 @@ import customtkinter
 import sys
 from TraceView import TraceView
 from PicoTrace import loadTraceBuffers
+from TraceParser import parseTraceFiles
+from pathlib import Path
 
 class TraceApp(customtkinter.CTk):
     """
@@ -24,20 +26,20 @@ class TraceApp(customtkinter.CTk):
         self.sidebar_frame.grid(row=0, column=0, rowspan=4, sticky="nsew", padx=5, pady=5)
         self.sidebar_frame.grid_rowconfigure(4, weight=1)
 
-        ''' Button to start recording a new trace from a target. '''
-        self.btn_recordTrace = customtkinter.CTkButton(self.sidebar_frame, text="Record Trace", command=self.button_record_function)
-        self.btn_recordTrace.grid(row=0, column=0, padx=20, pady=(20, 5), sticky="ew")
-        
         ''' Option to select the trace source. '''
         self.opt_selectSource = customtkinter.CTkOptionMenu(self.sidebar_frame, values=["FreeRTOS", "Linux", "QNX"], command=self.selectTraceSource)
-        self.opt_selectSource.grid(row=1, column=0, padx=20, pady=5, sticky="ew")
+        self.opt_selectSource.grid(row=0, column=0, padx=20, pady=(20, 5), sticky="ew")
 
-        ''' Button to save the current trace. '''
-        self.btn_saveTrace = customtkinter.CTkButton(self.sidebar_frame, text="Save Trace", command=self.button_function)
-        self.btn_saveTrace.grid(row=2, column=0, padx=20, pady=5, sticky="ew")
+        ''' Button to start recording a new trace from a target. '''
+        self.btn_recordTrace = customtkinter.CTkButton(self.sidebar_frame, text="Record Trace", command=self.button_record_function)
+        self.btn_recordTrace.grid(row=1, column=0, padx=20, pady=5, sticky="ew")
+
+        #''' Button to save the current trace. '''
+        #self.btn_saveTrace = customtkinter.CTkButton(self.sidebar_frame, text="Save Trace", command=self.button_function)
+        #self.btn_saveTrace.grid(row=2, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Button to load an existing trace. '''
-        self.btn_loadTrace = customtkinter.CTkButton(self.sidebar_frame, text="Load Trace", command=self.button_function)
+        self.btn_loadTrace = customtkinter.CTkButton(self.sidebar_frame, text="Load Trace", command=self.load_function)
         self.btn_loadTrace.grid(row=3, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Textbox to display stdout. '''
@@ -57,14 +59,14 @@ class TraceApp(customtkinter.CTk):
         self.btn_recordTrace.configure(state="disabled")
         self.update()
         print("Loading trace buffer for each core. Might take a few seconds...")
-        loadTraceBuffers(self)
-        
+        loadTraceBuffers(self)   
 
-    def button_function(self):
-        print("Loading trace buffer for each core...")
-        traceData = loadTraceBuffers()
-        print("Size trace buffer core 0: " + str(len(traceData[0])) + "b")
-        print("Size trace buffer core 1: " + str(len(traceData[1])) + "b")
+    def load_function(self):
+        
+        self.btn_loadTrace.configure(state="disabled")
+        self.update()
+        print("Loading trace from files...")
+        parseTraceFiles(self)
 
     def selectTraceSource(self, traceSource: str):
         print(traceSource)

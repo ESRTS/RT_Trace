@@ -3,7 +3,7 @@ import telnetlib
 from threading import Thread
 from time import sleep
 
-def loadTraceBuffers(gui, size=4000):
+def loadTraceBuffers(gui, size=2000):
 
     thread = Thread(target = pico_thread, args = (size, gui))
     thread.start()
@@ -16,17 +16,31 @@ def pico_thread(size, gui):
     print("Size trace buffer core 1: " + str(len(traceBuffer[1])) + "b")
 
     # Parse the trace buffers
-
+    writeFile(traceBuffer[0], "buffer0")
+    writeFile(traceBuffer[1], "buffer1")
+    
     # Draw the execution trace
 
     # Enable the buttons and update the GUI
     gui.btn_recordTrace.configure(state="normal")
     gui.update()
 
+def writeFile(data, filename):
+    # Open file in binary write mode
+    binary_file = open(filename + ".txt", "wb")
+ 
+    # Write bytes to file
+    binary_file.write(data)
+ 
+    # Close file
+    binary_file.close()
+
+    print("Created File: " + filename + ".txt")
+
 def readTraceBuffers(size):
 
-    buffer0 = "0x20080000"  # SRAM8_BASE
-    buffer1 = "0x20081000"  # SRAM9_BASE
+    buffer0 = "0x2008001c"  # SRAM8_BASE
+    buffer1 = "0x2008100c"  # SRAM9_BASE
     traceBuffer = []
 
     debugger = subprocess.Popen([r"openocd",
