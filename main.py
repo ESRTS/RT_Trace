@@ -13,7 +13,7 @@ class TraceApp(customtkinter.CTk):
         super().__init__(*args, **kwargs)
 
         ''' Set the default size of the GUI window and give it a name. '''
-        self.geometry(str(self.winfo_screenwidth()) + "x1000")
+        self.geometry(str(self.winfo_screenwidth()) + "x500")
         self.minsize(800, 400)
         self.title("RT-Trace View")
 

@@ -30,6 +30,33 @@ event_map = {
     'ISR_EXIT': TRACE_ISR_EXIT
 }
 
+systickCore0Id = 15
+systickCore1Id = 42
+schedulerId = 0
+
+taskColorIndex = 0
+
+taskColors = [(100, 237, 157), (100, 143, 237), (212, 237, 76), (237, 123, 100), (141, 100, 237)]
+
+def getTaskColor(taskId):
+    """
+    Function returns the task colors. 
+    """
+    global taskColorIndex
+    
+    if taskId == systickCore0Id:
+        c = (203, 255, 168)
+    elif taskId == systickCore1Id:
+        c = (255, 82, 82)
+    elif taskId == schedulerId:
+        c = (61, 61, 61)
+    else:
+        c = taskColors[taskColorIndex]
+        taskColorIndex = (taskColorIndex + 1) % len(taskColors)
+
+    colorString = '#%02X%02X%02X' % (c[0],c[1],c[2])
+    return colorString
+    
 def parseTraceFiles(gui):
     thread = Thread(target = parser_thread, args = (gui, ))
     thread.start()
@@ -73,7 +100,7 @@ def parser(buffers):
     print("Found tarce data for tasks:")
 
     for task in allTasks:   
-        if len(task.jobs) is not 0:
+        if len(task.jobs) != 0:
             tasks.append(task)
 
     for task in tasks:
@@ -86,9 +113,9 @@ def extractTraceInfo(events):
     tasks = []
 
     # Create three tasks to represent the scheduler, tick ISR, doorbell ISR.
-    tasks.append(TraceTask(0, "Scheduler", None, "#000000"))
-    tasks.append(TraceTask(15, "Tick", None, "#ff0000"))
-    tasks.append(TraceTask(42, "Doorbell", None, "#00ff"))
+    tasks.append(TraceTask(schedulerId, "Scheduler", None, getTaskColor(schedulerId)))
+    tasks.append(TraceTask(systickCore0Id, "Tick Core 1", None, getTaskColor(systickCore0Id)))
+    tasks.append(TraceTask(systickCore1Id, "Tick Core 2", None, getTaskColor(systickCore1Id)))
 
     traceStart = None
 
@@ -98,7 +125,7 @@ def extractTraceInfo(events):
             id = evt.get('taskId')
             prio = evt.get('priority')
             name = evt.get('name').split('\\')[0]
-            tmpTask = TraceTask(id, name, prio, "#0f000f")
+            tmpTask = TraceTask(id, name, prio, getTaskColor(id))
             tasks.append(tmpTask)
         if evt.get('type') is TRACE_TASK_START_READY:
             traceStart = evt.get('ts')  # By convention we set the start of the first task to t=0

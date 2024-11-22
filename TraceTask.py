@@ -92,9 +92,13 @@ class TraceTask():
         self.id = id                # Task ID
         self.name = name            # Task name
         self.priority = priority    # Task priority
-        self.taskColor = color      # Color of the task in the trace
         self.jobs = []              # Jobs of the task
         self.currentJob = None
+
+        # Used for the visualization only
+        self.taskColor = color      # Color of the task in the trace
+        self.leftIndex = 0          # Index of the first job in the visible field
+        self.rightIndex = 0         # Index of the last job in the visible
 
     def __str__(self) -> str:
         return self.name + " (" + str(len(self.jobs)) + " jobs)"
