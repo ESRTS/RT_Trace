@@ -9,26 +9,28 @@ class TraceView(customtkinter.CTkCanvas):
     def __init__(self, master):
         super().__init__(master, scrollregion = (0,0,100,500))
         
-        self.borderX = 30            # Border that is added to the left and right of the plot
-        self.borderY = 30            # Border that is added on top and bottom
-        self.legend = 90             # Size that is reserved for the legend (left of the trace)
-        self.scaleFactor = 1         # Factor to scale the complete view (not used)
-        self.taskTimelineHight = 40  # Describes the height of one task's timeline
-        self.taskHeight = 25         # Describes the height of one task
-        self.releaseArrowWidth = 2   # Stroke width of release arrow
-        self.releaseArrowLength = 10 # Length of the release arrow
-        self.releaseArrowD = 4       # D parameter of release arrow
-        self.releaseArrowH = 4       # H parameter of release arrow
-        self.sizeX = 0               # Width of the canvas
-        self.maxTicks = 30           # Maximum number of ticks plotted in view
-        self.view = 0                # Length of the visible interval
-        self.tickScale = 1           # Tick scale 0 = us, 1 = ms, 2 = s
-        self.leftBound = 0           # Smallest time value of the visible trace
-        self.rightBound = 50000      # Largest time value of the visible trace (50 ms)
-        self.windowStart = 0
-        self.windowStop = 0
-        self.oldWindowStart = 0
-        self.oldWindowStop = 0
+        """
+        Variables that indicate a value in pixel have the ending '_px'
+        Variables that indicate a value in time ticks have the ending '_tks'
+        """
+        self.borderX_px = 30            # Border that is added to the left and right of the plot
+        self.borderY_px = 30            # Border that is added on top and bottom
+        self.legend_px = 90             # Size that is reserved for the legend (left of the trace)
+        self.scaleFactor = 1            # Factor to scale the complete view (not used)
+        self.taskTimelineHeight_px = 40 # Describes the height of one task's timeline
+        self.taskHeight_px = 25         # Describes the height of one task
+        self.releaseArrowWidth_px = 2   # Stroke width of release arrow
+        self.releaseArrowLength_px = 10 # Length of the release arrow
+        self.releaseArrowD_px = 4       # D parameter of release arrow
+        self.releaseArrowH_px = 4       # H parameter of release arrow
+        self.sizeX_px = 0               # Width of the canvas
+        self.maxTicks = 30              # Maximum number of tick marks plotted in view
+        self.view_tks = 0               # Length of the visible interval in time ticks
+        self.tickScale = 1              # Tick scale 0 = us, 1 = ms, 2 = s
+        self.leftBound_tks = 0          # Smallest time value of the visible trace
+        self.rightBound_tks = 50000     # Largest time value of the visible trace (50 ms)
+        self.oldLeftBound_tks = 0       # Last value of leftBound_tks before the view was updated 
+        self.oldRightBound_tks = 0      # Last value of rightBound_tks before the view was updated
 
         self.ctk_textbox_scrollbar = customtkinter.CTkScrollbar(self, command=self.yview)
         self.ctk_textbox_scrollbar.place(relx=1,rely=0,relheight=1,anchor='ne')
@@ -37,7 +39,6 @@ class TraceView(customtkinter.CTkCanvas):
         self.tasks = None
 
         self.draw()
-        self.sizeX  = int(self.winfo_width())
 
     def setTasks(self, tasks):
         """
@@ -55,35 +56,42 @@ class TraceView(customtkinter.CTkCanvas):
             return
         #if self.tasks is not None:
         
-        self.sizeX  = int(self.winfo_width())
+        self.sizeX_px  = int(self.winfo_width())
 
-        # Find the maximum time to display
+        # Find the maximum time to display in ticks
         for task in self.tasks:
-            if task.jobs[-1].getFinishTime() > self.view:
-                self.view = task.jobs[-1].getFinishTime()
+            if task.jobs[-1].getFinishTime() > self.rightBound_tks:
+                self.rightBound_tks = task.jobs[-1].getFinishTime()
 
-        windowHeight = len(self.tasks) * self.taskTimelineHight + self.borderY
+        # we add one ms to the right bound to not finish the trace with the last event
+        self.rightBound_tks = self.rightBound_tks + 1000 
 
-        startY = self.borderY / 2
+        # Compute the length of the visible view in ticks
+        self.view_tks = self.rightBound_tks - self.leftBound_tks
 
+        windowHeight = len(self.tasks) * self.taskTimelineHeight_px + self.borderY_px
+
+        startY = self.borderY_px / 2
+
+        # Draw the tick marks for the current view on the canvas
         self.drawTicks()
 
-        self.oldWindowStart = self.windowStart
-        self.oldWindowStop = self.windowStop
-        self.windowStart = self.tickToPixel(self.leftBound)
-        self.windowStop = self.tickToPixel(self.rightBound)
+        #self.oldWindowStart_px = self.windowStart_px
+        #self.oldWindowStop_px = self.windowStop_px
+        #self.windowStart_px = self.tickToPixel(self.leftBound_tks)
+        #self.windowStop_px = self.tickToPixel(self.rightBound_tks)
 
         for task in self.tasks:
-            taskPos = self.taskTimelineHight * (self.tasks.index(task) + 1) - 1 - self.taskHeight
+            taskPos = self.taskTimelineHeight_px * (self.tasks.index(task) + 1) - 1 - self.taskHeight_px
             self.paintTask(task, taskPos)
 
         for task in self.tasks:
-            self.create_line(self.borderX + self.legend, (self.taskTimelineHight * (self.tasks.index(task) + 1)) - 1, self.sizeX - self.borderX, (self.taskTimelineHight * (self.tasks.index(task) + 1)) - 1)
+            self.create_line(self.borderX_px + self.legend_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1)
 
             #left vertical boundary
-            self.create_line(self.plotXOffset(), 0, self.plotXOffset(), (self.taskTimelineHight * (self.tasks.index(task) + 1)) - 1)
+            self.create_line(self.plotXOffset(), 0, self.plotXOffset(), (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1)
 			
-            self.create_line(self.sizeX - self.borderX, 0, self.sizeX - self.borderX, (self.taskTimelineHight * (self.tasks.index(task) + 1)) - 1)
+            self.create_line(self.sizeX_px - self.borderX_px, 0, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1)
 
         self.paintLegend()
         
@@ -93,7 +101,7 @@ class TraceView(customtkinter.CTkCanvas):
         """
 
         for task in self.tasks:
-            self.create_text(self.legend + (self.borderX / 2), (self.taskTimelineHight * (self.tasks.index(task) + 1)) - (self.taskTimelineHight / 2), anchor=customtkinter.E,text=task.name)
+            self.create_text(self.legend_px + (self.borderX_px / 2), (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - (self.taskTimelineHeight_px / 2), anchor=customtkinter.E,text=task.name)
 
     def paintTask(self, task, y):
         """
@@ -112,16 +120,19 @@ class TraceView(customtkinter.CTkCanvas):
         start_px = self.tickToPixel(job.getStartTime())
         finish_px = self.tickToPixel(job.getFinishTime())
 
-        if start_px < self.windowStart:
-            start_px = self.windowStart
-        elif finish_px > self.windowStop:
-            finish_px = self.windowStop
+        windowStart = self.tickToPixel(self.leftBound_tks)
+        windowStop = self.tickToPixel(self.rightBound_tks)
+
+        if start_px < windowStart:
+            start_px = windowStart
+        elif finish_px > windowStop:
+            finish_px = windowStop
 		
         if finish_px - start_px >= 0:
 
             # Plot the ready marking
             if task.id > 100:   # the ISR and scheduler events have an ID < 100. For those we don't have jobs so we don't draw the grey background either.
-                self.create_rectangle(start_px, y, start_px + (finish_px - start_px), y + self.taskHeight, fill='#DDDDDD')
+                self.create_rectangle(start_px, y, start_px + (finish_px - start_px), y + self.taskHeight_px, fill='#DDDDDD')
 
             # Plot the execution
             self.drawJobsSection(task, job, y, start_px, finish_px, self.tickToPixel(job.releaseTime), self.tickToPixel(job.getFinishTime()))
@@ -151,7 +162,7 @@ class TraceView(customtkinter.CTkCanvas):
                     execeWidth_px = 1  # Minimum with of an execution segment on the trace is 1px
                 
                 # Draw the execution on the trace
-                self.create_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight, fill = task.taskColor)
+                self.create_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = task.taskColor)
     
     def updateVisibleJobs(self, task):
         """
@@ -165,68 +176,68 @@ class TraceView(customtkinter.CTkCanvas):
         # This allows us to have a more efficient draw update since we don't need to look at all jobs of the task.
 
         # LEFT BOUND CHECK
-        if self.windowStart < self.oldWindowStart:
+        if self.leftBound_tks < self.oldLeftBound_tks:  # The new left boundary has a smaller time than the old boundary ("left bound moved to the left")
             stop = False
 
             while stop is not True:
                 if task.leftIndex == 0:
                     stop = True
                 else:   
-                    job = task.jobs[task.leftIndex - 1] # Get the next smaller job
+                    job = task.jobs[task.leftIndex - 1] # Get the next smaller job (we can get index -1 since we made sure above that the index is not 0)
 
-                    if job.getFinishTime() <= self.windowStart:
+                    if job.getFinishTime() <= self.leftBound_tks:   # If this job finishes outside the visible view we stop and do not include it in the view
                         stop = True
                     else:
-                        task.leftIndex = task.leftIndex - 1
+                        task.leftIndex = task.leftIndex - 1 # Since the job finished within the view it's index is included. 
 
-        elif self.windowStart > self.oldWindowStart:
+        elif self.leftBound_tks > self.oldLeftBound_tks:    # The new left boundary is larger than the old boundary ("left boundary was moved to the right")
             stop = False
 
             while stop is not True:
-                if task.leftIndex is maxIndex:
+                if task.leftIndex is maxIndex: # If the last job is already outside the view we can stop
                     stop = True
                 else:
-                    job = task.jobs[task.leftIndex] # Get the next smaller job
+                    job = task.jobs[task.leftIndex] # Get the job on the current boundary
 
-                    if job.getFinishTime() > self.windowStart:
+                    if job.getFinishTime() > self.leftBound_tks:    # If the job is in the visible view, we can stop.
                         stop = True
                     else:
-                        task.leftIndex = task.leftIndex + 1
+                        task.leftIndex = task.leftIndex + 1 # Since the job was not in the view, the next job is checked
 
         # RIGHT BOUND CHECK
-        if self.windowStop > self.oldWindowStop:
+        if self.rightBound_tks > self.oldRightBound_tks: # The new right boundary is larger than the old right boundary ("right boundary was moved to the right")
             stop = False
 
             while stop is not True:
-                if task.rightIndex is maxIndex:
+                if task.rightIndex is maxIndex: # If the last job is already in view we can stop
                     stop = True
                 else:
                     job = task.jobs[task.rightIndex + 1] # Get the next larger job
 
-                    if job.releaseTime <= self.windowStop:
+                    if job.releaseTime > self.rightBound_tks:   # If the release of this job is outside the view, we found the first job that is not visible anymore
                         stop = True
                     else:
-                        task.rightIndex = task.rightIndex + 1
+                        task.rightIndex = task.rightIndex + 1   # Since the job was not outside the view we can set the right index accordingly
 
-        elif self.windowStop < self.oldWindowStop:
+        elif self.rightBound_tks < self.oldRightBound_tks:  # The new right boundary is smaller than the old boundary ("right boundary was moved to the left")
             stop = False
 
             while stop is not True:
-                if task.rightIndex <= 0:
+                if task.rightIndex <= 0:    # If the view is to the left of the first job, stop (i.e. even the first job appears later then the right boundary)
                     stop = True
                 else:
-                    job = task.jobs[task.rightIndex] # Get the next larger job
+                    job = task.jobs[task.rightIndex] # Get the currently oldest visible job 
 
-                    if job.releaseTime <= self.windowStop:
+                    if job.releaseTime < self.rightBound_tks:  # Since the right boundary was moved earlier we can stop as soon as the job with rightIndex is in view again
                         stop = True
                     else:
-                        task.rightIndex = task.rightIndex - 1
+                        task.rightIndex = task.rightIndex - 1   # Since the job was not in view we check the job before that
 
     def drawTicks(self):
         """
         Draws the tick lines based on the current view.
         """
-        minSizeTick = self.view / self.maxTicks
+        minSizeTick = self.view_tks / self.maxTicks
 
         b = minSizeTick / 1
         subdivisor = 1
@@ -259,8 +270,8 @@ class TraceView(customtkinter.CTkCanvas):
             self.tickScale = 1000000
             subdivider = 100
 
-        firstTick = self.leftBound
-        firstTick = math.ceil(self.leftBound / (self.tickScale * subdivider))
+        firstTick = self.leftBound_tks
+        firstTick = math.ceil(self.leftBound_tks / (self.tickScale * subdivider))
         tick = firstTick * (self.tickScale * subdivider)
 
         drawNextTick = True
@@ -269,14 +280,14 @@ class TraceView(customtkinter.CTkCanvas):
             pos = self.tickToPixel(tick)
 
             # Draw the ticks
-            self.create_line(pos, 0, pos, self.taskTimelineHight * (len(self.tasks)), fill="lightgrey")
-            self.create_line(pos, self.taskTimelineHight * (len(self.tasks)) - 1, pos, self.taskTimelineHight * (len(self.tasks)) + 5)
+            self.create_line(pos, 0, pos, self.taskTimelineHeight_px * (len(self.tasks)), fill="lightgrey")
+            self.create_line(pos, self.taskTimelineHeight_px * (len(self.tasks)) - 1, pos, self.taskTimelineHeight_px * (len(self.tasks)) + 5)
             
             # Draw timestring
-            self.create_text(pos, self.taskTimelineHight * (len(self.tasks)) + 12, anchor=customtkinter.N, text=self.getTimeString(tick))
+            self.create_text(pos, self.taskTimelineHeight_px * (len(self.tasks)) + 12, anchor=customtkinter.N, text=self.getTimeString(tick))
 
             tick = tick + (self.tickScale * subdivider) # Increment tick
-            if tick >= self.rightBound:
+            if tick >= self.rightBound_tks:
                 drawNextTick = False
 
     def getTimeString(self, tick):
@@ -299,17 +310,17 @@ class TraceView(customtkinter.CTkCanvas):
         """
         Returns the start pixel of the main plot area.
         """
-        return self.borderX + self.legend 
+        return self.borderX_px + self.legend_px
     
     def tickToPixel(self, tick):
         """
         This function converts a tick time value into it's respective pixel x-coordinate on the canvas.
         """
-        plotWidth = self.sizeX - self.borderX - self.borderX - self.legend
-        plotXOffset = self.borderX + self.legend
+        plotWidth = self.sizeX_px - self.borderX_px - self.borderX_px - self.legend_px
+        plotXOffset = self.borderX_px + self.legend_px
 
-        viewLength = self.rightBound - self.leftBound
-        posLength = tick - self.leftBound
+        viewLength = self.rightBound_tks - self.leftBound_tks
+        posLength = tick - self.leftBound_tks
 
         tmp = (plotWidth * posLength) / viewLength
 
@@ -319,7 +330,7 @@ class TraceView(customtkinter.CTkCanvas):
         """
         This function converts a pixel x-coordinate and converts it into it's respective tick time value.
         """
-        viewLength = self.rightBound - self.leftBound
-        plotWidth = self.sizeX - self.borderX - self.borderX - self.legend
+        viewLength = self.rightBound_tks - self.leftBound_tks
+        plotWidth = self.sizeX_px - self.borderX_px - self.borderX_px - self.legend_px
 
         return (pixel * viewLength) / (plotWidth)
