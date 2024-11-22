@@ -47,12 +47,29 @@ class TraceApp(customtkinter.CTk):
         self.textbox.grid(row=3, column=1, rowspan=1, columnspan=1, sticky="nswe", padx=5, pady=5)
         
         ''' Redirect stdout and stderr to the textbox. '''
-        sys.stdout = TextRedirector(self.textbox, "stdout")
-        sys.stderr = TextRedirector(self.textbox, "stderr")
+        #sys.stdout = TextRedirector(self.textbox, "stdout")
+        #sys.stderr = TextRedirector(self.textbox, "stderr")
 
         ''' Execution Trace Widget. '''
         self.traceView = TraceView(self)
         self.traceView.grid(row=0, column=1, rowspan=3, columnspan=1, sticky="nswe", padx=5, pady=5)
+
+        ''' Bind the key handler function. '''
+        self.bind("<Key>", self.keyHandler)
+
+    def keyHandler(self, event):
+        """
+        Key-handler function. Used to control the trace view.
+        """
+        #print(event.char, event.keysym, event.keycode)
+        if event.keycode == 2063660802: # Left arrow
+            print("LEFT")
+        elif event.keycode == 2080438019: # Right arrow
+            print("RIGHT")
+        elif event.keycode == 2113992448: # Up arrow
+            print("UP")
+        elif event.keycode == 2097215233: # Down arrow
+            print("DOWN")
 
     def button_record_function(self):
 

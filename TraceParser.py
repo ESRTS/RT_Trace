@@ -105,6 +105,7 @@ def parser(buffers):
 
     for task in tasks:
         print("\t" + str(task))
+        #task.printAll()
 
     return tasks
 
@@ -128,7 +129,8 @@ def extractTraceInfo(events):
             tmpTask = TraceTask(id, name, prio, getTaskColor(id))
             tasks.append(tmpTask)
         if evt.get('type') is TRACE_TASK_START_READY:
-            traceStart = evt.get('ts')  # By convention we set the start of the first task to t=0
+            if traceStart is None:
+                traceStart = evt.get('ts')  # By convention we set the start of the first task to t=0
 
     for task in tasks:
         """ First, get all events that belong to this task.
@@ -178,7 +180,7 @@ def parseTaskExecution(traceStart, task, events):
         Based on this, the jobs and execution segments are extracted. 
     """
     #task.printInfo()
-    traceStart = 0
+    #traceStart = 0
 
     jobFinishes = False
     timeToWake = 0

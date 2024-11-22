@@ -13,6 +13,7 @@ class TraceView(customtkinter.CTkCanvas):
         Variables that indicate a value in pixel have the ending '_px'
         Variables that indicate a value in time ticks have the ending '_tks'
         """
+        # --> Variables to alter the dimensions of different elements in the trace <--
         self.borderX_px = 30            # Border that is added to the left and right of the plot
         self.borderY_px = 30            # Border that is added on top and bottom
         self.legend_px = 90             # Size that is reserved for the legend (left of the trace)
@@ -23,8 +24,10 @@ class TraceView(customtkinter.CTkCanvas):
         self.releaseArrowLength_px = 10 # Length of the release arrow
         self.releaseArrowD_px = 4       # D parameter of release arrow
         self.releaseArrowH_px = 4       # H parameter of release arrow
-        self.sizeX_px = 0               # Width of the canvas
         self.maxTicks = 30              # Maximum number of tick marks plotted in view
+
+        # --> Internal variables. No manual configuration needed! <--
+        self.sizeX_px = 0               # Width of the canvas
         self.view_tks = 0               # Length of the visible interval in time ticks
         self.tickScale = 1              # Tick scale 0 = us, 1 = ms, 2 = s
         self.leftBound_tks = 0          # Smallest time value of the visible trace
@@ -38,7 +41,11 @@ class TraceView(customtkinter.CTkCanvas):
 
         self.tasks = None
 
+        self.canvasItems = []           # Used to store all canvas items that are updated with a new view, so we can delete those easily
+
         self.draw()
+
+        
 
     def setTasks(self, tasks):
         """
@@ -56,9 +63,14 @@ class TraceView(customtkinter.CTkCanvas):
             return
         #if self.tasks is not None:
         
+        # In case the view was updated, make sure to delete all canvas items first
+        for item in self.canvasItems:
+            self.delete(item)
+
         self.sizeX_px  = int(self.winfo_width())
 
         # Find the maximum time to display in ticks
+        self.rightBound_tks = 0
         for task in self.tasks:
             if task.jobs[-1].getFinishTime() > self.rightBound_tks:
                 self.rightBound_tks = task.jobs[-1].getFinishTime()
@@ -76,22 +88,17 @@ class TraceView(customtkinter.CTkCanvas):
         # Draw the tick marks for the current view on the canvas
         self.drawTicks()
 
-        #self.oldWindowStart_px = self.windowStart_px
-        #self.oldWindowStop_px = self.windowStop_px
-        #self.windowStart_px = self.tickToPixel(self.leftBound_tks)
-        #self.windowStop_px = self.tickToPixel(self.rightBound_tks)
-
         for task in self.tasks:
             taskPos = self.taskTimelineHeight_px * (self.tasks.index(task) + 1) - 1 - self.taskHeight_px
             self.paintTask(task, taskPos)
 
         for task in self.tasks:
-            self.create_line(self.borderX_px + self.legend_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1)
+            self.canvasItems.append(self.create_line(self.borderX_px + self.legend_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1))
 
             #left vertical boundary
-            self.create_line(self.plotXOffset(), 0, self.plotXOffset(), (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1)
+            self.canvasItems.append(self.create_line(self.plotXOffset(), 0, self.plotXOffset(), (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1))
 			
-            self.create_line(self.sizeX_px - self.borderX_px, 0, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1)
+            self.canvasItems.append(self.create_line(self.sizeX_px - self.borderX_px, 0, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1))
 
         self.paintLegend()
         
@@ -101,7 +108,7 @@ class TraceView(customtkinter.CTkCanvas):
         """
 
         for task in self.tasks:
-            self.create_text(self.legend_px + (self.borderX_px / 2), (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - (self.taskTimelineHeight_px / 2), anchor=customtkinter.E,text=task.name)
+            self.canvasItems.append(self.create_text(self.legend_px + (self.borderX_px / 2), (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - (self.taskTimelineHeight_px / 2), anchor=customtkinter.E,text=task.name))
 
     def paintTask(self, task, y):
         """
@@ -132,10 +139,16 @@ class TraceView(customtkinter.CTkCanvas):
 
             # Plot the ready marking
             if task.id > 100:   # the ISR and scheduler events have an ID < 100. For those we don't have jobs so we don't draw the grey background either.
-                self.create_rectangle(start_px, y, start_px + (finish_px - start_px), y + self.taskHeight_px, fill='#DDDDDD')
+                self.canvasItems.append(self.create_rectangle(start_px, y, start_px + (finish_px - start_px), y + self.taskHeight_px, fill='#DDDDDD'))
 
             # Plot the execution
             self.drawJobsSection(task, job, y, start_px, finish_px, self.tickToPixel(job.releaseTime), self.tickToPixel(job.getFinishTime()))
+
+        if self.leftBound_tks <= job.releaseTime and self.rightBound_tks >= job.releaseTime:
+            #releaseArrowLength_px
+            #drawArrowLine(g2d, rel, y, rel, y - RELEASE_ARROW_LENGTH, RELEASE_ARROW_D, RELEASE_AWWOR_h);
+            rel_px = self.tickToPixel(job.releaseTime)
+            self.canvasItems.append(self.create_line(rel_px, y, rel_px, y - self.releaseArrowLength_px, arrow=customtkinter.LAST, arrowshape=(self.releaseArrowH_px, self.releaseArrowH_px, self.releaseArrowD_px / 2), width=self.releaseArrowWidth_px))
 
     def drawJobsSection(self, task, job, y, start_px, stop_px, sectionStart_px, sectionStop_px):
         """
@@ -162,7 +175,7 @@ class TraceView(customtkinter.CTkCanvas):
                     execeWidth_px = 1  # Minimum with of an execution segment on the trace is 1px
                 
                 # Draw the execution on the trace
-                self.create_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = task.taskColor)
+                self.canvasItems.append(self.create_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = task.taskColor))
     
     def updateVisibleJobs(self, task):
         """
@@ -280,11 +293,11 @@ class TraceView(customtkinter.CTkCanvas):
             pos = self.tickToPixel(tick)
 
             # Draw the ticks
-            self.create_line(pos, 0, pos, self.taskTimelineHeight_px * (len(self.tasks)), fill="lightgrey")
-            self.create_line(pos, self.taskTimelineHeight_px * (len(self.tasks)) - 1, pos, self.taskTimelineHeight_px * (len(self.tasks)) + 5)
+            self.canvasItems.append(self.create_line(pos, 0, pos, self.taskTimelineHeight_px * (len(self.tasks)), fill="lightgrey"))
+            self.canvasItems.append(self.create_line(pos, self.taskTimelineHeight_px * (len(self.tasks)) - 1, pos, self.taskTimelineHeight_px * (len(self.tasks)) + 5))
             
             # Draw timestring
-            self.create_text(pos, self.taskTimelineHeight_px * (len(self.tasks)) + 12, anchor=customtkinter.N, text=self.getTimeString(tick))
+            self.canvasItems.append(self.create_text(pos, self.taskTimelineHeight_px * (len(self.tasks)) + 12, anchor=customtkinter.N, text=self.getTimeString(tick)))
 
             tick = tick + (self.tickScale * subdivider) # Increment tick
             if tick >= self.rightBound_tks:
