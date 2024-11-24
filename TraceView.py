@@ -34,6 +34,8 @@ class TraceView(customtkinter.CTkCanvas):
         self.rightBound_tks = 50000     # Largest time value of the visible trace (50 ms)
         self.oldLeftBound_tks = 0       # Last value of leftBound_tks before the view was updated 
         self.oldRightBound_tks = 0      # Last value of rightBound_tks before the view was updated
+        self.zoomFactor = 1.2         # Factor used to compute zoom areas
+        self.zoomMax = 50               # Maximum zoom level 50us
 
         self.ctk_textbox_scrollbar = customtkinter.CTkScrollbar(self, command=self.yview)
         self.ctk_textbox_scrollbar.place(relx=1,rely=0,relheight=1,anchor='ne')
@@ -53,6 +55,15 @@ class TraceView(customtkinter.CTkCanvas):
         """
         self.tasks = tasks
 
+        # Find the maximum time to display in ticks
+        self.rightBound_tks = 0
+        for task in self.tasks:
+            if task.jobs[-1].getFinishTime() > self.rightBound_tks:
+                self.rightBound_tks = task.jobs[-1].getFinishTime()
+
+        # we add one ms to the right bound to not finish the trace with the last event
+        self.rightBound_tks = self.rightBound_tks + 1000 
+
     def draw(self):
         """
         Function draws the trace view of all tasks. 
@@ -68,15 +79,6 @@ class TraceView(customtkinter.CTkCanvas):
             self.delete(item)
 
         self.sizeX_px  = int(self.winfo_width())
-
-        # Find the maximum time to display in ticks
-        self.rightBound_tks = 0
-        for task in self.tasks:
-            if task.jobs[-1].getFinishTime() > self.rightBound_tks:
-                self.rightBound_tks = task.jobs[-1].getFinishTime()
-
-        # we add one ms to the right bound to not finish the trace with the last event
-        self.rightBound_tks = self.rightBound_tks + 1000 
 
         # Compute the length of the visible view in ticks
         self.view_tks = self.rightBound_tks - self.leftBound_tks
@@ -347,3 +349,25 @@ class TraceView(customtkinter.CTkCanvas):
         plotWidth = self.sizeX_px - self.borderX_px - self.borderX_px - self.legend_px
 
         return (pixel * viewLength) / (plotWidth)
+    
+    def zoom(self, direction):
+        """
+        Function is used to handle zoom events. 
+        Depending on the zoom direction the new left and right boundaries are calculated. 
+        """
+
+        left_tks = self.leftBound_tks
+        right_tks = self.rightBound_tks
+
+        if direction > 0: # Zoom in
+            left_tks = left_tks * self.zoomFactor
+            right_tks = right_tks / self.zoomFactor
+        elif direction < 0:  # Zoom out
+            left_tks = left_tks / self.zoomFactor
+            right_tks = right_tks * self.zoomFactor
+
+        if right_tks - left_tks > self.zoomMax:
+            self.leftBound_tks = left_tks
+            self.rightBound_tks = right_tks
+
+        self.draw()

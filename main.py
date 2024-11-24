@@ -67,9 +67,9 @@ class TraceApp(customtkinter.CTk):
         elif event.keycode == 2080438019: # Right arrow
             print("RIGHT")
         elif event.keycode == 2113992448: # Up arrow
-            print("UP")
+            self.traceView.zoom(1)
         elif event.keycode == 2097215233: # Down arrow
-            print("DOWN")
+            self.traceView.zoom(-1)
 
     def button_record_function(self):
 
