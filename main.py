@@ -57,6 +57,11 @@ class TraceApp(customtkinter.CTk):
         ''' Bind the key handler function. '''
         self.bind("<Key>", self.keyHandler)
 
+        ''' Bind the handler functions to move the trace. '''
+        self.traceView.bind("<B1-Motion>", self.traceView.mouseDragHandler)
+        self.traceView.bind("<ButtonPress>", self.traceView.buttonPressed)
+        self.traceView.bind("<ButtonRelease>", self.traceView.buttonReleased)
+
     def keyHandler(self, event):
         """
         Key-handler function. Used to control the trace view.

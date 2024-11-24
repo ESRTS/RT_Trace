@@ -34,8 +34,10 @@ class TraceView(customtkinter.CTkCanvas):
         self.rightBound_tks = 50000     # Largest time value of the visible trace (50 ms)
         self.oldLeftBound_tks = 0       # Last value of leftBound_tks before the view was updated 
         self.oldRightBound_tks = 0      # Last value of rightBound_tks before the view was updated
-        self.zoomFactor = 1.2         # Factor used to compute zoom areas
+        self.zoomFactor = 1.2           # Factor used to compute zoom areas
         self.zoomMax = 50               # Maximum zoom level 50us
+        self.moveView = False           # Flag to indicate that the view is moved
+        self.moveInitialX = 0           # Initial X-position if the view is moved
 
         self.ctk_textbox_scrollbar = customtkinter.CTkScrollbar(self, command=self.yview)
         self.ctk_textbox_scrollbar.place(relx=1,rely=0,relheight=1,anchor='ne')
@@ -371,3 +373,33 @@ class TraceView(customtkinter.CTkCanvas):
             self.rightBound_tks = right_tks
 
         self.draw()
+
+    def mouseDragHandler(self, event):
+        """
+        Function to handle mouse drag events. If the button was pressed before, this means 
+        the view is moved. The function then calculates the new view boundaries and repaints the view. 
+        """
+
+        if self.moveView is True:
+            delta = self.moveInitialX - event.x
+            self.moveInitialX = event.x
+
+            div_tks = self.pixelToTime(delta)
+
+            self.leftBound_tks = self.leftBound_tks + div_tks
+            self.rightBound_tks = self.rightBound_tks + div_tks
+
+            self.draw()
+
+    def buttonPressed(self, event):
+        """
+        Function starts the sequence to move the view.
+        """
+        self.moveView = True
+        self.moveInitialX = event.x
+
+    def buttonReleased(self, event):
+        """
+        Function stops the sequence to move the view.
+        """
+        self.moveView = False
