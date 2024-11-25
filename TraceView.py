@@ -72,7 +72,11 @@ class TraceView(customtkinter.CTkCanvas):
         """
         #print("Draw...")
 
+        self.sizeX_px  = int(self.winfo_width())
+
         if self.tasks is None:
+            self.canvasItems.append(self.create_text(200, 100, anchor=customtkinter.N, text="No Trace Loaded..."))
+
             return
         #if self.tasks is not None:
         
@@ -80,12 +84,12 @@ class TraceView(customtkinter.CTkCanvas):
         for item in self.canvasItems:
             self.delete(item)
 
-        self.sizeX_px  = int(self.winfo_width())
+        
 
         # Compute the length of the visible view in ticks
         self.view_tks = self.rightBound_tks - self.leftBound_tks
 
-        windowHeight = len(self.tasks) * self.taskTimelineHeight_px + self.borderY_px
+        
 
         startY = self.borderY_px / 2
 
