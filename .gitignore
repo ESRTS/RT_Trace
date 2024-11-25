@@ -3,3 +3,4 @@ __pycache__
 *.DS_Store
 buffer0.txt
 buffer1.txt
+trace.pdf

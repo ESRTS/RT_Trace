@@ -4,6 +4,8 @@ from TraceView import TraceView
 from PicoTrace import loadTraceBuffers
 from TraceParser import parseTraceFiles
 from pathlib import Path
+import subprocess
+import os
 
 class TraceApp(customtkinter.CTk):
     """
@@ -34,13 +36,13 @@ class TraceApp(customtkinter.CTk):
         self.btn_recordTrace = customtkinter.CTkButton(self.sidebar_frame, text="Record Trace", command=self.button_record_function)
         self.btn_recordTrace.grid(row=1, column=0, padx=20, pady=5, sticky="ew")
 
-        #''' Button to save the current trace. '''
-        #self.btn_saveTrace = customtkinter.CTkButton(self.sidebar_frame, text="Save Trace", command=self.button_function)
-        #self.btn_saveTrace.grid(row=2, column=0, padx=20, pady=5, sticky="ew")
-
         ''' Button to load an existing trace. '''
         self.btn_loadTrace = customtkinter.CTkButton(self.sidebar_frame, text="Load Trace", command=self.load_function)
-        self.btn_loadTrace.grid(row=3, column=0, padx=20, pady=5, sticky="ew")
+        self.btn_loadTrace.grid(row=2, column=0, padx=20, pady=5, sticky="ew")
+
+        ''' Button to save the current trace. '''
+        self.btn_saveTrace = customtkinter.CTkButton(self.sidebar_frame, text="Save Trace", command=self.save_image_function)
+        self.btn_saveTrace.grid(row=3, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Textbox to display stdout. '''
         self.textbox = customtkinter.CTkTextbox(self, corner_radius=10)
@@ -93,6 +95,19 @@ class TraceApp(customtkinter.CTk):
     def selectTraceSource(self, traceSource: str):
         print(traceSource)
 
+    def save_image_function(self):
+        """
+        Function generates a PDF of the current trace view.
+        """
+        self.traceView.postscript(file="tmp.ps", colormode="color")                 # Generate the postscript of the trace canvas
+        process = subprocess.Popen(["ps2pdf", "-dEPSCrop", "tmp.ps", "trace.pdf"])  # Convert the postscript file to PDF (requires ps2pdf)
+        streamdata = process.communicate()[0]                                       # Get the return code of the process
+        rc = process.returncode
+        if rc == 0:
+            print("Saved trace as trace.pdf.")
+        else:
+            print("Cound not generate PDF file.")
+        os.remove("tmp.ps")                                                         # Delete the temporary postscript file
 
 class TextRedirector(object):
     """
