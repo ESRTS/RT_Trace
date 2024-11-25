@@ -47,7 +47,7 @@ class TraceApp(customtkinter.CTk):
         self.textbox.grid(row=3, column=1, rowspan=1, columnspan=1, sticky="nswe", padx=5, pady=5)
         
         ''' Redirect stdout and stderr to the textbox. '''
-        #sys.stdout = TextRedirector(self.textbox, "stdout")
+        sys.stdout = TextRedirector(self.textbox, "stdout")
         #sys.stderr = TextRedirector(self.textbox, "stderr")
 
         ''' Execution Trace Widget. '''

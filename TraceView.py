@@ -24,7 +24,7 @@ class TraceView(customtkinter.CTkCanvas):
         self.releaseArrowLength_px = 10 # Length of the release arrow
         self.releaseArrowD_px = 4       # D parameter of release arrow
         self.releaseArrowH_px = 4       # H parameter of release arrow
-        self.maxTicks = 30              # Maximum number of tick marks plotted in view
+        self.maxTicks = 20              # Maximum number of tick marks plotted in view
 
         # --> Internal variables. No manual configuration needed! <--
         self.sizeX_px = 0               # Width of the canvas
@@ -70,7 +70,7 @@ class TraceView(customtkinter.CTkCanvas):
         """
         Function draws the trace view of all tasks. 
         """
-        print("Draw...")
+        #print("Draw...")
 
         if self.tasks is None:
             return
@@ -131,13 +131,13 @@ class TraceView(customtkinter.CTkCanvas):
         start_px = self.tickToPixel(job.getStartTime())
         finish_px = self.tickToPixel(job.getFinishTime())
 
-        windowStart = self.tickToPixel(self.leftBound_tks)
-        windowStop = self.tickToPixel(self.rightBound_tks)
+        windowStart_px = self.tickToPixel(self.leftBound_tks)
+        windowStop_px = self.tickToPixel(self.rightBound_tks)
 
-        if start_px < windowStart:
-            start_px = windowStart
-        elif finish_px > windowStop:
-            finish_px = windowStop
+        if start_px < windowStart_px:
+            start_px = windowStart_px
+        elif finish_px > windowStop_px:
+            finish_px = windowStop_px
 		
         if finish_px - start_px >= 0:
 
@@ -149,29 +149,29 @@ class TraceView(customtkinter.CTkCanvas):
             self.drawJobsSection(task, job, y, start_px, finish_px, self.tickToPixel(job.releaseTime), self.tickToPixel(job.getFinishTime()))
 
         if self.leftBound_tks <= job.releaseTime and self.rightBound_tks >= job.releaseTime:
-            #releaseArrowLength_px
-            #drawArrowLine(g2d, rel, y, rel, y - RELEASE_ARROW_LENGTH, RELEASE_ARROW_D, RELEASE_AWWOR_h);
-            rel_px = self.tickToPixel(job.releaseTime)
-            self.canvasItems.append(self.create_line(rel_px, y, rel_px, y - self.releaseArrowLength_px, arrow=customtkinter.LAST, arrowshape=(self.releaseArrowH_px, self.releaseArrowH_px, self.releaseArrowD_px / 2), width=self.releaseArrowWidth_px))
+            # Draw the release arrow if this is not an ISR
+            if task.id > 100:
+                rel_px = self.tickToPixel(job.releaseTime)
+                self.canvasItems.append(self.create_line(rel_px, y, rel_px, y - self.releaseArrowLength_px, arrow=customtkinter.LAST, arrowshape=(self.releaseArrowH_px, self.releaseArrowH_px, self.releaseArrowD_px / 2), width=self.releaseArrowWidth_px))
 
     def drawJobsSection(self, task, job, y, start_px, stop_px, sectionStart_px, sectionStop_px):
         """
         Function draws all execution intervals of the job that are in the visible part of the plot.
         """
         
-        if sectionStart_px > start_px:
+        if sectionStart_px > start_px:  # Job release is before the visible left boundary of the trace
             start_px = sectionStart_px
-        if sectionStop_px > stop_px:
+        if sectionStop_px > stop_px:    # Job finish time is after the visible right boundary of the trace
             stop_px = sectionStop_px
 
         for interval in job.execIntervals:
             startInterval_px = self.tickToPixel(interval.start)
             stopInterval_px = self.tickToPixel(interval.stop)
 
-            if startInterval_px < sectionStart_px:
-                startInterval_px = sectionStart_px
-            if stopInterval_px > sectionStop_px:
-                stopInterval_px = sectionStop_px
+            if startInterval_px < start_px: # The execution interval starts before the visible left boundary of the trace
+                startInterval_px = start_px
+            if stopInterval_px > stop_px:   # The execution interval finishes after the visible right boundary of the trace
+                stopInterval_px = stop_px
 
             if stopInterval_px - startInterval_px >= 0:
                 execeWidth_px = stopInterval_px - startInterval_px
@@ -193,7 +193,7 @@ class TraceView(customtkinter.CTkCanvas):
         # This allows us to have a more efficient draw update since we don't need to look at all jobs of the task.
 
         # LEFT BOUND CHECK
-        if self.leftBound_tks < self.oldLeftBound_tks:  # The new left boundary has a smaller time than the old boundary ("left bound moved to the left")
+        if self.leftBound_tks > self.oldLeftBound_tks:  # The new left boundary has a smaller time than the old boundary ("left bound moved to the left")
             stop = False
 
             while stop is not True:
@@ -207,7 +207,7 @@ class TraceView(customtkinter.CTkCanvas):
                     else:
                         task.leftIndex = task.leftIndex - 1 # Since the job finished within the view it's index is included. 
 
-        elif self.leftBound_tks > self.oldLeftBound_tks:    # The new left boundary is larger than the old boundary ("left boundary was moved to the right")
+        elif self.leftBound_tks < self.oldLeftBound_tks:    # The new left boundary is larger than the old boundary ("left boundary was moved to the right")
             stop = False
 
             while stop is not True:
@@ -358,19 +358,39 @@ class TraceView(customtkinter.CTkCanvas):
         Depending on the zoom direction the new left and right boundaries are calculated. 
         """
 
+        # left_tks = self.leftBound_tks
+        # right_tks = self.rightBound_tks
+
+        # if direction > 0: # Zoom in
+        #     left_tks = left_tks * self.zoomFactor
+        #     right_tks = right_tks / self.zoomFactor
+        # elif direction < 0:  # Zoom out
+        #     left_tks = left_tks / self.zoomFactor
+        #     right_tks = right_tks * self.zoomFactor
+
+        # print("Planned: left_tks = " + str(left_tks) + " right_tks = " + str(right_tks))
+        # if right_tks - left_tks > self.zoomMax:
+        #     self.leftBound_tks = left_tks
+        #     self.rightBound_tks = right_tks
+
+        # self.draw()
+
+        # New version
         left_tks = self.leftBound_tks
         right_tks = self.rightBound_tks
 
+        oldWidth = right_tks - left_tks
+        center = (oldWidth / 2) + left_tks
         if direction > 0: # Zoom in
-            left_tks = left_tks * self.zoomFactor
-            right_tks = right_tks / self.zoomFactor
+            newWidth = oldWidth / self.zoomFactor
         elif direction < 0:  # Zoom out
-            left_tks = left_tks / self.zoomFactor
-            right_tks = right_tks * self.zoomFactor
+            newWidth = oldWidth * self.zoomFactor
+        
+        if newWidth < self.zoomMax:
+            newWidth = self.zoomMax
 
-        if right_tks - left_tks > self.zoomMax:
-            self.leftBound_tks = left_tks
-            self.rightBound_tks = right_tks
+        self.leftBound_tks = center - (newWidth / 2)
+        self.rightBound_tks = center + (newWidth / 2)
 
         self.draw()
 

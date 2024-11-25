@@ -218,15 +218,16 @@ def parseTaskExecution(traceStart, task, events):
 
         elif evt.get('type') is TRACE_ISR_ENTER:
             if task.currentJob is None:
-                task.newJob(ts, None)   # an ISR has no jobs in this sense, so we see it as a single job
+                task.newJob(ts, None)   # an ISR has no jobs in this sense, so we see every execution as a single job
             task.startExec(ts, evt.get('core'), ExecutionType.EXECUTE)
 
         elif evt.get('type') is TRACE_ISR_EXIT:
             task.stopExec(ts)
+            task.finishJob()
 
-    if task.id < 100: # This holds only for ISR 
-        if task.currentJob is not None:
-            task.finishJob()    # An ISR has no direct jobs, so we collect all execution in one job. This job must be finished at the end of the trace.
+    #if task.id < 100: # This holds only for ISR 
+    #    if task.currentJob is not None:
+    #        task.finishJob()    # An ISR has no direct jobs, so we collect all execution in one job. This job must be finished at the end of the trace.
 
     
 def parseTraceEvents(events, buffers):
