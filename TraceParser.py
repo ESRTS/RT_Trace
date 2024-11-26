@@ -19,23 +19,6 @@ TRACE_ISR_ENTER                 = 10
 TRACE_ISR_EXIT                  = 11
 
 """
-A trace event map to have readable code.
-"""
-event_map = {
-    'IDLE': TRACE_IDLE,
-    'TASK_START_EXEC': TRACE_TASK_START_EXEC,
-    'TASK_STOP_EXEC': TRACE_TASK_STOP_EXEC,
-    'TASK_START_READY': TRACE_TASK_START_READY,
-    'TASK_STOP_READY': TRACE_TASK_STOP_READY,
-    'TASK_CREATE': TRACE_TASK_CREATE,
-    'START': TRACE_START,
-    'STOP': TRACE_STOP,
-    'DELAY_UNTIL': TRACE_DELAY_UNTIL,
-    'ISR_ENTER': TRACE_ISR_ENTER,
-    'ISR_EXIT': TRACE_ISR_EXIT
-}
-
-"""
 ISR's have specific task id's (the ISR id). Those are not registered in the trace itself.
 They are hardcoded here. This should be done better to support several platforms where the ISR id's
 might be different.

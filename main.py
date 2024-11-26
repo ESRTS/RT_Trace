@@ -7,6 +7,27 @@ from pathlib import Path
 import subprocess
 import os
 
+"""
+ID for each target selection
+"""
+PICO2_FREERTOS = 0
+LINUX = 1
+QNX = 2
+
+"""
+A map to link the target ID to the target name
+"""
+target_map = {
+    PICO2_FREERTOS : 'Pico2 FreeRTOS',
+    LINUX : 'Linux',
+    QNX: 'QNX'
+}
+
+"""
+A list with all targets that are supported at the moment.
+"""
+supported_targets = [PICO2_FREERTOS]
+
 class TraceApp(customtkinter.CTk):
     """
     Main class of the RT-Trace app. 
@@ -29,9 +50,15 @@ class TraceApp(customtkinter.CTk):
         self.sidebar_frame.grid_rowconfigure(4, weight=1)
 
         ''' Option to select the trace source. '''
-        self.opt_selectSource = customtkinter.CTkOptionMenu(self.sidebar_frame, values=["Pico2 FreeRTOS", "Linux", "QNX"], command=self.selectTraceSource)
+        self.selectValues = []
+        for target in target_map:
+            if len(self.selectValues) == 0:
+                self.selectedTarget = target    # Select the first target in the list
+            self.selectValues.append(target_map.get(target)) # Create a list with all target names for the option menu
+        self.opt_selectSource = customtkinter.CTkOptionMenu(self.sidebar_frame, values=self.selectValues, command=self.selectTraceSource)
         self.opt_selectSource.grid(row=0, column=0, padx=20, pady=(20, 5), sticky="ew")
         
+
         ''' Button to start recording a new trace from a target. '''
         self.btn_recordTrace = customtkinter.CTkButton(self.sidebar_frame, text="Record Trace", command=self.button_record_function)
         self.btn_recordTrace.grid(row=1, column=0, padx=20, pady=5, sticky="ew")
@@ -64,6 +91,16 @@ class TraceApp(customtkinter.CTk):
         self.traceView.bind("<ButtonPress>", self.traceView.buttonPressed)
         self.traceView.bind("<ButtonRelease>", self.traceView.buttonReleased)
 
+        ''' Bind the function to handle window resize events. '''
+        self.traceView.bind("<Configure>", self.resize_window_function)
+
+    def resize_window_function(self, event):
+        """
+        Function is called to handle window resize events.
+        """
+        
+        self.traceView.draw()
+
     def keyHandler(self, event):
         """
         Key-handler function. Used to control the trace view.
@@ -79,21 +116,49 @@ class TraceApp(customtkinter.CTk):
             self.traceView.zoom(-1)
 
     def button_record_function(self):
-
-        self.btn_recordTrace.configure(state="disabled")
-        self.update()
-        print("Loading trace buffer for each core. Might take a few seconds...")
-        loadTraceBuffers(self)   
+        """
+        Callback that ius called if the button "Record Trace" is clicked.
+        """
+        if self.selectedTarget in supported_targets:    # Make sure only to load from supported targets
+            self.btn_recordTrace.configure(state="disabled")
+            self.update()
+            print("Reading the trace buffer for each core. Might take a few seconds...")
+            loadTraceBuffers(self)   
+        else:
+            print("Reading the trace buffer from target " + target_map.get(self.selectedTarget) + " is not yet supported.")
 
     def load_function(self):
-        
-        self.btn_loadTrace.configure(state="disabled")
-        self.update()
-        print("Loading trace from files...")
-        parseTraceFiles(self)
+        """
+        Callback that ius called if the button "Load Trace" is clicked.
+        """
+        if self.selectedTarget in supported_targets:    # Make sure only to load from supported targets
+            self.btn_loadTrace.configure(state="disabled")
+            self.update()
+            print("Loading trace from files...")
+            parseTraceFiles(self)
+        else:
+            print("Loading a trace from target " + target_map.get(self.selectedTarget) + " is not yet supported.")
 
     def selectTraceSource(self, traceSource: str):
-        print(traceSource)
+        """
+        Callback that ius called if a new target is selected from the option menu.
+        """
+        for target in target_map:
+            if target_map.get(target) is traceSource:
+                self.selectedTarget = target
+
+        self.textbox.configure(state=customtkinter.NORMAL)  # Reset the textbox if a different target is selected
+        self.textbox.delete(1.0, 'end')
+        self.textbox.configure(state=customtkinter.DISABLED)
+
+        self.traceView.setTasks(None)
+        self.traceView.draw()
+        #self.traceView.update()
+
+        if self.selectedTarget == PICO2_FREERTOS:
+            print("To load the trace buffer, openocd needs to be in the path.")
+        else:
+            print("Target " + target_map.get(self.selectedTarget) + " is not yet supported!")
 
     def save_image_function(self):
         """
@@ -133,4 +198,5 @@ def main():
     app.mainloop()                                  # Start the main loop of the GUI
 
 if __name__ == "__main__":
+
     main()

@@ -58,15 +58,29 @@ class TraceView(customtkinter.CTkCanvas):
         """
         self.tasks = tasks
 
-        # Find the maximum time to display in ticks
-        self.rightBound_tks = 0
-        for task in self.tasks:
-            if task.jobs[-1].getFinishTime() > self.rightBound_tks:
-                self.rightBound_tks = task.jobs[-1].getFinishTime()
+        if self.tasks is not None:
+            # Find the maximum time to display in ticks
+            self.rightBound_tks = 0
+            for task in self.tasks:
+                if task.jobs[-1].getFinishTime() > self.rightBound_tks:
+                    self.rightBound_tks = task.jobs[-1].getFinishTime()
 
-        # we add one ms to the right bound to not finish the trace with the last event
-        self.rightBound_tks = self.rightBound_tks + 1000 
-        self.zoomMin = self.rightBound_tks
+            # we add one ms to the right bound to not finish the trace with the last event
+            self.rightBound_tks = self.rightBound_tks + 1000 
+            self.zoomMin = self.rightBound_tks
+        else:
+            # If there is no task, reset bounds to default values.
+            self.leftBound_tks = 0
+            self.rightBound_tks = 50000
+            self.clearTrace()
+
+    def clearTrace(self):
+        """
+        Delete all items from the trace.
+        """
+        
+        for item in self.canvasItems:
+            self.delete(item)
 
     def draw(self):
         """
@@ -77,23 +91,16 @@ class TraceView(customtkinter.CTkCanvas):
         self.sizeX_px  = int(self.winfo_width())
 
         if self.tasks is None:
-            self.canvasItems.append(self.create_text(200, 100, anchor=customtkinter.N, text="No Trace Loaded..."))
+            self.canvasItems.append(self.create_text(200, 100, anchor=customtkinter.N, text="No Trace Loaded...."))
 
             return
         #if self.tasks is not None:
         
         # In case the view was updated, make sure to delete all canvas items first
-        for item in self.canvasItems:
-            self.delete(item)
-
-        
+        self.clearTrace()
 
         # Compute the length of the visible view in ticks
         self.view_tks = self.rightBound_tks - self.leftBound_tks
-
-        
-
-        startY = self.borderY_px / 2
 
         # Draw the tick marks for the current view on the canvas
         self.drawTicks()
