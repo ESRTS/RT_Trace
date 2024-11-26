@@ -166,6 +166,9 @@ class TraceTask():
         return maxRt
 
 if __name__ == "__main__":
+    """
+    Debugging.
+    """
     print("TraceTask Test")
 
     task = TraceTask("TestTask", "#121212")

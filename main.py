@@ -29,9 +29,9 @@ class TraceApp(customtkinter.CTk):
         self.sidebar_frame.grid_rowconfigure(4, weight=1)
 
         ''' Option to select the trace source. '''
-        self.opt_selectSource = customtkinter.CTkOptionMenu(self.sidebar_frame, values=["FreeRTOS", "Linux", "QNX"], command=self.selectTraceSource)
+        self.opt_selectSource = customtkinter.CTkOptionMenu(self.sidebar_frame, values=["Pico2 FreeRTOS", "Linux", "QNX"], command=self.selectTraceSource)
         self.opt_selectSource.grid(row=0, column=0, padx=20, pady=(20, 5), sticky="ew")
-
+        
         ''' Button to start recording a new trace from a target. '''
         self.btn_recordTrace = customtkinter.CTkButton(self.sidebar_frame, text="Record Trace", command=self.button_record_function)
         self.btn_recordTrace.grid(row=1, column=0, padx=20, pady=5, sticky="ew")

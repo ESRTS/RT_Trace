@@ -1,9 +1,11 @@
 from threading import Thread
 from pathlib import Path
 import io
-import struct
 from TraceTask import *
 
+"""
+All supported trace event id's.
+"""
 TRACE_IDLE                      = 1
 TRACE_TASK_START_EXEC           = 2
 TRACE_TASK_STOP_EXEC            = 3
@@ -16,6 +18,9 @@ TRACE_DELAY_UNTIL               = 9
 TRACE_ISR_ENTER                 = 10
 TRACE_ISR_EXIT                  = 11
 
+"""
+A trace event map to have readable code.
+"""
 event_map = {
     'IDLE': TRACE_IDLE,
     'TASK_START_EXEC': TRACE_TASK_START_EXEC,
@@ -30,17 +35,25 @@ event_map = {
     'ISR_EXIT': TRACE_ISR_EXIT
 }
 
+"""
+ISR's have specific task id's (the ISR id). Those are not registered in the trace itself.
+They are hardcoded here. This should be done better to support several platforms where the ISR id's
+might be different.
+"""
 systickCore0Id = 15
 systickCore1Id = 42
 schedulerId = 0
 
+"""
+To assign different colors to tasks we use an index into the taskColors array and increment the index
+every time a color is assigned to a task. The index wraps around if it reaches the end.
+"""
 taskColorIndex = 0
-
 taskColors = [(100, 237, 157), (100, 143, 237), (212, 237, 76), (237, 123, 100), (141, 100, 237)]
 
 def getTaskColor(taskId):
     """
-    Function returns the task colors. 
+    Function returns the task colors for the trace. The colors are selected in sequence from the list, wrapping around when the end of the list is reached. 
     """
     global taskColorIndex
     
@@ -58,11 +71,17 @@ def getTaskColor(taskId):
     return colorString
     
 def parseTraceFiles(gui):
+    """
+    Main function that is called from the GUI to read the trace files from the target device.
+    To not block the GUI, this is done in a separate thread.
+    """
     thread = Thread(target = parser_thread, args = (gui, ))
     thread.start()
 
 def parser_thread(gui):
-
+    """
+    Thread to parse the trace buffers. The trace events are then converted to tasks, jobs and execution segments.
+    """
     buffer0 = Path("buffer0.txt")
     buffer1 = Path("buffer1.txt")
 
@@ -74,14 +93,14 @@ def parser_thread(gui):
             traceBuffer1 = bytearray(fh1.read())
             print("Successfully loaded trace buffers for core 0 and core 1")
 
-            tasks = parser([traceBuffer0, traceBuffer1])
+            tasks = parser([traceBuffer0, traceBuffer1])    # Parse the content of the trace buffers
 
         else:
             print("Error: buffer1.txt does not exist!")
     else:
         print("Error: buffer0.txt does not exist!")
 
-    # Enable the buttons and update the GUI
+    # If this was called from the GUI, enable the buttons and update the GUI
     if gui is not None:
         gui.btn_loadTrace.configure(state="normal")
         gui.traceView.setTasks(tasks)
@@ -89,28 +108,34 @@ def parser_thread(gui):
         gui.update()
 
 def parser(buffers):
+    """
+    Function parses a variable number of trace buffers.
+    Trace events are then converted to tasks, jobs and execution segments.
+    The function returns an array with all trace tasks.
+    """
     print("Parsing Files!")
 
-    # Parse the raw events from the trace files of each core
     events = []
-    parseTraceEvents(events, buffers)
+    parseTraceEvents(events, buffers)       # Parse the raw events from the trace files of each core
 
-    allTasks = extractTraceInfo(events)
+    allTasks = extractTraceInfo(events)     # Parse all trace tasks from the event trace (afterwards we have trace tasks, jobs and execution segments). 
     tasks = []
-    print("Found tarce data for tasks:")
+    print("Found trace data for tasks:")
 
-    for task in allTasks:   
+    for task in allTasks:                   # Some tasks might be created in the trace but never execute. We exclue those here. 
         if len(task.jobs) != 0:
             tasks.append(task)
 
-    for task in tasks:
+    for task in tasks:                      # Print a list with parsed tasks and the number of jobs they have in the trace.
         print("\t" + str(task))
         #task.printAll()
 
     return tasks
 
 def extractTraceInfo(events):
-    """ Extract trace information from the raw trace events. So we have information on task-level"""
+    """ 
+    Extract trace information from the raw trace events. So we have information on task-level.
+    """
     tasks = []
 
     # Create three tasks to represent the scheduler, tick ISR, doorbell ISR.
@@ -120,28 +145,29 @@ def extractTraceInfo(events):
 
     traceStart = None
 
-    # All other tasks are parsed from the trace events
+    # All other tasks are parsed from the trace events. 
     for evt in events:
-        if evt.get('type') is TRACE_TASK_CREATE:
+        if evt.get('type') is TRACE_TASK_CREATE:    # Parse all task create events and create trace tasks for each.
             id = evt.get('taskId')
             prio = evt.get('priority')
             name = evt.get('name').split('\\')[0]
             tmpTask = TraceTask(id, name, prio, getTaskColor(id))
             tasks.append(tmpTask)
-        if evt.get('type') is TRACE_TASK_START_READY:
+        if evt.get('type') is TRACE_TASK_START_READY:   # We set the trace time t=0 to the first task ready event.
             if traceStart is None:
                 traceStart = evt.get('ts')  # By convention we set the start of the first task to t=0
 
     for task in tasks:
-        """ First, get all events that belong to this task.
-            Then those are parsed separately and converted to jobs and execution segments.
+        """ 
+        For each task separately, get all events that belong to this task.
+        Then those are parsed separately and converted to jobs and execution segments.
         """
         
         taskEvts = []
         prevTaskEvt = None
         prevIrqEvt = None
 
-        for evt in events:  # Search all execution segments for this task. We do this sequentially, it could be done nicer for all tasksk at once.
+        for evt in events:  # Search all execution segments for this task. We do this sequentially on task level, it could be done nicer for all tasksk at once.
 
             # Only handle events of this task
             if evt.get('taskId') == task.id or evt.get('irqId') == task.id:
@@ -169,45 +195,43 @@ def extractTraceInfo(events):
             elif (evt.get('type') is TRACE_ISR_ENTER) or (evt.get('type') is TRACE_ISR_EXIT):
                 prevIrqEvt = evt
 
-        sortedTaskEvts = sorted(taskEvts, key=lambda d: d['ts'])    # Sort all events of this task by timestamp
+        sortedTaskEvts = sorted(taskEvts, key=lambda d: d['ts'])    # Sort all events of this task by timestamp. Since timestamps on cores are synchronised this can be done. Attention, if the platform does not support this!
 
-        parseTaskExecution(traceStart, task, sortedTaskEvts)
+        parseTaskExecution(traceStart, task, sortedTaskEvts)    # After all task events are parsed, the trace tasks are created here.
 
     return tasks
 
 def parseTaskExecution(traceStart, task, events):
-    """ The function gets a list of events related to this specific task.
-        Based on this, the jobs and execution segments are extracted. 
+    """ 
+    The function gets a list of events related to this specific task.
+    Based on this, the jobs and execution segments are extracted. 
     """
-    #task.printInfo()
-    #traceStart = 0
 
     jobFinishes = False
     timeToWake = 0
 
     for evt in events:
-        #print("\t" + str(evt))
 
         ts = evt.get('ts') - traceStart
 
-        if evt.get('type') is TRACE_TASK_START_READY:   # 4
+        if evt.get('type') is TRACE_TASK_START_READY:   # Event ID: 4
             if task.currentJob is None:
                 task.newJob(ts, None)    # If there is no active job, create a new one. I.e. this is a task release.
                 jobFinishes = False
 
-        elif evt.get('type') is TRACE_TASK_START_EXEC:  # 2
+        elif evt.get('type') is TRACE_TASK_START_EXEC:  # Event ID: 2
             task.startExec(ts, evt.get('core'), ExecutionType.EXECUTE)   # Start a new execution segment.
 
-        elif evt.get('type') is TRACE_DELAY_UNTIL:      # 9
+        elif evt.get('type') is TRACE_DELAY_UNTIL:      # Event ID: 9
             # DelayUntil is used to create periodic tasks. I.e. the statement tells us that the job finishes with the next TRACE_TASK_STOP_READY statement. 
             # We can also set the job deadline now, assuming the deadline is equal to the release of the next job.
             jobFinishes = True  # Mark that the job finishes with the next TRACE_TASK_STOP_READY event
             timeToWake = evt.get('timeToWake') * 1000   # to get it in ts granularity
-        elif evt.get('type') is TRACE_TASK_STOP_EXEC:  # 3
+        elif evt.get('type') is TRACE_TASK_STOP_EXEC:  # Event ID: 3
             task.stopExec(ts)   # Stop the current execution segment.
 
             if jobFinishes is True:
-                initialStart = 0    # the task delay until event has the wakeup time relative to the initial start as parameter
+                initialStart = 0    # the task delay until event has the wakeup time relative to the initial start as parameter.
                 if len (task.jobs) > 0:
                     initialStart = task.jobs[0].releaseTime
                 else:
@@ -218,20 +242,19 @@ def parseTaskExecution(traceStart, task, events):
 
         elif evt.get('type') is TRACE_ISR_ENTER:
             if task.currentJob is None:
-                task.newJob(ts, None)   # an ISR has no jobs in this sense, so we see every execution as a single job
+                task.newJob(ts, None)   # an ISR has no jobs in this sense, so we see every execution as a single job.
             task.startExec(ts, evt.get('core'), ExecutionType.EXECUTE)
 
         elif evt.get('type') is TRACE_ISR_EXIT:
             task.stopExec(ts)
-            task.finishJob()
+            task.finishJob()    # Each stop execution event of an ISR is also the end of the job.
 
-    #if task.id < 100: # This holds only for ISR 
-    #    if task.currentJob is not None:
-    #        task.finishJob()    # An ISR has no direct jobs, so we collect all execution in one job. This job must be finished at the end of the trace.
 
     
 def parseTraceEvents(events, buffers):
-
+    """
+    This function converts the trace buffer of the traget into processable trace events.
+    """
     coreId = 0
 
     for buffer in buffers:
@@ -248,12 +271,16 @@ def parseTraceEvents(events, buffers):
 
         coreId = coreId + 1
 
-    #for evt in events:
-    #    print(evt)
-
 class EventParser:
-
+    """
+    This class describes the event parser. It is used to extract all trace events from a raw buffer.
+    """
+    
     def __init__(self, inBuffer):
+        """
+        Initialization of the event parser.
+        The object gets a trace buffer in bytearray format as argument.
+        """
         self.maxBytes = len(inBuffer)
         self.buffer = file = io.BytesIO(inBuffer)
         self.time = 0
@@ -262,12 +289,18 @@ class EventParser:
         
 
     def printBuffer(self):
+        """
+        A helper function to print the content of the trace buffer in hex-format to stdout.
+        """
         print("".join([f"\\x{byte:02x}" for byte in self.buffer.read(4)]))
         for i in range(1, 100, 1):
             print("".join([f"\\x{byte:02x}" for byte in self.buffer.read(16)]))
         print("done")
 
     def readBytes(self, len):
+        """
+        Function reads one byte from the trace buffer
+        """
         if (self.maxBytes - self.bytesRead) >= len:
             b = self.buffer.read(len)
             self.bytesRead = self.bytesRead + len
@@ -277,11 +310,16 @@ class EventParser:
             return None
     
     def readInteger(self):
-
+        """
+        Function reads an integer (4 bytes) from the trace buffer.
+        """
         b = self.readBytes(4)
         return int.from_bytes(b, byteorder='little', signed=False)
 
     def read_event(self, coreId):
+        """
+        Function reads the next event of the trace buffer.
+        """
         b = self.readBytes(2)
         if b is None:
             return None
@@ -358,11 +396,8 @@ class EventParser:
 
         return evt
 
-
-class TraceEvent():
-
-    def __init__(self, name,):
-        pass
-
 if __name__ == "__main__":
+    """
+    Debugging.
+    """
     parser_thread(None)

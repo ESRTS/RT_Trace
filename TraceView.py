@@ -362,24 +362,6 @@ class TraceView(customtkinter.CTkCanvas):
         Depending on the zoom direction the new left and right boundaries are calculated. 
         """
 
-        # left_tks = self.leftBound_tks
-        # right_tks = self.rightBound_tks
-
-        # if direction > 0: # Zoom in
-        #     left_tks = left_tks * self.zoomFactor
-        #     right_tks = right_tks / self.zoomFactor
-        # elif direction < 0:  # Zoom out
-        #     left_tks = left_tks / self.zoomFactor
-        #     right_tks = right_tks * self.zoomFactor
-
-        # print("Planned: left_tks = " + str(left_tks) + " right_tks = " + str(right_tks))
-        # if right_tks - left_tks > self.zoomMax:
-        #     self.leftBound_tks = left_tks
-        #     self.rightBound_tks = right_tks
-
-        # self.draw()
-
-        # New version
         left_tks = self.leftBound_tks
         right_tks = self.rightBound_tks
 
