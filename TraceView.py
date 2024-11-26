@@ -36,6 +36,7 @@ class TraceView(customtkinter.CTkCanvas):
         self.oldRightBound_tks = 0      # Last value of rightBound_tks before the view was updated
         self.zoomFactor = 1.2           # Factor used to compute zoom areas
         self.zoomMax = 50               # Maximum zoom level 50us
+        self.zoomMin = 0                # Minimum zoom level, this is set to the last trace event.
         self.moveView = False           # Flag to indicate that the view is moved
         self.moveInitialX = 0           # Initial X-position if the view is moved
 
@@ -65,6 +66,7 @@ class TraceView(customtkinter.CTkCanvas):
 
         # we add one ms to the right bound to not finish the trace with the last event
         self.rightBound_tks = self.rightBound_tks + 1000 
+        self.zoomMin = self.rightBound_tks
 
     def draw(self):
         """
@@ -372,11 +374,20 @@ class TraceView(customtkinter.CTkCanvas):
         elif direction < 0:  # Zoom out
             newWidth = oldWidth * self.zoomFactor
         
-        if newWidth < self.zoomMax:
+        if newWidth < self.zoomMax:     # Enforce maximum zoom level
             newWidth = self.zoomMax
+        elif newWidth > self.zoomMin:   # Enforce minimum zoom level
+            newWidth = self.zoomMin
 
         self.leftBound_tks = center - (newWidth / 2)
         self.rightBound_tks = center + (newWidth / 2)
+
+        if self.leftBound_tks < 0:  # Don't allow to display negative times
+            self.leftBound_tks = 0
+            self.rightBound_tks = newWidth
+        elif self.rightBound_tks > self.zoomMin:    # Don't allow to display times larger than the last event. self.zoomMin holds the timestamp of the last event.
+            self.leftBound_tks = self.zoomMin - newWidth
+            self.rightBound_tks = self.zoomMin
 
         self.draw()
 
@@ -392,8 +403,19 @@ class TraceView(customtkinter.CTkCanvas):
 
             div_tks = self.pixelToTime(delta)
 
-            self.leftBound_tks = self.leftBound_tks + div_tks
-            self.rightBound_tks = self.rightBound_tks + div_tks
+            viewWidth = self.rightBound_tks - self.leftBound_tks
+
+            # Compute the new trace boundaries (in ticks). We force that the user can't display 
+            # times < 0 and times > the last trace event.
+            if self.leftBound_tks + div_tks < 0:
+                self.leftBound_tks = 0
+                self.rightBound_tks = viewWidth
+            elif self.rightBound_tks + div_tks > self.zoomMin:  # self.zoomMin holds the timestamp of the last event
+                self.leftBound_tks = self.zoomMin - viewWidth
+                self.rightBound_tks = self.zoomMin
+            else:
+                self.leftBound_tks = self.leftBound_tks + div_tks
+                self.rightBound_tks = self.rightBound_tks + div_tks
 
             self.draw()
 
