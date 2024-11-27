@@ -8,25 +8,15 @@ import subprocess
 import os
 
 """
-ID for each target selection
+Here all available targets are configures. If the flag 'implemented' is False, they are not supported yet.
+'requirement_str' can be used to inform the user of any additional prerequisites, this is displayed in the textbox once the target is selected. 
 """
-PICO2_FREERTOS = 0
-LINUX = 1
-QNX = 2
-
-"""
-A map to link the target ID to the target name
-"""
-target_map = {
-    PICO2_FREERTOS : 'Pico2 FreeRTOS',
-    LINUX : 'Linux',
-    QNX: 'QNX'
-}
-
-"""
-A list with all targets that are supported at the moment.
-"""
-supported_targets = [PICO2_FREERTOS]
+targets = [
+    {'name': 'Pico2 FreeRTOS', 'numCores': 2, 'implemented': True, 'requirement_str' : "To load the trace buffer, openocd and telnet needs to be on the path."},
+    {'name': 'RPI QNX', 'numCores': 4, 'implemented': False, 'requirement_str' : "To load the trace buffer, telnet needs to be on the path."},
+    {'name': 'RPI Linux', 'numCores': 4, 'implemented': False, 'requirement_str' : "To load the trace buffer, ..."},
+    {'name': 'STM FreeRTOS', 'numCores': 1, 'implemented': False, 'requirement_str' : "To load the trace buffer, openocd and telnet needs to be on the path."}
+]
 
 class TraceApp(customtkinter.CTk):
     """
@@ -51,10 +41,11 @@ class TraceApp(customtkinter.CTk):
 
         ''' Option to select the trace source. '''
         self.selectValues = []
-        for target in target_map:
+        for target in targets:
             if len(self.selectValues) == 0:
-                self.selectedTarget = target    # Select the first target in the list
-            self.selectValues.append(target_map.get(target)) # Create a list with all target names for the option menu
+                self.selectedTarget = targets.index(target)     # Select the first target in the list
+            self.selectValues.append(target.get('name'))        # Create a list with all target names for the option menu
+
         self.opt_selectSource = customtkinter.CTkOptionMenu(self.sidebar_frame, values=self.selectValues, command=self.selectTraceSource)
         self.opt_selectSource.grid(row=0, column=0, padx=20, pady=(20, 5), sticky="ew")
         
@@ -94,6 +85,9 @@ class TraceApp(customtkinter.CTk):
         ''' Bind the function to handle window resize events. '''
         self.traceView.bind("<Configure>", self.resize_window_function)
 
+        ''' Print the requirement string for the initially selected target. '''
+        print(targets[self.selectedTarget].get('requirement_str'))
+
     def resize_window_function(self, event):
         """
         Function is called to handle window resize events.
@@ -105,47 +99,56 @@ class TraceApp(customtkinter.CTk):
         """
         Key-handler function. Used to control the trace view.
         """
-        #print(event.char, event.keysym, event.keycode)
-        if event.keycode == 2063660802: # Left arrow
-            print("LEFT")
-        elif event.keycode == 2080438019: # Right arrow
-            print("RIGHT")
-        elif event.keycode == 2113992448: # Up arrow
+        if event.keycode == 2113992448: # Up arrow
             self.traceView.zoom(1)
         elif event.keycode == 2097215233: # Down arrow
             self.traceView.zoom(-1)
+
+    def disableAllButtons(self):
+        """
+        Function disables all buttons. 
+        """
+        self.btn_loadTrace.configure(state="disabled")
+        self.btn_recordTrace.configure(state="disabled")
+        self.btn_saveTrace.configure(state="disabled")
+        self.update()
+
+    def enableAllButtons(self):
+        """
+        Function enables all buttons.
+        """
+        self.btn_loadTrace.configure(state="enabled")
+        self.btn_recordTrace.configure(state="enabled")
+        self.btn_saveTrace.configure(state="enabled")
+        self.update()
 
     def button_record_function(self):
         """
         Callback that ius called if the button "Record Trace" is clicked.
         """
-        if self.selectedTarget in supported_targets:    # Make sure only to load from supported targets
-            self.btn_recordTrace.configure(state="disabled")
-            self.update()
-            print("Reading the trace buffer for each core. Might take a few seconds...")
-            loadTraceBuffers(self)   
-        else:
-            print("Reading the trace buffer from target " + target_map.get(self.selectedTarget) + " is not yet supported.")
+        self.btn_recordTrace.configure(state="disabled")
+        self.update()
+        print("Reading the trace buffer for each core. Might take a few seconds...")
+        loadTraceBuffers(self)   
+        
 
     def load_function(self):
         """
         Callback that ius called if the button "Load Trace" is clicked.
         """
-        if self.selectedTarget in supported_targets:    # Make sure only to load from supported targets
-            self.btn_loadTrace.configure(state="disabled")
-            self.update()
-            print("Loading trace from files...")
-            parseTraceFiles(self, 2)
-        else:
-            print("Loading a trace from target " + target_map.get(self.selectedTarget) + " is not yet supported.")
+        self.btn_loadTrace.configure(state="disabled")
+        self.update()
+        print("Loading trace from files...")
+        parseTraceFiles(self, 2)
+        
 
     def selectTraceSource(self, traceSource: str):
         """
         Callback that ius called if a new target is selected from the option menu.
         """
-        for target in target_map:
-            if target_map.get(target) is traceSource:
-                self.selectedTarget = target
+        for target in targets:
+            if target.get('name') is traceSource:
+                self.selectedTarget = targets.index(target)
 
         self.textbox.configure(state=customtkinter.NORMAL)  # Reset the textbox if a different target is selected
         self.textbox.delete(1.0, 'end')
@@ -154,24 +157,29 @@ class TraceApp(customtkinter.CTk):
         self.traceView.setTasks(None)
         self.traceView.draw()
 
-        if self.selectedTarget == PICO2_FREERTOS:
-            print("To load the trace buffer, openocd needs to be in the path.")
+        if targets[self.selectedTarget].get('implemented') is True:    # Make sure only to load from supported targets
+            print(targets[self.selectedTarget].get('requirement_str'))
+            self.enableAllButtons()
         else:
-            print("Target " + target_map.get(self.selectedTarget) + " is not yet supported!")
+            print("Target " + targets[self.selectedTarget].get('name') + " is not yet supported!")
+            self.disableAllButtons()
 
     def save_image_function(self):
         """
         Function generates a PDF of the current trace view.
         """
-        self.traceView.postscript(file="tmp.ps", colormode="color")                 # Generate the postscript of the trace canvas
-        process = subprocess.Popen(["ps2pdf", "-dEPSCrop", "tmp.ps", "trace.pdf"])  # Convert the postscript file to PDF (requires ps2pdf)
-        streamdata = process.communicate()[0]                                       # Get the return code of the process
-        rc = process.returncode
-        if rc == 0:
-            print("Saved trace as trace.pdf.")
+        if self.traceView.tasks is not None:    # Only save the trace as PDF if some tasks are loaded
+            self.traceView.postscript(file="tmp.ps", colormode="color")                 # Generate the postscript of the trace canvas
+            process = subprocess.Popen(["ps2pdf", "-dEPSCrop", "tmp.ps", "trace.pdf"])  # Convert the postscript file to PDF (requires ps2pdf)
+            streamdata = process.communicate()[0]                                       # Get the return code of the process
+            rc = process.returncode
+            if rc == 0:
+                print("Saved trace as trace.pdf.")
+            else:
+                print("Cound not generate PDF file.")
+            os.remove("tmp.ps")                                                         # Delete the temporary postscript file
         else:
-            print("Cound not generate PDF file.")
-        os.remove("tmp.ps")                                                         # Delete the temporary postscript file
+            print("No trace loaded!")
 
 class TextRedirector(object):
     """
