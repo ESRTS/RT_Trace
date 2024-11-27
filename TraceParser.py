@@ -53,35 +53,32 @@ def getTaskColor(taskId):
     colorString = '#%02X%02X%02X' % (c[0],c[1],c[2])
     return colorString
     
-def parseTraceFiles(gui):
+def parseTraceFiles(gui, numCores):
     """
     Main function that is called from the GUI to read the trace files from the target device.
     To not block the GUI, this is done in a separate thread.
     """
-    thread = Thread(target = parser_thread, args = (gui, ))
+    thread = Thread(target = parser_thread, args = (gui, numCores))
     thread.start()
 
-def parser_thread(gui):
+def parser_thread(gui, numCores):
     """
     Thread to parse the trace buffers. The trace events are then converted to tasks, jobs and execution segments.
     """
-    buffer0 = Path("buffer0.txt")
-    buffer1 = Path("buffer1.txt")
+    bufferPaths = []
+    for c in range(0,numCores):
+        bufferPaths.append(Path("buffer" + str(c) + ".txt"))
+        if not bufferPaths[-1].is_file():
+            print("Error: File " + str(bufferPaths[-1]) + " does not exist!")
 
-    if buffer0.is_file():
-        if buffer1.is_file():
-            fh0 = open("buffer0.txt", "rb")
-            fh1 = open("buffer1.txt", "rb")
-            traceBuffer0 = bytearray(fh0.read())
-            traceBuffer1 = bytearray(fh1.read())
-            print("Successfully loaded trace buffers for core 0 and core 1")
+    allBuffers = []
+    for buffer in bufferPaths:
+        fh = open(buffer, "rb")
+        traceBuffer = bytearray(fh.read())
+        allBuffers.append(traceBuffer)
+        print("Loaded trace buffer: " + str(buffer))
 
-            tasks = parser([traceBuffer0, traceBuffer1])    # Parse the content of the trace buffers
-
-        else:
-            print("Error: buffer1.txt does not exist!")
-    else:
-        print("Error: buffer0.txt does not exist!")
+    tasks = parser(allBuffers)    # Parse the content of the trace buffers
 
     # If this was called from the GUI, enable the buttons and update the GUI
     if gui is not None:

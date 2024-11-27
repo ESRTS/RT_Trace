@@ -135,7 +135,7 @@ class TraceApp(customtkinter.CTk):
             self.btn_loadTrace.configure(state="disabled")
             self.update()
             print("Loading trace from files...")
-            parseTraceFiles(self)
+            parseTraceFiles(self, 2)
         else:
             print("Loading a trace from target " + target_map.get(self.selectedTarget) + " is not yet supported.")
 
