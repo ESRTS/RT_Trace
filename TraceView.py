@@ -14,7 +14,7 @@ class TraceView(customtkinter.CTkCanvas):
         Variables that indicate a value in time ticks have the ending '_tks'
         """
         # --> Variables to alter the dimensions of different elements in the trace <--
-        self.borderX_px = 30            # Border that is added to the left and right of the plot
+        self.borderX_px = 40            # Border that is added to the left and right of the plot
         self.borderY_px = 30            # Border that is added on top and bottom
         self.legend_px = 90             # Size that is reserved for the legend (left of the trace)
         self.scaleFactor = 1            # Factor to scale the complete view (not used)
@@ -65,13 +65,23 @@ class TraceView(customtkinter.CTkCanvas):
                 if task.jobs[-1].getFinishTime() > self.rightBound_tks:
                     self.rightBound_tks = task.jobs[-1].getFinishTime()
 
+                # Get the width of the task name on the canvas. We need to make sure that the legend width is large enough to hold the task name.
+                tmpElement = self.create_text(200, 200, anchor=customtkinter.N, text=task.name) # Create the text
+                bbox = self.bbox(tmpElement)    # Measure the text
+                self.delete(tmpElement) # Delete the text again
+                elementWidth = bbox[2] - bbox[0]
+                if elementWidth > self.legend_px:
+                    self.legend_px = elementWidth
+
             # we add one ms to the right bound to not finish the trace with the last event
             self.rightBound_tks = self.rightBound_tks + 1000 
             self.zoomMin = self.rightBound_tks
+
         else:
-            # If there is no task, reset bounds to default values.
+            # If there is no task, reset bounds and legend width to default values.
             self.leftBound_tks = 0
             self.rightBound_tks = 50000
+            self.legend_px = 90
             self.clearTrace()
 
     def clearTrace(self):
@@ -90,35 +100,38 @@ class TraceView(customtkinter.CTkCanvas):
 
         self.sizeX_px  = int(self.winfo_width())
 
+        # Display a standard text if no task is set yet
         if self.tasks is None:
             self.canvasItems.append(self.create_text(200, 100, anchor=customtkinter.N, text="No Trace Loaded...."))
+            traceHeight = 200
+        else: 
+            traceHeight = len(self.tasks) * self.taskTimelineHeight_px + self.borderY_px
+            
+            # In case the view was updated, make sure to delete all canvas items first
+            self.clearTrace()
 
-            return
-        #if self.tasks is not None:
+            # Compute the length of the visible view in ticks
+            self.view_tks = self.rightBound_tks - self.leftBound_tks
+
+            # Draw the tick marks for the current view on the canvas
+            self.drawTicks()
+
+            for task in self.tasks:
+                taskPos = self.taskTimelineHeight_px * (self.tasks.index(task) + 1) - 1 - self.taskHeight_px
+                self.paintTask(task, taskPos)
+
+            for task in self.tasks:
+                self.canvasItems.append(self.create_line(self.borderX_px + self.legend_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1))
+
+                #left vertical boundary
+                self.canvasItems.append(self.create_line(self.plotXOffset(), 0, self.plotXOffset(), (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1))
+                
+                self.canvasItems.append(self.create_line(self.sizeX_px - self.borderX_px, 0, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1))
+
+            self.paintLegend()
         
-        # In case the view was updated, make sure to delete all canvas items first
-        self.clearTrace()
+        self.configure(scrollregion = (0,0,100,traceHeight))
 
-        # Compute the length of the visible view in ticks
-        self.view_tks = self.rightBound_tks - self.leftBound_tks
-
-        # Draw the tick marks for the current view on the canvas
-        self.drawTicks()
-
-        for task in self.tasks:
-            taskPos = self.taskTimelineHeight_px * (self.tasks.index(task) + 1) - 1 - self.taskHeight_px
-            self.paintTask(task, taskPos)
-
-        for task in self.tasks:
-            self.canvasItems.append(self.create_line(self.borderX_px + self.legend_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1))
-
-            #left vertical boundary
-            self.canvasItems.append(self.create_line(self.plotXOffset(), 0, self.plotXOffset(), (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1))
-			
-            self.canvasItems.append(self.create_line(self.sizeX_px - self.borderX_px, 0, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1))
-
-        self.paintLegend()
-        
     def paintLegend(self):
         """
         Function draws the task labels on the canvas.

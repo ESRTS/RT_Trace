@@ -153,7 +153,6 @@ class TraceApp(customtkinter.CTk):
 
         self.traceView.setTasks(None)
         self.traceView.draw()
-        #self.traceView.update()
 
         if self.selectedTarget == PICO2_FREERTOS:
             print("To load the trace buffer, openocd needs to be in the path.")
@@ -184,8 +183,12 @@ class TextRedirector(object):
 
     def write(self, string):
         self.widget.configure(state="normal")
-        self.widget.insert("end", string, (self.tag,))
+        self.widget.insert("end", string, (self.tag,))  # Add the string to the textbox
         self.widget.configure(state="disabled")
+        self.widget.see("end")                          # Scroll the view to the end
+
+    def flush(self):    # Needed to have the interface of a file-like object
+        pass    
 
 def main():
     """

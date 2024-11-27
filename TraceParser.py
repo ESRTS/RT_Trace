@@ -193,8 +193,9 @@ def parseTaskExecution(traceStart, task, events):
     jobFinishes = False
     timeToWake = 0
 
+     #print("Parsing task: " + str(task))
     for evt in events:
-
+        #print('\t' + str(evt))
         ts = evt.get('ts') - traceStart
 
         if evt.get('type') is TRACE_TASK_START_READY:   # Event ID: 4
@@ -203,6 +204,8 @@ def parseTaskExecution(traceStart, task, events):
                 jobFinishes = False
 
         elif evt.get('type') is TRACE_TASK_START_EXEC:  # Event ID: 2
+            if task.currentJob is None:
+                task.newJob(ts, None)
             task.startExec(ts, evt.get('core'), ExecutionType.EXECUTE)   # Start a new execution segment.
 
         elif evt.get('type') is TRACE_DELAY_UNTIL:      # Event ID: 9

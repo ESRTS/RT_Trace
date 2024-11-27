@@ -135,7 +135,7 @@ class TraceTask():
         """
         Task starts to execute at time ts.
         """
-        assert self.currentJob != None
+        assert self.currentJob != None, "No current job! " + str(self)
 
         self.currentJob.startExec(ts, core, type)
 
