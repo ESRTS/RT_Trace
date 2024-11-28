@@ -175,7 +175,7 @@ class TraceApp(customtkinter.CTk):
             now = datetime.now()
 
             Path("output").mkdir(parents=True, exist_ok=True)
-            filename = "Trace_" + now.strftime("%d_%m_%Y_%H_%M")
+            filename = targets[self.selectedTarget].get('name') + "_Trace_" + now.strftime("%d_%m_%Y_%H_%M")
             filename = os.path.join('output', filename + '.pdf')
 
 
