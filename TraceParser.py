@@ -82,7 +82,7 @@ def parser_thread(gui, numCores):
     bufferPaths = []
     for c in range(0,numCores):
 
-        filename = os.path.join('data', 'raw_buffer' + str(c))
+        filename = os.path.join('data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'raw_buffer' + str(c))
 
         bufferPaths.append(Path(filename + ".txt"))
         if not bufferPaths[-1].is_file():

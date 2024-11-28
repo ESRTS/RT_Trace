@@ -8,17 +8,7 @@ import subprocess
 import os
 from datetime import datetime
 
-"""
-Here all available targets are configures. If the flag 'implemented' is False, they are not supported yet.
-'requirement_str' can be used to inform the user of any additional prerequisites, this is displayed in the textbox once the target is selected. 
-'recordTraceFunc' is a target specific function that loads the trace buffer
-"""
-targets = [
-    {'name': 'Pico2 FreeRTOS', 'numCores': 2, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : loadPico2TraceBuffers},
-    {'name': 'RPI QNX', 'numCores': 4, 'implemented': False, 'requirement_str' : 'To load the trace buffer, telnet needs to be on the path.', 'recordTraceFunc' : None},
-    {'name': 'RPI Linux', 'numCores': 4, 'implemented': False, 'requirement_str' : 'To load the trace buffer, ...', 'recordTraceFunc' : None},
-    {'name': 'STM FreeRTOS', 'numCores': 1, 'implemented': False, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : None}
-]
+
 
 class TraceApp(customtkinter.CTk):
     """
@@ -26,6 +16,18 @@ class TraceApp(customtkinter.CTk):
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+        """
+        Here all available targets are configures. If the flag 'implemented' is False, they are not supported yet.
+        'requirement_str' can be used to inform the user of any additional prerequisites, this is displayed in the textbox once the target is selected. 
+        'recordTraceFunc' is a target specific function that loads the trace buffer
+        """
+        self.targets = [
+            {'name': 'Pico2 FreeRTOS', 'numCores': 2, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : loadPico2TraceBuffers},
+            {'name': 'RPI QNX', 'numCores': 4, 'implemented': False, 'requirement_str' : 'To load the trace buffer, telnet needs to be on the path.', 'recordTraceFunc' : None},
+            {'name': 'RPI Linux', 'numCores': 4, 'implemented': False, 'requirement_str' : 'To load the trace buffer, ...', 'recordTraceFunc' : None},
+            {'name': 'STM FreeRTOS', 'numCores': 1, 'implemented': False, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : None}
+        ]
 
         ''' Set the default size of the GUI window and give it a name. '''
         self.geometry(str(self.winfo_screenwidth()) + "x500")
@@ -43,9 +45,9 @@ class TraceApp(customtkinter.CTk):
 
         ''' Option to select the trace source. '''
         self.selectValues = []
-        for target in targets:
+        for target in self.targets:
             if len(self.selectValues) == 0:
-                self.selectedTarget = targets.index(target)     # Select the first target in the list
+                self.selectedTarget = self.targets.index(target)     # Select the first target in the list
             self.selectValues.append(target.get('name'))        # Create a list with all target names for the option menu
 
         self.opt_selectSource = customtkinter.CTkOptionMenu(self.sidebar_frame, values=self.selectValues, command=self.selectTraceSource)
@@ -88,7 +90,7 @@ class TraceApp(customtkinter.CTk):
         self.traceView.bind("<Configure>", self.resize_window_function)
 
         ''' Print the requirement string for the initially selected target. '''
-        print(targets[self.selectedTarget].get('requirement_str'))
+        print(self.targets[self.selectedTarget].get('requirement_str'))
 
     def resize_window_function(self, event):
         """
@@ -131,7 +133,7 @@ class TraceApp(customtkinter.CTk):
         self.btn_recordTrace.configure(state="disabled")
         self.update()
         print("Reading the trace buffer for each core. Might take a few seconds...")
-        targets[self.selectedTarget].get('recordTraceFunc')(self)   # Call the target specific function to load the trace buffers
+        self.targets[self.selectedTarget].get('recordTraceFunc')(self)   # Call the target specific function to load the trace buffers
         
 
     def load_function(self):
@@ -148,9 +150,9 @@ class TraceApp(customtkinter.CTk):
         """
         Callback that ius called if a new target is selected from the option menu.
         """
-        for target in targets:
+        for target in self.targets:
             if target.get('name') is traceSource:
-                self.selectedTarget = targets.index(target)
+                self.selectedTarget = self.targets.index(target)
 
         self.textbox.configure(state=customtkinter.NORMAL)  # Reset the textbox if a different target is selected
         self.textbox.delete(1.0, 'end')
@@ -159,11 +161,11 @@ class TraceApp(customtkinter.CTk):
         self.traceView.setTasks(None)
         self.traceView.draw()
 
-        if targets[self.selectedTarget].get('implemented') is True:    # Make sure only to load from supported targets
-            print(targets[self.selectedTarget].get('requirement_str'))
+        if self.targets[self.selectedTarget].get('implemented') is True:    # Make sure only to load from supported targets
+            print(self.targets[self.selectedTarget].get('requirement_str'))
             self.enableAllButtons()
         else:
-            print("Target " + targets[self.selectedTarget].get('name') + " is not yet supported!")
+            print("Target " + self.targets[self.selectedTarget].get('name') + " is not yet supported!")
             self.disableAllButtons()
 
     def save_image_function(self):
@@ -175,7 +177,7 @@ class TraceApp(customtkinter.CTk):
             now = datetime.now()
 
             Path("output").mkdir(parents=True, exist_ok=True)
-            filename = targets[self.selectedTarget].get('name') + "_Trace_" + now.strftime("%d_%m_%Y_%H_%M")
+            filename = self.targets[self.selectedTarget].get('name') + "_Trace_" + now.strftime("%d_%m_%Y_%H_%M_%S")
             filename = os.path.join('output', filename + '.pdf')
 
 

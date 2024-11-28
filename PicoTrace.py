@@ -17,10 +17,11 @@ def pico_thread(size, gui):
     print("Size trace buffer core 0: " + str(len(traceBuffer[0])) + "b")
     print("Size trace buffer core 1: " + str(len(traceBuffer[1])) + "b")
 
-    Path("data").mkdir(parents=True, exist_ok=True)
+    targetPath = os.path.join('data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'))
+    Path(targetPath).mkdir(parents=True, exist_ok=True)
 
-    filename1 = os.path.join('data', 'raw_buffer0')
-    filename2 = os.path.join('data', 'raw_buffer1')
+    filename1 = os.path.join('data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'raw_buffer0')
+    filename2 = os.path.join('data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'raw_buffer1')
 
     # Parse the trace buffers
     writeFile(traceBuffer[0], filename1)
