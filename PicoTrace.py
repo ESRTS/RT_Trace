@@ -2,6 +2,8 @@ import subprocess
 import telnetlib
 from threading import Thread
 from time import sleep
+import os
+from pathlib import Path
 
 def loadPico2TraceBuffers(gui, size=2000):
 
@@ -15,9 +17,14 @@ def pico_thread(size, gui):
     print("Size trace buffer core 0: " + str(len(traceBuffer[0])) + "b")
     print("Size trace buffer core 1: " + str(len(traceBuffer[1])) + "b")
 
+    Path("data").mkdir(parents=True, exist_ok=True)
+
+    filename1 = os.path.join('data', 'raw_buffer0')
+    filename2 = os.path.join('data', 'raw_buffer1')
+
     # Parse the trace buffers
-    writeFile(traceBuffer[0], "buffer0")
-    writeFile(traceBuffer[1], "buffer1")
+    writeFile(traceBuffer[0], filename1)
+    writeFile(traceBuffer[1], filename2)
     
     # Draw the execution trace
 
@@ -46,8 +53,14 @@ def readTraceBuffers(size):
     debugger = subprocess.Popen([r"openocd",
             "-f", r"interface/cmsis-dap.cfg",
             "-f", r"target/rp2350.cfg",
-            "-c", "telnet_port 4444"])
+            "-c", "telnet_port 4444"])#, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     
+    #while True:
+    #    line = myStdout.readline()
+    #    if not line:
+    #        break
+    #    print(line.rstrip(), flush=True)
+
     sleep(0.25)
 
     tel = telnetlib.Telnet('localhost', 4444)

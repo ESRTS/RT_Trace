@@ -2,6 +2,7 @@ from threading import Thread
 from pathlib import Path
 import io
 from TraceTask import *
+import os
 
 """
 All supported trace event id's.
@@ -18,6 +19,19 @@ TRACE_DELAY_UNTIL               = 9
 TRACE_ISR_ENTER                 = 10
 TRACE_ISR_EXIT                  = 11
 
+eventMap = {
+    TRACE_IDLE : "TRACE_IDLE",
+    TRACE_TASK_START_EXEC : "TRACE_TASK_START_EXEC",
+    TRACE_TASK_STOP_EXEC : "TRACE_TASK_STOP_EXEC",
+    TRACE_TASK_START_READY : "TRACE_TASK_START_READY",
+    TRACE_TASK_STOP_READY : "TRACE_TASK_STOP_READY",
+    TRACE_TASK_CREATE : "TRACE_TASK_CREATE",
+    TRACE_START : "TRACE_START",
+    TRACE_STOP : "TRACE_STOP",
+    TRACE_DELAY_UNTIL : "TRACE_DELAY_UNTIL",
+    TRACE_ISR_ENTER : "TRACE_ISR_ENTER",
+    TRACE_ISR_EXIT : "TRACE_ISR_EXIT"
+}
 """
 ISR's have specific task id's (the ISR id). Those are not registered in the trace itself.
 They are hardcoded here. This should be done better to support several platforms where the ISR id's
@@ -67,7 +81,10 @@ def parser_thread(gui, numCores):
     """
     bufferPaths = []
     for c in range(0,numCores):
-        bufferPaths.append(Path("buffer" + str(c) + ".txt"))
+
+        filename = os.path.join('data', 'raw_buffer' + str(c))
+
+        bufferPaths.append(Path(filename + ".txt"))
         if not bufferPaths[-1].is_file():
             print("Error: File " + str(bufferPaths[-1]) + " does not exist!")
 
@@ -130,13 +147,17 @@ def extractTraceInfo(events):
         if evt.get('type') is TRACE_TASK_CREATE:    # Parse all task create events and create trace tasks for each.
             id = evt.get('taskId')
             prio = evt.get('priority')
-            name = evt.get('name').split('\\')[0]
+            #name = evt.get('name').split('\\')[0]
+            name = evt.get('name').split('\x00', 1)[0]
             tmpTask = TraceTask(id, name, prio, getTaskColor(id))
             tasks.append(tmpTask)
         if evt.get('type') is TRACE_TASK_START_READY:   # We set the trace time t=0 to the first task ready event.
             if traceStart is None:
                 traceStart = evt.get('ts')  # By convention we set the start of the first task to t=0
 
+    eventFileName = os.path.join('data', 'events.txt')
+    eventFile = open(eventFileName, 'w')
+    
     for task in tasks:
         """ 
         For each task separately, get all events that belong to this task.
@@ -177,11 +198,14 @@ def extractTraceInfo(events):
 
         sortedTaskEvts = sorted(taskEvts, key=lambda d: d['ts'])    # Sort all events of this task by timestamp. Since timestamps on cores are synchronised this can be done. Attention, if the platform does not support this!
 
-        parseTaskExecution(traceStart, task, sortedTaskEvts)    # After all task events are parsed, the trace tasks are created here.
+        parseTaskExecution(traceStart, task, sortedTaskEvts, eventFile)    # After all task events are parsed, the trace tasks are created here.
+
+    eventFile.close()
+    print("Wrote event file to: " + eventFileName)
 
     return tasks
 
-def parseTaskExecution(traceStart, task, events):
+def parseTaskExecution(traceStart, task, events, eventFile):
     """ 
     The function gets a list of events related to this specific task.
     Based on this, the jobs and execution segments are extracted. 
@@ -190,9 +214,15 @@ def parseTaskExecution(traceStart, task, events):
     jobFinishes = False
     timeToWake = 0
 
+    
+
     #print("Parsing task: " + str(task))
+    eventFile.write("Task: " + task.name + "\n")
+
     for evt in events:
         #print('\t' + str(evt))
+        eventFile.write('\tts: ' + "%06.3f" % (evt.get('ts')/1000) + "ms\t" + eventMap.get(evt.get('type')) + ":  " + str(evt) + "\n")
+
         ts = evt.get('ts') - traceStart
 
         if evt.get('type') is TRACE_TASK_START_READY:   # Event ID: 4

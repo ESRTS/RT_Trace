@@ -6,6 +6,7 @@ from TraceParser import parseTraceFiles
 from pathlib import Path
 import subprocess
 import os
+from datetime import datetime
 
 """
 Here all available targets are configures. If the flag 'implemented' is False, they are not supported yet.
@@ -170,12 +171,20 @@ class TraceApp(customtkinter.CTk):
         Function generates a PDF of the current trace view.
         """
         if self.traceView.tasks is not None:    # Only save the trace as PDF if some tasks are loaded
+
+            now = datetime.now()
+
+            Path("output").mkdir(parents=True, exist_ok=True)
+            filename = "Trace_" + now.strftime("%d_%m_%Y_%H_%M")
+            filename = os.path.join('output', filename + '.pdf')
+
+
             self.traceView.postscript(file="tmp.ps", colormode="color")                 # Generate the postscript of the trace canvas
-            process = subprocess.Popen(["ps2pdf", "-dEPSCrop", "tmp.ps", "trace.pdf"])  # Convert the postscript file to PDF (requires ps2pdf)
+            process = subprocess.Popen(["ps2pdf", "-dEPSCrop", "tmp.ps", filename])  # Convert the postscript file to PDF (requires ps2pdf)
             streamdata = process.communicate()[0]                                       # Get the return code of the process
             rc = process.returncode
             if rc == 0:
-                print("Saved trace as trace.pdf.")
+                print("Saved trace as " + filename + ".")
             else:
                 print("Cound not generate PDF file.")
             os.remove("tmp.ps")                                                         # Delete the temporary postscript file
@@ -197,7 +206,7 @@ class TextRedirector(object):
         self.widget.see("end")                          # Scroll the view to the end
 
     def flush(self):    # Needed to have the interface of a file-like object
-        pass    
+        pass   
 
 def main():
     """

@@ -7,3 +7,5 @@ trace.pdf
 build/*
 dist/*
 *.spec
+data/*
+output/*
