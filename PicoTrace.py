@@ -45,7 +45,22 @@ def writeFile(data, filename):
 
     print("Created File: " + filename + ".txt")
 
+def textRedirectErrThread(output):
+
+    while output.poll() is None: # check whether process is still running
+            msg = output.stderr.readline().strip() # read a line from the process output
+            if msg:
+                print(msg)
+
+def textRedirectOutThread(output):
+
+    while output.poll() is None: # check whether process is still running
+            msg = output.stdout.readline().strip() # read a line from the process output
+            if msg:
+                print(msg)
+
 def readTraceBuffers(size):
+    global stop_threads
 
     buffer0 = "0x2008001c"  # SRAM8_BASE
     buffer1 = "0x2008100c"  # SRAM9_BASE
@@ -54,13 +69,14 @@ def readTraceBuffers(size):
     debugger = subprocess.Popen([r"openocd",
             "-f", r"interface/cmsis-dap.cfg",
             "-f", r"target/rp2350.cfg",
-            "-c", "telnet_port 4444"])#, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            "-c", "telnet_port 4444",
+            "-c", "adapter speed 4000"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1, text=True)#, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    stderrThread = Thread(target = textRedirectErrThread, args = (debugger,))
+    stderrThread.start()
     
-    #while True:
-    #    line = myStdout.readline()
-    #    if not line:
-    #        break
-    #    print(line.rstrip(), flush=True)
+    stdoutThread = Thread(target = textRedirectOutThread, args = (debugger,))
+    stdoutThread.start()
 
     sleep(0.25)
 
