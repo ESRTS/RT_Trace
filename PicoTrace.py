@@ -3,7 +3,7 @@ import telnetlib
 from threading import Thread
 from time import sleep
 
-def loadTraceBuffers(gui, size=2000):
+def loadPico2TraceBuffers(gui, size=2000):
 
     thread = Thread(target = pico_thread, args = (size, gui))
     thread.start()

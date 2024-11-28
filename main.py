@@ -1,7 +1,7 @@
 import customtkinter
 import sys
 from TraceView import TraceView
-from PicoTrace import loadTraceBuffers
+from PicoTrace import loadPico2TraceBuffers
 from TraceParser import parseTraceFiles
 from pathlib import Path
 import subprocess
@@ -10,12 +10,13 @@ import os
 """
 Here all available targets are configures. If the flag 'implemented' is False, they are not supported yet.
 'requirement_str' can be used to inform the user of any additional prerequisites, this is displayed in the textbox once the target is selected. 
+'recordTraceFunc' is a target specific function that loads the trace buffer
 """
 targets = [
-    {'name': 'Pico2 FreeRTOS', 'numCores': 2, 'implemented': True, 'requirement_str' : "To load the trace buffer, openocd and telnet needs to be on the path."},
-    {'name': 'RPI QNX', 'numCores': 4, 'implemented': False, 'requirement_str' : "To load the trace buffer, telnet needs to be on the path."},
-    {'name': 'RPI Linux', 'numCores': 4, 'implemented': False, 'requirement_str' : "To load the trace buffer, ..."},
-    {'name': 'STM FreeRTOS', 'numCores': 1, 'implemented': False, 'requirement_str' : "To load the trace buffer, openocd and telnet needs to be on the path."}
+    {'name': 'Pico2 FreeRTOS', 'numCores': 2, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : loadPico2TraceBuffers},
+    {'name': 'RPI QNX', 'numCores': 4, 'implemented': False, 'requirement_str' : 'To load the trace buffer, telnet needs to be on the path.', 'recordTraceFunc' : None},
+    {'name': 'RPI Linux', 'numCores': 4, 'implemented': False, 'requirement_str' : 'To load the trace buffer, ...', 'recordTraceFunc' : None},
+    {'name': 'STM FreeRTOS', 'numCores': 1, 'implemented': False, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : None}
 ]
 
 class TraceApp(customtkinter.CTk):
@@ -129,7 +130,7 @@ class TraceApp(customtkinter.CTk):
         self.btn_recordTrace.configure(state="disabled")
         self.update()
         print("Reading the trace buffer for each core. Might take a few seconds...")
-        loadTraceBuffers(self)   
+        targets[self.selectedTarget].get('recordTraceFunc')(self)   # Call the target specific function to load the trace buffers
         
 
     def load_function(self):

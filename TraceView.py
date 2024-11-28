@@ -62,8 +62,9 @@ class TraceView(customtkinter.CTkCanvas):
             # Find the maximum time to display in ticks
             self.rightBound_tks = 0
             for task in self.tasks:
-                if task.jobs[-1].getFinishTime() > self.rightBound_tks:
-                    self.rightBound_tks = task.jobs[-1].getFinishTime()
+                if task.id > 100:   # We are only interested in user tasks (all ISR task id < 100).
+                    if task.jobs[-1].getFinishTime() > self.rightBound_tks:
+                        self.rightBound_tks = task.jobs[-1].getFinishTime()
 
                 # Get the width of the task name on the canvas. We need to make sure that the legend width is large enough to hold the task name.
                 tmpElement = self.create_text(200, 200, anchor=customtkinter.N, text=task.name) # Create the text
@@ -187,7 +188,7 @@ class TraceView(customtkinter.CTkCanvas):
         
         if sectionStart_px > start_px:  # Job release is before the visible left boundary of the trace
             start_px = sectionStart_px
-        if sectionStop_px > stop_px:    # Job finish time is after the visible right boundary of the trace
+        if sectionStop_px < stop_px:    # Job finish time is after the visible right boundary of the trace
             stop_px = sectionStop_px
 
         for interval in job.execIntervals:

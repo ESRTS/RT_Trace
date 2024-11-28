@@ -190,7 +190,7 @@ def parseTaskExecution(traceStart, task, events):
     jobFinishes = False
     timeToWake = 0
 
-     #print("Parsing task: " + str(task))
+    #print("Parsing task: " + str(task))
     for evt in events:
         #print('\t' + str(evt))
         ts = evt.get('ts') - traceStart
