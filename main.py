@@ -8,8 +8,6 @@ import subprocess
 import os
 from datetime import datetime
 
-
-
 class TraceApp(customtkinter.CTk):
     """
     Main class of the RT-Trace app. 
@@ -71,8 +69,11 @@ class TraceApp(customtkinter.CTk):
         self.textbox.grid(row=3, column=1, rowspan=1, columnspan=1, sticky="nswe", padx=5, pady=5)
         
         ''' Redirect stdout and stderr to the textbox. '''
+        self.textbox.tag_config('stderr', background="white", foreground="red")
+        self.textbox.tag_config('stdout', background="white", foreground="black")
+
         sys.stdout = TextRedirector(self.textbox, "stdout")
-        #sys.stderr = TextRedirector(self.textbox, "stderr")
+        sys.stderr = TextRedirector(self.textbox, "stderr")
 
         ''' Execution Trace Widget. '''
         self.traceView = TraceView(self)
@@ -148,7 +149,7 @@ class TraceApp(customtkinter.CTk):
 
     def selectTraceSource(self, traceSource: str):
         """
-        Callback that ius called if a new target is selected from the option menu.
+        Callback that is called if a new target is selected from the option menu.
         """
         for target in self.targets:
             if target.get('name') is traceSource:
