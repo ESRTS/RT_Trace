@@ -3,6 +3,7 @@ from pathlib import Path
 import io
 from TraceTask import *
 import os
+import FileHelper
 
 """
 All supported trace event id's.
@@ -82,7 +83,9 @@ def parser_thread(gui, numCores):
     bufferPaths = []
     for c in range(0,numCores):
 
-        filename = os.path.join('data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'raw_buffer' + str(c))
+        cwd = FileHelper.getCwd()
+
+        filename = os.path.join(cwd, 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'raw_buffer' + str(c))
 
         bufferPaths.append(Path(filename + ".txt"))
         if not bufferPaths[-1].is_file():
@@ -95,7 +98,10 @@ def parser_thread(gui, numCores):
         allBuffers.append(traceBuffer)
         print("Loaded trace buffer: " + str(buffer))
 
-    tasks = parser(allBuffers)    # Parse the content of the trace buffers
+    cwd = FileHelper.getCwd()
+    eventFilePath = os.path.join(cwd, 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'events.txt')
+
+    tasks = parser(allBuffers, eventFilePath)    # Parse the content of the trace buffers
 
     # If this was called from the GUI, enable the buttons and update the GUI
     if gui is not None:
@@ -104,7 +110,7 @@ def parser_thread(gui, numCores):
         gui.traceView.draw()
         gui.update()
 
-def parser(buffers):
+def parser(buffers, eventFilePath):
     """
     Function parses a variable number of trace buffers.
     Trace events are then converted to tasks, jobs and execution segments.
@@ -115,7 +121,7 @@ def parser(buffers):
     events = []
     parseTraceEvents(events, buffers)       # Parse the raw events from the trace files of each core
 
-    allTasks = extractTraceInfo(events)     # Parse all trace tasks from the event trace (afterwards we have trace tasks, jobs and execution segments). 
+    allTasks = extractTraceInfo(events, eventFilePath)     # Parse all trace tasks from the event trace (afterwards we have trace tasks, jobs and execution segments). 
     tasks = []
     print("Found trace data for tasks:")
 
@@ -129,7 +135,7 @@ def parser(buffers):
 
     return tasks
 
-def extractTraceInfo(events):
+def extractTraceInfo(events, eventFilePath):
     """ 
     Extract trace information from the raw trace events. So we have information on task-level.
     """
@@ -155,8 +161,7 @@ def extractTraceInfo(events):
             if traceStart is None:
                 traceStart = evt.get('ts')  # By convention we set the start of the first task to t=0
 
-    eventFileName = os.path.join('data', 'events.txt')
-    eventFile = open(eventFileName, 'w')
+    eventFile = open(eventFilePath, 'w')
     
     for task in tasks:
         """ 
@@ -201,7 +206,7 @@ def extractTraceInfo(events):
         parseTaskExecution(traceStart, task, sortedTaskEvts, eventFile)    # After all task events are parsed, the trace tasks are created here.
 
     eventFile.close()
-    print("Wrote event file to: " + eventFileName)
+    print("Wrote event file to: " + eventFilePath)
 
     return tasks
 

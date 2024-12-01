@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import os
 from datetime import datetime
+import FileHelper
 
 class TraceApp(customtkinter.CTk):
     """
@@ -177,22 +178,28 @@ class TraceApp(customtkinter.CTk):
 
             now = datetime.now()
 
-            Path("output").mkdir(parents=True, exist_ok=True)
-            filename = self.targets[self.selectedTarget].get('name') + "_Trace_" + now.strftime("%d_%m_%Y_%H_%M_%S")
-            filename = os.path.join('output', filename + '.pdf')
+            cwd = FileHelper.getCwd()
+            targetPath = os.path.join(cwd, 'output')
+            Path(targetPath).mkdir(parents=True, exist_ok=True)
+            pdfFilename = self.targets[self.selectedTarget].get('name') + "_Trace_" + now.strftime("%d_%m_%Y_%H_%M_%S")
+            pdfFilename = os.path.join(cwd, 'output', pdfFilename + '.pdf')
 
+            psFilename = os.path.join(cwd, 'output', "tmp.ps")
 
-            self.traceView.postscript(file="tmp.ps", colormode="color")                 # Generate the postscript of the trace canvas
-            process = subprocess.Popen(["ps2pdf", "-dEPSCrop", "tmp.ps", filename])  # Convert the postscript file to PDF (requires ps2pdf)
+            self.traceView.postscript(file=psFilename, colormode="color")                 # Generate the postscript of the trace canvas
+
+            my_env = os.environ.copy()
+            my_env["PATH"] = f"{my_env['PATH']}:/usr/local/bin" # This is not final, a config file for the openocd path should be added
+            process = subprocess.Popen(["ps2pdf", "-dEPSCrop", psFilename, pdfFilename], env=my_env)  # Convert the postscript file to PDF (requires ps2pdf)
             streamdata = process.communicate()[0]                                       # Get the return code of the process
             rc = process.returncode
             if rc == 0:
-                print("Saved trace as " + filename + ".")
+                print("Saved trace as " + pdfFilename + ".")
             else:
-                print("Cound not generate PDF file.")
-            os.remove("tmp.ps")                                                         # Delete the temporary postscript file
+                print("Cound not generate PDF file.", file=sys.stderr)
+            os.remove(psFilename)                                                         # Delete the temporary postscript file
         else:
-            print("No trace loaded!")
+            print("No trace loaded!", file=sys.stderr)
 
 class TextRedirector(object):
     """
