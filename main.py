@@ -76,8 +76,8 @@ class TraceApp(customtkinter.CTk):
         self.textbox.grid(row=3, column=1, rowspan=1, columnspan=1, sticky="nswe", padx=5, pady=5)
         
         ''' Redirect stdout and stderr to the textbox. '''
-        self.textbox.tag_config('stderr', background="white", foreground="red")
-        self.textbox.tag_config('stdout', background="white", foreground="black")
+        self.textbox.tag_config('stderr', foreground="red")
+        self.textbox.tag_config('stdout', foreground="black")
 
         sys.stdout = TextRedirector(self.textbox, "stdout")
         sys.stderr = TextRedirector(self.textbox, "stderr")
