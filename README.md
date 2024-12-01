@@ -17,4 +17,4 @@ In our trace implementation on the Pico2, each core loggs trace events to its ow
 Use pyinstaller to generate the packaged application. To generate the application for Windows this must be executed on under Windows. 
 Executables for Linux and OSX can be created on OSX directly. 
 
-```$pyinstaller main.py --noconsole --icon ./test.icns --onefile```
+```$ pyinstaller main.py --noconsole --icon ./test.icns --add-data "Resources/config.ini:." --noconfirm```

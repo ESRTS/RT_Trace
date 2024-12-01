@@ -8,6 +8,7 @@ import subprocess
 import os
 from datetime import datetime
 import FileHelper
+import configparser
 
 class TraceApp(customtkinter.CTk):
     """
@@ -27,6 +28,11 @@ class TraceApp(customtkinter.CTk):
             {'name': 'RPI Linux', 'numCores': 4, 'implemented': False, 'requirement_str' : 'To load the trace buffer, ...', 'recordTraceFunc' : None},
             {'name': 'STM FreeRTOS', 'numCores': 1, 'implemented': False, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : None}
         ]
+
+        ''' Get the path for ps2pdf. '''
+        config = configparser.ConfigParser()
+        config.read(FileHelper.getConfigFilePath())
+        self.ps2pdf_path = config.get('general','ps2pdf_path', fallback = '/usr/local/bin')
 
         ''' Set the default size of the GUI window and give it a name. '''
         self.geometry(str(self.winfo_screenwidth()) + "x500")
@@ -189,7 +195,7 @@ class TraceApp(customtkinter.CTk):
             self.traceView.postscript(file=psFilename, colormode="color")                 # Generate the postscript of the trace canvas
 
             my_env = os.environ.copy()
-            my_env["PATH"] = f"{my_env['PATH']}:/usr/local/bin" # This is not final, a config file for the openocd path should be added
+            my_env["PATH"] = f"{my_env['PATH']}:{self.ps2pdf_path}" # This is not final, a config file for the openocd path should be added
             process = subprocess.Popen(["ps2pdf", "-dEPSCrop", psFilename, pdfFilename], env=my_env)  # Convert the postscript file to PDF (requires ps2pdf)
             streamdata = process.communicate()[0]                                       # Get the return code of the process
             rc = process.returncode

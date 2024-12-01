@@ -6,6 +6,7 @@ import os
 import sys
 from pathlib import Path
 import FileHelper
+import configparser
 
 """
 A global variable that is used to indicate if an error was reported in openocd.
@@ -16,14 +17,14 @@ before trying to connect to openocd via telnet.
 """
 errorMsg = None
 
-def loadPico2TraceBuffers(gui, size=2000):
+def loadPico2TraceBuffers(gui):
 
-    thread = Thread(target = pico_thread, args = (size, gui))
+    thread = Thread(target = pico_thread, args = (gui,))
     thread.start()
 
-def pico_thread(size, gui):
+def pico_thread(gui):
     
-    traceBuffer = readTraceBuffers(size)
+    traceBuffer = readTraceBuffers()
 
     if traceBuffer is not None:
     
@@ -91,7 +92,7 @@ def textRedirectOutThread(output):
             if msg:
                 print(msg)
 
-def readTraceBuffers(size):
+def readTraceBuffers():
     """
     This function reads the trace buffer from both cores.
     Openocd is used to access the memory on the target device, as it's own subprocess.
@@ -101,13 +102,20 @@ def readTraceBuffers(size):
     openocd stderr to indicate that something went wrong before starting the telnet session.
     """
     global errorMsg
+    
+    # Read the configuration from the ini-file
+    config = configparser.ConfigParser()
+    config.read(FileHelper.getConfigFilePath())
+    size = config.get('Pico2_FreeRTOS','bufferSize', fallback = '2000')
+    print("Size is: " + str(size))
+    buffer0 = config.get('Pico2_FreeRTOS','buffer0', fallback = '0x2008001c') #"0x2008001c"  # SRAM8_BASE
+    buffer1 = config.get('Pico2_FreeRTOS','buffer1', fallback = '0x2008100c') #"0x2008100c"  # SRAM9_BASE
+    openocdPath = config.get('Pico2_FreeRTOS','openocd_path', fallback = '/usr/local/bin') 
 
-    buffer0 = "0x2008001c"  # SRAM8_BASE
-    buffer1 = "0x2008100c"  # SRAM9_BASE
     traceBuffer = []
 
     my_env = os.environ.copy()
-    my_env["PATH"] = f"{my_env['PATH']}:/usr/local/bin" # This is not final, a config file for the openocd path should be added
+    my_env["PATH"] = f"{my_env['PATH']}:{openocdPath}" # This is not final, a config file for the openocd path should be added
     
     debugger = subprocess.Popen([r"openocd",
             "-f", r"interface/cmsis-dap.cfg",
