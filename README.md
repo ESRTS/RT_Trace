@@ -11,7 +11,7 @@ A tool to visualize scheduling traces. Several trace sources can be configured. 
 Use pyinstaller to generate the packaged application. To generate the application for Windows this must be executed on under Windows. 
 Executables for Linux and OSX can be created on OSX directly. 
 
-```$ pyinstaller main.py --noconsole --icon ./test.icns --add-data "Resources/config.ini:." --noconfirm```
+```$ pyinstaller main.py --noconsole --icon ./icon.icns --add-data "Resources/config.ini:." --noconfirm```
 
 ## Supported Platforms
 
@@ -48,6 +48,12 @@ void xPortSysTickHandler( void )
 	}
 	portENABLE_INTERRUPTS();
 }
+```
+
+<b>File:</b> ```portmacro.h```
+Substitute the definition of ```portEND_SWITCHING_ISR``` with:
+```
+#define portEND_SWITCHING_ISR( xSwitchRequired ) { if( xSwitchRequired != pdFALSE ) { traceISR_EXIT_TO_SCHEDULER(); portYIELD() } else { traceISR_EXIT(); } }
 ```
 
 <b>File:</b> ```task.h```
