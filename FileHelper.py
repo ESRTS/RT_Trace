@@ -16,4 +16,5 @@ def getConfigFilePath():
     Get the path to the configuration file.
     """
     cwd = getCwd()
-    return os.path.abspath(os.path.join(os.path.dirname( cwd ), 'Resources', 'config.ini'))
+    #return os.path.abspath(os.path.join(os.path.dirname( cwd ), 'Resources', 'config.ini'))
+    return os.path.abspath(os.path.join(cwd, 'Resources', 'config.ini'))

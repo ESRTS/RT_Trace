@@ -332,7 +332,11 @@ class EventParser:
         Function reads an integer (4 bytes) from the trace buffer.
         """
         b = self.readBytes(4)
-        return int.from_bytes(b, byteorder='little', signed=False)
+
+        if b is not None:
+            return int.from_bytes(b, byteorder='little', signed=False)
+        else:
+            return None
 
     def read_event(self, coreId):
         """
@@ -378,7 +382,6 @@ class EventParser:
             evt = {'type':TRACE_TASK_STOP_READY, 'ts':self.time, 'core':coreId, 'taskId':taskId}
 
         elif eventId == TRACE_TASK_CREATE:
-
             taskId = self.readInteger()
             strLen = self.readInteger()
             priority = self.readInteger()

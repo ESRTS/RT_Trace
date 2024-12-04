@@ -2,6 +2,7 @@ import customtkinter
 import sys
 from TraceView import TraceView
 from PicoTrace import loadPico2TraceBuffers
+from L476Trace import loadSTM32L476TraceBuffers
 from TraceParser import parseTraceFiles
 from pathlib import Path
 import subprocess
@@ -26,7 +27,7 @@ class TraceApp(customtkinter.CTk):
             {'name': 'Pico2 FreeRTOS', 'numCores': 2, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : loadPico2TraceBuffers},
             {'name': 'RPI QNX', 'numCores': 4, 'implemented': False, 'requirement_str' : 'To load the trace buffer, telnet needs to be on the path.', 'recordTraceFunc' : None},
             {'name': 'RPI Linux', 'numCores': 4, 'implemented': False, 'requirement_str' : 'To load the trace buffer, ...', 'recordTraceFunc' : None},
-            {'name': 'STM FreeRTOS', 'numCores': 1, 'implemented': False, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : None}
+            {'name': 'STM FreeRTOS', 'numCores': 1, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : loadSTM32L476TraceBuffers}
         ]
 
         ''' Get the path for ps2pdf. '''
@@ -151,7 +152,7 @@ class TraceApp(customtkinter.CTk):
         self.btn_loadTrace.configure(state="disabled")
         self.update()
         print("Loading trace from files...")
-        parseTraceFiles(self, 2)
+        parseTraceFiles(self, self.targets[self.selectedTarget].get('numCores'))
         
 
     def selectTraceSource(self, traceSource: str):
