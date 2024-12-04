@@ -19,9 +19,9 @@ Executables for Linux and OSX can be created on OSX directly.
 
 In our trace implementation on the Pico2, each core loggs trace events to its own trace buffer. The source for the timestamp on each core is the same, which allows for an easy combination of events from both trace buffers. 
 
-## Nucleo-L476RG with FreeRTOS
+### Nucleo-L476RG with FreeRTOS
 
-### Required Source Code Modifications
+#### Required Source Code Modifications
 <b>File:</b> ```port.c``` 
 
 Tracing calls must be added to the tick handler.
