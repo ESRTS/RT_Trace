@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
-#include "trace.h"
+#include <trace.h>
 
 #ifdef TRACE_STM32L476RG
 #include "stm32l4xx_hal.h"
@@ -148,8 +148,8 @@ static bool enableTrace;
  *
  */
 uint32_t save_and_disable_interrupts() {
-	uint32_t irqState = __get_PRIMASK();              				/* Save the current interrupt state */
-	__disable_irq();												/* Disable interrupts on the current core */
+	uint32_t irqState = __get_PRIMASK();              						/* Save the current interrupt state */
+	__disable_irq();														/* Disable interrupts on the current core */
 	return irqState;
 }
 
@@ -158,8 +158,8 @@ uint32_t save_and_disable_interrupts() {
  *
  */
 void restore_interrupts(uint32_t irqState) {
-	__set_PRIMASK(irqState);										/* Restore the interrupt state */
-	__enable_irq();                                  				/* Enable interrupts */
+	__set_PRIMASK(irqState);												/* Restore the interrupt state */
+	__enable_irq();                                  						/* Enable interrupts */
 }
 
 /**
@@ -175,19 +175,19 @@ uint64_t timer_time_us_64()
 
     do
     {
-        ms = uptimeMillis;					/* Current time in ms. */
-        st = TIM1->CNT;						/* Current counter of TIM1, counts up to 999. */
+        ms = uptimeMillis;													/* Current time in ms. */
+        st = TIM1->CNT;														/* Current counter of TIM1, counts up to 999. */
         uptimeMillis = HAL_GetTick();
-    } while (ms != uptimeMillis);			/* Make sure the timer didn't roll over during the measurement. */
+    } while (ms != uptimeMillis);											/* Make sure the timer didn't roll over during the measurement. */
 
-    uint64_t ts = (ms * 1000) + st;			/* TIM1 is used as systick, counts up until 999 */
+    uint64_t ts = (ms * 1000) + st;											/* TIM1 is used as systick, counts up until 999 */
     return ts;
 
 }
 
 /**
- * @brief Initializes the trace mechanism.
- *
+ * @brief Initializes the trace mechanism. 
+ * 
  */
 void trace_init() {
 
@@ -229,22 +229,22 @@ void trace_init() {
 
 /**
  * @brief Encodes the event ID as well as the timestamp delta into one byte.
- *
+ * 
  * The event ID is encoded into the upper 16 bits.
  * The delta between the last timestamp and the current time is encoded into the lower byte.
- * With the 1us timer granularity, this allows to record timestamps that are up to 65,536 ms apart.
- * As the FreeRTOS ticks appear at 1ms granularity (if not changed), this is safe.
- *
- * Note: We assume interrupts are disabled when this function is called.
- * @param event
- * @return uint32_t
+ * With the 1us timer granularity, this allows to record timestamps that are up to 65,536 ms apart. 
+ * As the FreeRTOS ticks appear at 1ms granularity (if not changed), this is safe. 
+ * 
+ * Note: We assume interrupts are disabled when this function is called. 
+ * @param event 
+ * @return uint32_t 
  */
 uint32_t trace_encodeTime(uint16_t event) {
 	bool* enabled = getTraceState();
-	if (*enabled == false) return 0;                    /* Only increment the timestamps if treacing is still enabled. */
+	if (*enabled == false) return 0;                    					/* Only increment the timestamps if treacing is still enabled. */
 
-	uint64_t* lastTs = getLastTimestamp();              /* Get the timestamp of the last event that was written */
-	uint64_t ts = timer_time_us_64();          /* 1us timestamp, can be accessed from both cores */
+	uint64_t* lastTs = getLastTimestamp();              					/* Get the timestamp of the last event that was written */
+	uint64_t ts = timer_time_us_64();          								/* 1us timestamp, can be accessed from both cores */
 
 	uint16_t delta = ((ts - *lastTs) & 0xffff);
 	*lastTs = ts;
@@ -253,10 +253,10 @@ uint32_t trace_encodeTime(uint16_t event) {
 }
 
 /**
- * @brief Returns a pointer to the correct buffer location, considering which core it is and
+ * @brief Returns a pointer to the correct buffer location, considering which core it is and 
  * which event needs to be written.
- * Note: We assume interrupts are disabled when this function is called.
- *
+ * Note: We assume interrupts are disabled when this function is called. 
+ * 
  * @param length Length of the event data.
  * @return Pointer to the reserved event buffer.
  */
@@ -268,13 +268,13 @@ uint32_t* trace_getEventBuffer(uint16_t length) {
 	bool* enabled = getTraceState();
 	uint32_t* retval = NULL;
 
-	if (*enabled == true) {                         /* Check if traceing is enabled for this core */
-	    if (*index + length <= TRACE_BUFFER_SIZE) { /* Check if the buffer has sufficient space for the message */
-	        retval = &buffer[*index];               /* Return the pointer to the buffer location the event should be written to. */
-	        *index += length;                       /* Reserve space, i.e. increment the index. */
+	if (*enabled == true) {                         						/* Check if traceing is enabled for this core */
+	    if (*index + length <= TRACE_BUFFER_SIZE) { 						/* Check if the buffer has sufficient space for the message */
+	        retval = &buffer[*index];               						/* Return the pointer to the buffer location the event should be written to. */
+	        *index += length;                       						/* Reserve space, i.e. increment the index. */
 	        buffer[*index] = 0xaabbccdd;
 	    } else {
-	    *enabled = false;                       /* If this event can't be added to the buffer, tracing is disabled for this core. */
+	    *enabled = false;                       							/* If this event can't be added to the buffer, tracing is disabled for this core. */
 	    }
 	}
 
@@ -283,30 +283,30 @@ uint32_t* trace_getEventBuffer(uint16_t length) {
 
 /**
  * @brief Record the event that the CPU starts to be idle.
- *
+ * 
  */
 void trace_idle(void) {
-
-    uint32_t irqState = save_and_disable_interrupts();              /* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(1);                     /* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_IDLE);             /* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   /* Enable and restore interrupts */
+    
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    uint32_t* buffer = trace_getEventBuffer(1);                     		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_IDLE);             		/* Encodes the event ID and the timestamp delta */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
-    }
+    } 
 }
 
 /**
  * @brief Record the event that the task has started to execute.
- *
+ * 
  */
 void trace_execStart(uint32_t taskId) {
-
-    uint32_t irqState = save_and_disable_interrupts();              /* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(2);                     /* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_TASK_START_EXEC);  /* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   /* Enable and restore interrupts */
+    
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_TASK_START_EXEC);  		/* Encodes the event ID and the timestamp delta */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -316,14 +316,14 @@ void trace_execStart(uint32_t taskId) {
 
 /**
  * @brief Record the event that the task has stopped to execute.
- *
+ * 
  */
 void trace_execStop(uint32_t taskId) {
-
-    uint32_t irqState = save_and_disable_interrupts();              /* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(2);                     /* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_TASK_STOP_EXEC);   /* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   /* Enable and restore interrupts */
+    
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_TASK_STOP_EXEC);   		/* Encodes the event ID and the timestamp delta */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -333,14 +333,14 @@ void trace_execStop(uint32_t taskId) {
 
 /**
  * @brief Record the event that the task is in ready state.
- *
+ * 
  */
 void trace_readyStart(uint32_t taskId) {
-
-    uint32_t irqState = save_and_disable_interrupts();              /* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(2);                     /* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_TASK_START_READY); /* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   /* Enable and restore interrupts */
+    
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_TASK_START_READY); 		/* Encodes the event ID and the timestamp delta */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -350,14 +350,14 @@ void trace_readyStart(uint32_t taskId) {
 
 /**
  * @brief Record the event that the task is not in ready state anymore.
- *
+ * 
  */
 void trace_readyStop(uint32_t taskId) {
-
-    uint32_t irqState = save_and_disable_interrupts();              /* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(2);                     /* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_TASK_STOP_READY);  /* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   /* Enable and restore interrupts */
+    
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_TASK_STOP_READY);  		/* Encodes the event ID and the timestamp delta */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -368,20 +368,20 @@ void trace_readyStop(uint32_t taskId) {
 
 /**
  * @brief Record the event that a new task was created.
- *
+ * 
  */
 void trace_taskCreate(uint32_t taskId, uint32_t priority, const char* name) {
 
-    uint32_t irqState = save_and_disable_interrupts();              /* Disable interrupts on the current core */
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
 
     /* Get the length of the string, with 4 byte alignment */
     uint16_t len = strlen(name);
     uint16_t slen = len / 4;
     if ( len % 4 != 0) slen++;
 
-    uint32_t* buffer = trace_getEventBuffer(4 + slen);              /* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_TASK_CREATE);      /* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   /* Enable and restore interrupts */
+    uint32_t* buffer = trace_getEventBuffer(4 + slen);              		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_TASK_CREATE);      		/* Encodes the event ID and the timestamp delta */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -396,14 +396,14 @@ void trace_taskCreate(uint32_t taskId, uint32_t priority, const char* name) {
 
 /**
  * @brief Record the event that the tracing started.
- *
+ * 
  */
 void trace_start(void) {
-
-    uint32_t irqState = save_and_disable_interrupts();              /* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(1);                     /* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_START);            /* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   /* Enable and restore interrupts */
+    
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    uint32_t* buffer = trace_getEventBuffer(1);                     		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_START);            		/* Encodes the event ID and the timestamp delta */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -412,14 +412,14 @@ void trace_start(void) {
 
 /**
  * @brief Record the event that the tracing started.
- *
+ * 
  */
 void trace_stop(void) {
-
-    uint32_t irqState = save_and_disable_interrupts();              /* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(1);                     /* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_STOP);             /* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   /* Enable and restore interrupts */
+    
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    uint32_t* buffer = trace_getEventBuffer(1);                     		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_STOP);             		/* Encodes the event ID and the timestamp delta */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -428,14 +428,14 @@ void trace_stop(void) {
 
 /**
  * @brief Record the event that the tracing started.
- *
+ * 
  */
 void trace_delayUntil(uint32_t* prev, uint32_t timeInc) {
-
-    uint32_t irqState = save_and_disable_interrupts();              /* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(2);                     /* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_DELAY_UNTIL);      /* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   /* Enable and restore interrupts */
+    
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_DELAY_UNTIL);      		/* Encodes the event ID and the timestamp delta */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -445,20 +445,20 @@ void trace_delayUntil(uint32_t* prev, uint32_t timeInc) {
 
 /**
  * @brief Record the ISR enter event.
- *
+ * 
  */
 void trace_isrEnter(void) {
-
-    uint32_t irqState = save_and_disable_interrupts();              /* Disable interrupts on the current core */
+    
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
 #ifdef TRACE_STM32L476RG
-    uint32_t irqId = SCB->ICSR & 0x000001ff;						/* Read VECTACTIVE, he exception number of the current executing exception. */
+    uint32_t irqId = SCB->ICSR & 0x000001ff;								/* Read VECTACTIVE, he exception number of the current executing exception. */
 #endif
 #ifdef TRACE_PICO2
-    uint32_t irqId = m33_hw->icsr & 0x000001ff;                     /* Read VECTACTIVE, he exception number of the current executing exception. */
+    uint32_t irqId = m33_hw->icsr & 0x000001ff;                     		/* Read VECTACTIVE, he exception number of the current executing exception. */
 #endif
-    uint32_t* buffer = trace_getEventBuffer(2);                     /* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_ISR_ENTER);        /* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   /* Enable and restore interrupts */
+    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_ISR_ENTER);        		/* Encodes the event ID and the timestamp delta */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -468,14 +468,30 @@ void trace_isrEnter(void) {
 
 /**
  * @brief Record the ISR exit event.
- *
+ * 
  */
 void trace_isrExit(void) {
+    
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    uint32_t* buffer = trace_getEventBuffer(1);                     		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_ISR_EXIT);         		/* Encodes the event ID and the timestamp delta */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
-    uint32_t irqState = save_and_disable_interrupts();              /* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(1);                     /* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_ISR_EXIT);         /* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   /* Enable and restore interrupts */
+    if (buffer != NULL) {
+        buffer[0] = identifyer;
+    }
+}
+
+/**
+ * @brief Record the ISR exit to scheduler event.
+ *
+ */
+void trace_isrExitToScheduler(void) {
+
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    uint32_t* buffer = trace_getEventBuffer(1);                     		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_ISR_EXIT_TO_SCHEDULER);	/* Encodes the event ID and the timestamp delta */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;

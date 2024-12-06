@@ -21,6 +21,10 @@ TRACE_ISR_ENTER                 = 10
 TRACE_ISR_EXIT                  = 11
 TRACE_ISR_EXIT_TO_SCHEDULER     = 12
 
+# Those events are not in the original trace and are created during parsing
+TRACE_IDLE_START                = 20
+TRACE_IDLE_STOP                 = 21
+
 eventMap = {
     TRACE_IDLE : "TRACE_IDLE",
     TRACE_TASK_START_EXEC : "TRACE_TASK_START_EXEC",
@@ -174,46 +178,112 @@ def extractTraceInfo(events, eventFilePath):
         Then those are parsed separately and converted to jobs and execution segments.
         """
         
+        if task.name[:4] == 'IDLE': # Check if this is the idle task. Each core has an idle task with name IDLEn, where n is the core ID.
+            isIdleTask = True
+        else:
+            isIdleTask = False
+
         taskEvts = []
         prevTaskEvt = None
         prevIrqEvt = None
 
         for evt in events:  # Search all execution segments for this task. We do this sequentially on task level, it could be done nicer for all tasksk at once.
 
-            # Only handle events of this task
-            if evt.get('taskId') == task.id or evt.get('irqId') == task.id:
-                if evt.get('type') is not TRACE_TASK_CREATE:    # The task create event was already parsed and handled above
-                    taskEvts.append(evt)
-            #elif evt.get('type') == TRACE_DELAY_UNTIL: #or evt.get('type') == TRACE_ISR_EXIT
-            
-            # Some events have no ID to match them to tasks. Those always belong to the same task that had the previous event.
-            if evt.get('type') == TRACE_DELAY_UNTIL:
-                if prevTaskEvt in taskEvts: # Always belongs to the last task event on this core
-                    taskEvts.append(evt)
+            if isIdleTask is not True:
+                # Parse events for a 'normal' task
+                # Only handle events of this task
+                if evt.get('taskId') == task.id or evt.get('irqId') == task.id:
+                    if (evt.get('type') is not TRACE_TASK_CREATE):    # The task create event was already parsed and handled above
+                        taskEvts.append(evt)
+                #elif evt.get('type') == TRACE_DELAY_UNTIL: #or evt.get('type') == TRACE_ISR_EXIT
+                
+                # Some events have no ID to match them to tasks. Those always belong to the same task that had the previous event.
+                if evt.get('type') == TRACE_DELAY_UNTIL:
+                    if prevTaskEvt in taskEvts: # Always belongs to the last task event on this core
+                        taskEvts.append(evt)
 
-            if (evt.get('type') == TRACE_ISR_EXIT) or (evt.get('type') is TRACE_ISR_EXIT_TO_SCHEDULER):
-                if prevIrqEvt in taskEvts:  # Always belongs to the last ISR event on this core
-                    if (prevIrqEvt.get('type') == TRACE_ISR_EXIT) or (prevIrqEvt.get('type') == TRACE_ISR_EXIT_TO_SCHEDULER):
-                        # in rare cases it seems the ISR_ENTER event is missing/not generated. In this case, we 
-                        # detect this here and create such an event with the timestamp of the previous task event
-                        taskEvts.append({'type':TRACE_ISR_ENTER, 'ts':prevTaskEvt.get('ts'), 'core':prevTaskEvt.get('coreId'), 'irqId':prevIrqEvt.get('irqId')})
-                    
-                    taskEvts.append(evt)
-            
-            # Remember the previous task or ISR events.
-            if (evt.get('type') is TRACE_TASK_START_EXEC):# or (evt.get('type') is TRACE_TASK_STOP_EXEC) or (evt.get('type') is TRACE_TASK_START_READY) or (evt.get('type') is TRACE_TASK_STOP_READY):
-                prevTaskEvt = evt
-            elif (evt.get('type') is TRACE_ISR_ENTER) or (evt.get('type') is TRACE_ISR_EXIT) or (evt.get('type') is TRACE_ISR_EXIT_TO_SCHEDULER):
-                prevIrqEvt = evt
+                if (evt.get('type') == TRACE_ISR_EXIT) or (evt.get('type') is TRACE_ISR_EXIT_TO_SCHEDULER):
+                    if prevIrqEvt in taskEvts:  # Always belongs to the last ISR event on this core
+                        if (prevIrqEvt.get('type') == TRACE_ISR_EXIT) or (prevIrqEvt.get('type') == TRACE_ISR_EXIT_TO_SCHEDULER):
+                            # in rare cases it seems the ISR_ENTER event is missing/not generated. In this case, we 
+                            # detect this here and create such an event with the timestamp of the previous task event
+                            taskEvts.append({'type':TRACE_ISR_ENTER, 'ts':prevTaskEvt.get('ts'), 'core':prevTaskEvt.get('core'), 'irqId':prevIrqEvt.get('irqId')})
+                        
+                        taskEvts.append(evt)
+                
+                # Remember the previous task or ISR events.
+                if (evt.get('type') is TRACE_TASK_START_EXEC):# or (evt.get('type') is TRACE_TASK_STOP_EXEC) or (evt.get('type') is TRACE_TASK_START_READY) or (evt.get('type') is TRACE_TASK_STOP_READY):
+                    prevTaskEvt = evt
+                elif (evt.get('type') is TRACE_ISR_ENTER) or (evt.get('type') is TRACE_ISR_EXIT) or (evt.get('type') is TRACE_ISR_EXIT_TO_SCHEDULER):
+                    prevIrqEvt = evt
+            else:
+                # Idle Task parsing
+                if (evt.get('type') is not TRACE_TASK_CREATE) and (evt.get('type') is not TRACE_DELAY_UNTIL) and (evt.get('type') is not TRACE_TASK_START_READY)and (evt.get('type') is not TRACE_TASK_STOP_READY):
+                    if len(task.name) > 4:
+                        if int(task.name[4:]) == evt.get('core'):
+                            taskEvts.append(evt)
+                    else:
+                        taskEvts.append(evt)
 
         sortedTaskEvts = sorted(taskEvts, key=lambda d: d['ts'])    # Sort all events of this task by timestamp. Since timestamps on cores are synchronised this can be done. Attention, if the platform does not support this!
 
-        parseTaskExecution(traceStart, task, sortedTaskEvts, eventFile)    # After all task events are parsed, the trace tasks are created here.
+        if isIdleTask is not True:
+            parseTaskExecution(traceStart, task, sortedTaskEvts, eventFile)    # After all task events are parsed, the trace tasks are created here.
+        else:
+            parseIdleTaskExecution(traceStart, task, sortedTaskEvts, eventFile)
 
     eventFile.close()
     print("Wrote event file to: " + eventFilePath)
 
     return tasks
+
+def parseIdleTaskExecution(traceStart, task, events, eventFile):
+    """
+    The function parses the idle task execution. The execution of this task is not recorded as 'normal' tasks. 
+    Instead, only the beginning of idle time is recorded until another task executes again.
+    Note Idle tasks are always on the same core and can be interrupted by the timer ISR.
+    """
+    print("Parsing idle task: " + str(task))
+    eventFile.write("Idle Task: " + task.name + "\n")
+
+    idleTaskExecuting = False
+
+    # Get the core id the idle task executes on. For platforms with > 1 core the id is added to the name.
+    if len(task.name) > 4:
+        idleTaskCore = int(task.name[4:])
+    else:
+        idleTaskCore = 0
+
+    for evt in events:
+        ts = evt.get('ts') - traceStart
+
+        if evt.get('type') is TRACE_IDLE:   # Event ID: 1
+            task.newJob(ts, None)                           # Create a new job. Each idel execution is its own job.
+            task.startExec(ts, evt.get('core'), ExecutionType.EXECUTE)   # Start a new execution segment.
+            idleTaskExecuting = True
+
+        if evt.get('type') is TRACE_ISR_ENTER:              # The timer ISR finishes the current IDLE execution.
+            if idleTaskExecuting is not False:
+                task.stopExec(ts)
+                task.finishJob()
+
+        if evt.get('type') is TRACE_ISR_EXIT:               # If the idle task was executing before the timer ISR it continues with a new 'job' afterwards.
+            if idleTaskExecuting:
+                task.newJob(ts, None)
+                task.startExec(ts, idleTaskCore, ExecutionType.EXECUTE)
+
+        if evt.get('type') is TRACE_ISR_EXIT_TO_SCHEDULER:  # If the ISR returns to the scheduler it means a 'normal' task will execute next.
+            idleTaskExecuting = False
+
+        if evt.get('type') is TRACE_TASK_START_EXEC:        # The start of a 'normal' task finished the idle task execution.
+            if idleTaskExecuting is not False:
+                task.stopExec(ts)
+                task.finishJob()
+                idleTaskExecuting = False
+    if idleTaskExecuting is True:
+        # While we don't finish started jobs of normal tasks at the end of the trace, for idle tasks this is no problem.
+        task.stopExec(ts)
+        task.finishJob()
 
 def parseTaskExecution(traceStart, task, events, eventFile):
     """ 
@@ -223,8 +293,6 @@ def parseTaskExecution(traceStart, task, events, eventFile):
 
     jobFinishes = False
     timeToWake = 0
-
-    
 
     #print("Parsing task: " + str(task))
     eventFile.write("Task: " + task.name + "\n")

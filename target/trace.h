@@ -26,7 +26,7 @@
 /** 
  * Enable this to trace idle events
  */
-//#define TRACE_ENABLE_IDLE_TRACE
+#define TRACE_ENABLE_IDLE_TRACE
 
 /****************************************************************************************************************
  * Defines and function declarations.
@@ -46,6 +46,7 @@
 #define TRACE_DELAY_UNTIL               (9u)
 #define TRACE_ISR_ENTER                 (10u)
 #define TRACE_ISR_EXIT                  (11u)
+#define TRACE_ISR_EXIT_TO_SCHEDULER     (12u)
 
 // Not yet supported
 /*
@@ -76,6 +77,7 @@ void trace_stop(void);
 void trace_delayUntil(uint32_t* prev, uint32_t timeInc);
 void trace_isrEnter(void);
 void trace_isrExit(void);
+void trace_isrExitToScheduler(void);
 
 /****************************************************************************************************************
  * FreeRTOS trace defines to map to the trace infrastructure.
@@ -92,11 +94,11 @@ void trace_isrExit(void);
 /* Called after a task has been selected to run.  pxCurrentTCB holds a pointer
  * to the task control block of the selected task. */
 #ifndef TRACE_ENABLE_IDLE_TRACE
-#define traceTASK_SWITCHED_IN()                         if (memcmp(pxCurrentTCB->pcTaskName, "IDLE", 5) != 0) {   \
+#define traceTASK_SWITCHED_IN()                         if (memcmp(pxCurrentTCB->pcTaskName, "IDLE", 4) != 0) {   \
                                                             trace_execStart((uint32_t)pxCurrentTCB);                         \
                                                         }
 #else
-#define traceTASK_SWITCHED_IN()                         if (memcmp(pxCurrentTCB->pcTaskName, "IDLE", 5) != 0) {   \
+#define traceTASK_SWITCHED_IN()                         if (memcmp(pxCurrentTCB->pcTaskName, "IDLE", 4) == 0) {   \
                                                             trace_idle();                                                    \
                                                          } else {                                                            \
                                                             trace_execStart((uint32_t)pxCurrentTCB);                         \
@@ -105,7 +107,7 @@ void trace_isrExit(void);
 
 /* Called before a task has been selected to run.  pxCurrentTCB holds a pointer
  * to the task control block of the task being switched out. */
-#define traceTASK_SWITCHED_OUT()                        if (memcmp(pxCurrentTCB->pcTaskName, "IDLE", 5) != 0) {   \
+#define traceTASK_SWITCHED_OUT()                        if (memcmp(pxCurrentTCB->pcTaskName, "IDLE", 4) != 0) {   \
                                                             trace_execStop((uint32_t)pxCurrentTCB);                          \
                                                         }
 
@@ -129,7 +131,7 @@ void trace_isrExit(void);
 #ifdef TRACE_ENABLE_IRQ_TRACE
     #define traceISR_EXIT()                             trace_isrExit()
 
-    #define traceISR_EXIT_TO_SCHEDULER()                trace_isrExit()
+    #define traceISR_EXIT_TO_SCHEDULER()                trace_isrExitToScheduler()
     
     #define traceISR_ENTER()                            trace_isrEnter()
 #endif

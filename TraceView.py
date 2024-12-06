@@ -178,8 +178,9 @@ class TraceView(customtkinter.CTkCanvas):
         if self.leftBound_tks <= job.releaseTime and self.rightBound_tks >= job.releaseTime:
             # Draw the release arrow if this is not an ISR
             if task.id > 100:
-                rel_px = self.tickToPixel(job.releaseTime)
-                self.canvasItems.append(self.create_line(rel_px, y, rel_px, y - self.releaseArrowLength_px, arrow=customtkinter.LAST, arrowshape=(self.releaseArrowH_px, self.releaseArrowH_px, self.releaseArrowD_px / 2), width=self.releaseArrowWidth_px))
+                if task.name[:4] != 'IDLE': # Idle tasks don't have jobs.
+                    rel_px = self.tickToPixel(job.releaseTime)
+                    self.canvasItems.append(self.create_line(rel_px, y, rel_px, y - self.releaseArrowLength_px, arrow=customtkinter.LAST, arrowshape=(self.releaseArrowH_px, self.releaseArrowH_px, self.releaseArrowD_px / 2), width=self.releaseArrowWidth_px))
 
     def drawJobsSection(self, task, job, y, start_px, stop_px, sectionStart_px, sectionStop_px):
         """

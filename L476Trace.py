@@ -118,7 +118,7 @@ def readTraceBuffers():
     # Read the configuration from the ini-file
     config = configparser.ConfigParser()
     config.read(FileHelper.getConfigFilePath())
-    size = config.get('STM_FreeRTOS','bufferSize', fallback = '2000')
+    size = config.get('STM_FreeRTOS','bufferSize', fallback = '4000')
     print("Size is: " + str(size))
     buffer0 = config.get('STM_FreeRTOS','buffer0', fallback = '0x10000000') 
     openocdPath = config.get('STM_FreeRTOS','openocd_path', fallback = '/usr/local/bin') 
