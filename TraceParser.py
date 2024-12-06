@@ -19,6 +19,7 @@ TRACE_STOP                      = 8
 TRACE_DELAY_UNTIL               = 9
 TRACE_ISR_ENTER                 = 10
 TRACE_ISR_EXIT                  = 11
+TRACE_ISR_EXIT_TO_SCHEDULER     = 12
 
 eventMap = {
     TRACE_IDLE : "TRACE_IDLE",
@@ -31,7 +32,8 @@ eventMap = {
     TRACE_STOP : "TRACE_STOP",
     TRACE_DELAY_UNTIL : "TRACE_DELAY_UNTIL",
     TRACE_ISR_ENTER : "TRACE_ISR_ENTER",
-    TRACE_ISR_EXIT : "TRACE_ISR_EXIT"
+    TRACE_ISR_EXIT : "TRACE_ISR_EXIT",
+    TRACE_ISR_EXIT_TO_SCHEDULER : "TRACE_ISR_EXIT_TO_SCHEDULER"
 }
 """
 ISR's have specific task id's (the ISR id). Those are not registered in the trace itself.
@@ -73,6 +75,8 @@ def parseTraceFiles(gui, numCores):
     Main function that is called from the GUI to read the trace files from the target device.
     To not block the GUI, this is done in a separate thread.
     """
+    global taskColorIndex
+    taskColorIndex = 0      # Reset the task color index, so we always start with the same task color assignments.
     thread = Thread(target = parser_thread, args = (gui, numCores))
     thread.start()
 
@@ -81,6 +85,7 @@ def parser_thread(gui, numCores):
     Thread to parse the trace buffers. The trace events are then converted to tasks, jobs and execution segments.
     """
     bufferPaths = []
+    
     for c in range(0,numCores):
 
         cwd = FileHelper.getCwd()
@@ -186,19 +191,19 @@ def extractTraceInfo(events, eventFilePath):
                 if prevTaskEvt in taskEvts: # Always belongs to the last task event on this core
                     taskEvts.append(evt)
 
-            if evt.get('type') == TRACE_ISR_EXIT:
+            if (evt.get('type') == TRACE_ISR_EXIT) or (evt.get('type') is TRACE_ISR_EXIT_TO_SCHEDULER):
                 if prevIrqEvt in taskEvts:  # Always belongs to the last ISR event on this core
-                    if prevIrqEvt.get('type') is TRACE_ISR_EXIT:
+                    if (prevIrqEvt.get('type') == TRACE_ISR_EXIT) or (prevIrqEvt.get('type') == TRACE_ISR_EXIT_TO_SCHEDULER):
                         # in rare cases it seems the ISR_ENTER event is missing/not generated. In this case, we 
                         # detect this here and create such an event with the timestamp of the previous task event
                         taskEvts.append({'type':TRACE_ISR_ENTER, 'ts':prevTaskEvt.get('ts'), 'core':prevTaskEvt.get('coreId'), 'irqId':prevIrqEvt.get('irqId')})
                     
                     taskEvts.append(evt)
-
+            
             # Remember the previous task or ISR events.
-            if (evt.get('type') is TRACE_TASK_START_EXEC) or (evt.get('type') is TRACE_TASK_STOP_EXEC) or (evt.get('type') is TRACE_TASK_START_READY) or (evt.get('type') is TRACE_TASK_STOP_READY):
+            if (evt.get('type') is TRACE_TASK_START_EXEC):# or (evt.get('type') is TRACE_TASK_STOP_EXEC) or (evt.get('type') is TRACE_TASK_START_READY) or (evt.get('type') is TRACE_TASK_STOP_READY):
                 prevTaskEvt = evt
-            elif (evt.get('type') is TRACE_ISR_ENTER) or (evt.get('type') is TRACE_ISR_EXIT):
+            elif (evt.get('type') is TRACE_ISR_ENTER) or (evt.get('type') is TRACE_ISR_EXIT) or (evt.get('type') is TRACE_ISR_EXIT_TO_SCHEDULER):
                 prevIrqEvt = evt
 
         sortedTaskEvts = sorted(taskEvts, key=lambda d: d['ts'])    # Sort all events of this task by timestamp. Since timestamps on cores are synchronised this can be done. Attention, if the platform does not support this!
@@ -263,10 +268,12 @@ def parseTaskExecution(traceStart, task, events, eventFile):
                 task.newJob(ts, None)   # an ISR has no jobs in this sense, so we see every execution as a single job.
             task.startExec(ts, evt.get('core'), ExecutionType.EXECUTE)
 
-        elif evt.get('type') is TRACE_ISR_EXIT:
+        elif (evt.get('type') is TRACE_ISR_EXIT):
             task.stopExec(ts)
             task.finishJob()    # Each stop execution event of an ISR is also the end of the job.
-
+        elif (evt.get('type') is TRACE_ISR_EXIT_TO_SCHEDULER):
+            task.stopExec(ts)
+            task.finishJob()    # Each stop execution event of an ISR is also the end of the job.
 
     
 def parseTraceEvents(events, buffers):
@@ -358,27 +365,27 @@ class EventParser:
         self.time = self.time + deltaTime # Compute the current timestamp in absolute time
         
         if eventId == TRACE_IDLE:
-            #print("[t=" + str(self.time) + "us] TRACE_IDLE")
+            print("[t=" + str(self.time) + "us] TRACE_IDLE")
             evt = {'type':TRACE_IDLE, 'ts':self.time, 'core':coreId}
 
         elif eventId == TRACE_TASK_START_EXEC:
             taskId = self.readInteger()
-            #print("[t=" + str(self.time) + "us] TRACE_TASK_START_EXEC  -> taskId: " + str(taskId))
+            print("[t=" + str(self.time) + "us] TRACE_TASK_START_EXEC  -> taskId: " + str(taskId))
             evt = {'type':TRACE_TASK_START_EXEC, 'ts':self.time, 'core':coreId, 'taskId':taskId}
 
         elif eventId == TRACE_TASK_STOP_EXEC:
             taskId = self.readInteger()
-            #print("[t=" + str(self.time) + "us] TRACE_TASK_STOP_EXEC   -> taskId: " + str(taskId))
+            print("[t=" + str(self.time) + "us] TRACE_TASK_STOP_EXEC   -> taskId: " + str(taskId))
             evt = {'type':TRACE_TASK_STOP_EXEC, 'ts':self.time, 'core':coreId, 'taskId':taskId}
 
         elif eventId == TRACE_TASK_START_READY:
             taskId = self.readInteger()
-            #print("[t=" + str(self.time) + "us] TRACE_TASK_START_READY -> taskId: " + str(taskId))
+            print("[t=" + str(self.time) + "us] TRACE_TASK_START_READY -> taskId: " + str(taskId))
             evt = {'type':TRACE_TASK_START_READY, 'ts':self.time, 'core':coreId, 'taskId':taskId}
 
         elif eventId == TRACE_TASK_STOP_READY:
             taskId = self.readInteger()
-            #print("[t=" + str(self.time) + "us] TRACE_TASK_STOP_READY  -> taskId: " + str(taskId))
+            print("[t=" + str(self.time) + "us] TRACE_TASK_STOP_READY  -> taskId: " + str(taskId))
             evt = {'type':TRACE_TASK_STOP_READY, 'ts':self.time, 'core':coreId, 'taskId':taskId}
 
         elif eventId == TRACE_TASK_CREATE:
@@ -386,30 +393,34 @@ class EventParser:
             strLen = self.readInteger()
             priority = self.readInteger()
             name = self.readBytes(strLen * 4).decode('UTF-8')
-            #print("[t=" + str(self.time) + "us] TRACE_TASK_CREATE      -> Task: " + name + " ID: " + str(taskId) + " with priority: " + str(priority))
+            print("[t=" + str(self.time) + "us] TRACE_TASK_CREATE      -> Task: " + name + " ID: " + str(taskId) + " with priority: " + str(priority))
             evt = {'type':TRACE_TASK_CREATE, 'ts':self.time, 'core':coreId, 'taskId':taskId, 'name':name, 'priority':priority}
 
         elif eventId == TRACE_START:
-            #print("[t=" + str(self.time) + "us] TRACE_START")
+            print("[t=" + str(self.time) + "us] TRACE_START")
             evt = {'type':TRACE_START, 'ts':self.time, 'core':coreId}
 
         elif eventId == TRACE_STOP:
-            #print("[t=" + str(self.time) + "us] TRACE_STOP")
+            print("[t=" + str(self.time) + "us] TRACE_STOP")
             evt = {'type':TRACE_STOP, 'ts':self.time, 'core':coreId}
 
         elif eventId == TRACE_DELAY_UNTIL:
             timeToWake = self.readInteger()
-            #print("[t=" + str(self.time) + "us] TRACE_DELAY_UNTIL      -> timeToWake: " + str(timeToWake) + " ms")
+            print("[t=" + str(self.time) + "us] TRACE_DELAY_UNTIL      -> timeToWake: " + str(timeToWake) + " ms")
             evt = {'type':TRACE_DELAY_UNTIL, 'ts':self.time, 'core':coreId, 'timeToWake':timeToWake}
 
         elif eventId == TRACE_ISR_ENTER:
             irqId = self.readInteger()
-            #print("[t=" + str(self.time) + "us] TRACE_ISR_ENTER        -> irqId: " + str(irqId))
+            print("[t=" + str(self.time) + "us] TRACE_ISR_ENTER        -> irqId: " + str(irqId))
             evt = {'type':TRACE_ISR_ENTER, 'ts':self.time, 'core':coreId, 'irqId':irqId}
 
         elif eventId == TRACE_ISR_EXIT:
-            #print("[t=" + str(self.time) + "us] TRACE_ISR_EXIT") 
+            print("[t=" + str(self.time) + "us] TRACE_ISR_EXIT") 
             evt = {'type':TRACE_ISR_EXIT, 'ts':self.time, 'core':coreId} 
+
+        elif eventId == TRACE_ISR_EXIT_TO_SCHEDULER:
+            print("[t=" + str(self.time) + "us] TRACE_ISR_EXIT_TO_SCHEDULER") 
+            evt = {'type':TRACE_ISR_EXIT_TO_SCHEDULER, 'ts':self.time, 'core':coreId} 
 
         else:
             #print("ERROR Unknown Event!")
