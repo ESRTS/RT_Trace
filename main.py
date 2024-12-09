@@ -36,7 +36,7 @@ class TraceApp(customtkinter.CTk):
         self.ps2pdf_path = config.get('general','ps2pdf_path', fallback = '/usr/local/bin')
 
         ''' Set the default size of the GUI window and give it a name. '''
-        self.geometry(str(self.winfo_screenwidth()) + "x500")
+        self.geometry(str(self.winfo_screenwidth()) + "x600")
         self.minsize(800, 400)
         self.title("RT-Trace View")
 
@@ -147,7 +147,7 @@ class TraceApp(customtkinter.CTk):
 
     def load_function(self):
         """
-        Callback that ius called if the button "Load Trace" is clicked.
+        Callback that is called if the button "Load Trace" is clicked.
         """
         self.btn_loadTrace.configure(state="disabled")
         self.update()
