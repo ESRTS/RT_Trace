@@ -4,6 +4,7 @@ import io
 from TraceTask import *
 import os
 import FileHelper
+import configparser
 import sys
 
 """
@@ -45,10 +46,11 @@ ISR's have specific task id's (the ISR id). Those are not registered in the trac
 They are hardcoded here. This should be done better to support several platforms where the ISR id's
 might be different.
 """
-systickCore0Id = 15
-systickCore1Id = 42
-schedulerCore0ID = 0
-schedulerCore1ID = 1
+#systickCore0Id = 15
+#systickCore1Id = 42
+#schedulerCore0ID = 0
+#schedulerCore1ID = 1
+schedulerId = 100
 
 """
 To assign different colors to tasks we use an index into the taskColors array and increment the index
@@ -63,13 +65,9 @@ def getTaskColor(taskId):
     """
     global taskColorIndex
     
-    if taskId == systickCore0Id:
+    if taskId < schedulerId:
         c = (203, 255, 168)
-    elif taskId == systickCore1Id:
-        c = (255, 82, 82)
-    elif taskId == schedulerCore0ID:
-        c = (61, 61, 61)
-    elif taskId == schedulerCore1ID:
+    elif schedulerId <= taskId <= schedulerId + 100:
         c = (61, 61, 61)
     else:
         c = taskColors[taskColorIndex]
@@ -94,6 +92,12 @@ def parser_thread(gui, numCores):
     """
     bufferPaths = []
     
+    # Get the tick id for each core from the config file.
+    configName = gui.targets[gui.selectedTarget].get('name').replace(' ', '_')    # Get the configuration name
+    config = configparser.ConfigParser()
+    config.read(FileHelper.getConfigFilePath())
+    tickIds = [int(x) for x in config.get(configName,'tickId').split(",")]
+
     for c in range(0,numCores):
 
         cwd = FileHelper.getCwd()
@@ -114,7 +118,7 @@ def parser_thread(gui, numCores):
     cwd = FileHelper.getCwd()
     eventFilePath = os.path.join(cwd, 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'events.txt')
 
-    tasks = parser(allBuffers, eventFilePath)    # Parse the content of the trace buffers
+    tasks = parser(allBuffers, eventFilePath, tickIds)    # Parse the content of the trace buffers
 
     # If this was called from the GUI, enable the buttons and update the GUI
     if gui is not None:
@@ -123,7 +127,7 @@ def parser_thread(gui, numCores):
         gui.traceView.draw()
         gui.update()
 
-def parser(buffers, eventFilePath):
+def parser(buffers, eventFilePath, tickIds):
     """
     Function parses a variable number of trace buffers.
     Trace events are then converted to tasks, jobs and execution segments.
@@ -134,7 +138,7 @@ def parser(buffers, eventFilePath):
     events = []
     parseTraceEvents(events, buffers)       # Parse the raw events from the trace files of each core
 
-    allTasks = extractTraceInfo(events, eventFilePath)     # Parse all trace tasks from the event trace (afterwards we have trace tasks, jobs and execution segments). 
+    allTasks = extractTraceInfo(events, eventFilePath, tickIds)     # Parse all trace tasks from the event trace (afterwards we have trace tasks, jobs and execution segments). 
     tasks = []
     print("Found trace data for tasks:")
 
@@ -148,17 +152,22 @@ def parser(buffers, eventFilePath):
 
     return tasks
 
-def extractTraceInfo(events, eventFilePath):
+def extractTraceInfo(events, eventFilePath, tickIds):
     """ 
     Extract trace information from the raw trace events. So we have information on task-level.
     """
     tasks = []
 
-    # Create three tasks to represent the scheduler, tick ISR, doorbell ISR.
-    tasks.append(TraceTask(schedulerCore0ID, "Scheduler Core 0", None, getTaskColor(schedulerCore0ID)))
-    tasks.append(TraceTask(schedulerCore1ID, "Scheduler Core 1", None, getTaskColor(schedulerCore1ID)))
-    tasks.append(TraceTask(systickCore0Id, "Tick Core 1", None, getTaskColor(systickCore0Id)))
-    tasks.append(TraceTask(systickCore1Id, "Tick Core 2", None, getTaskColor(systickCore1Id)))
+    # Create tasks to represent the scheduler, tick ISR for each core.
+    if len(tickIds) == 1:
+        # Exclude the core in the name if there is only one core
+        tasks.append(TraceTask(tickIds[0], "Tick", None, getTaskColor(tickIds[0])))
+        tasks.append(TraceTask(schedulerId, "Scheduler", None, getTaskColor(schedulerId)))
+    else:
+        coreId = 0
+        for id in tickIds:
+            tasks.append(TraceTask(id, "Tick Core " + str(coreId), None, getTaskColor(id)))
+            tasks.append(TraceTask(schedulerId + coreId, "Scheduler Core " + str(coreId), None, getTaskColor(schedulerId + coreId)))
 
     traceStart = None
 
@@ -199,7 +208,10 @@ def extractTraceInfo(events, eventFilePath):
             isSchedulerTask = True
             isNormalTask = False
             isIsr = False
-            schedCoreId = int(task.name[15:])    # For the scheduler task we need to consider only events on the correct core.
+            if len(task.name) > 9:
+                schedCoreId = int(task.name[15:])    # For the scheduler task we need to consider only events on the correct core.
+            else:
+                schedCoreId = 0
         elif task.id < 100:
             isIdleTask = False
             isSchedulerTask = False
@@ -327,14 +339,17 @@ def parseSchedulerExecution(traceStart, task, events, eventFile):
     if len(events) == 0:
         return
     
-    schedCoreId = int(task.name[15:])    # For the scheduler task we need to consider only events on the correct core.
+    if len(task.name) > 9:
+        schedCoreId = int(task.name[15:])    # For the scheduler task we need to consider only events on the correct core.
+    else:
+        schedCoreId = 0
 
     # The scheduler is active at t=0
     task.newJob(0, None)                           
     task.startExec(traceStart, schedCoreId, ExecutionType.EXECUTE)   
     
     for evt in events:
-        #print(evt)
+        print(evt)
         eventFile.write('\tts: ' + "%06.3f" % (evt.get('ts')/1000) + "ms\t" + eventMap.get(evt.get('type')) + ":  " + str(evt) + "\n")
         ts = evt.get('ts') - traceStart
 
@@ -593,27 +608,27 @@ class EventParser:
         self.time = self.time + deltaTime # Compute the current timestamp in absolute time
         
         if eventId == TRACE_IDLE:
-            print("[t=" + str(self.time) + "us] TRACE_IDLE")
+            print("[t=" + str(self.time) + "us] TRACE_IDLE" + " Core: " + str(coreId))
             evt = {'type':TRACE_IDLE, 'ts':self.time, 'core':coreId}
 
         elif eventId == TRACE_TASK_START_EXEC:
             taskId = self.readInteger()
-            print("[t=" + str(self.time) + "us] TRACE_TASK_START_EXEC  -> taskId: " + str(taskId))
+            print("[t=" + str(self.time) + "us] TRACE_TASK_START_EXEC  -> taskId: " + str(taskId) + " Core: " + str(coreId))
             evt = {'type':TRACE_TASK_START_EXEC, 'ts':self.time, 'core':coreId, 'taskId':taskId}
 
         elif eventId == TRACE_TASK_STOP_EXEC:
             taskId = self.readInteger()
-            print("[t=" + str(self.time) + "us] TRACE_TASK_STOP_EXEC   -> taskId: " + str(taskId))
+            print("[t=" + str(self.time) + "us] TRACE_TASK_STOP_EXEC   -> taskId: " + str(taskId) + " Core: " + str(coreId))
             evt = {'type':TRACE_TASK_STOP_EXEC, 'ts':self.time, 'core':coreId, 'taskId':taskId}
 
         elif eventId == TRACE_TASK_START_READY:
             taskId = self.readInteger()
-            print("[t=" + str(self.time) + "us] TRACE_TASK_START_READY -> taskId: " + str(taskId))
+            print("[t=" + str(self.time) + "us] TRACE_TASK_START_READY -> taskId: " + str(taskId) + " Core: " + str(coreId))
             evt = {'type':TRACE_TASK_START_READY, 'ts':self.time, 'core':coreId, 'taskId':taskId}
 
         elif eventId == TRACE_TASK_STOP_READY:
             taskId = self.readInteger()
-            print("[t=" + str(self.time) + "us] TRACE_TASK_STOP_READY  -> taskId: " + str(taskId))
+            print("[t=" + str(self.time) + "us] TRACE_TASK_STOP_READY  -> taskId: " + str(taskId) + " Core: " + str(coreId))
             evt = {'type':TRACE_TASK_STOP_READY, 'ts':self.time, 'core':coreId, 'taskId':taskId}
 
         elif eventId == TRACE_TASK_CREATE:
@@ -621,33 +636,33 @@ class EventParser:
             strLen = self.readInteger()
             priority = self.readInteger()
             name = self.readBytes(strLen * 4).decode('UTF-8')
-            print("[t=" + str(self.time) + "us] TRACE_TASK_CREATE      -> Task: " + name + " ID: " + str(taskId) + " with priority: " + str(priority))
+            print("[t=" + str(self.time) + "us] TRACE_TASK_CREATE      -> Task: " + name + " ID: " + str(taskId) + " with priority: " + str(priority) + " Core: " + str(coreId))
             evt = {'type':TRACE_TASK_CREATE, 'ts':self.time, 'core':coreId, 'taskId':taskId, 'name':name, 'priority':priority}
 
         elif eventId == TRACE_START:
-            print("[t=" + str(self.time) + "us] TRACE_START")
+            print("[t=" + str(self.time) + "us] TRACE_START" + " Core: " + str(coreId))
             evt = {'type':TRACE_START, 'ts':self.time, 'core':coreId}
 
         elif eventId == TRACE_STOP:
-            print("[t=" + str(self.time) + "us] TRACE_STOP")
+            print("[t=" + str(self.time) + "us] TRACE_STOP" + " Core: " + str(coreId))
             evt = {'type':TRACE_STOP, 'ts':self.time, 'core':coreId}
 
         elif eventId == TRACE_DELAY_UNTIL:
             timeToWake = self.readInteger()
-            print("[t=" + str(self.time) + "us] TRACE_DELAY_UNTIL      -> timeToWake: " + str(timeToWake) + " ms")
+            print("[t=" + str(self.time) + "us] TRACE_DELAY_UNTIL      -> timeToWake: " + str(timeToWake) + " ms" + " Core: " + str(coreId))
             evt = {'type':TRACE_DELAY_UNTIL, 'ts':self.time, 'core':coreId, 'timeToWake':timeToWake}
 
         elif eventId == TRACE_ISR_ENTER:
             irqId = self.readInteger()
-            print("[t=" + str(self.time) + "us] TRACE_ISR_ENTER        -> irqId: " + str(irqId))
+            print("[t=" + str(self.time) + "us] TRACE_ISR_ENTER        -> irqId: " + str(irqId) + " Core: " + str(coreId))
             evt = {'type':TRACE_ISR_ENTER, 'ts':self.time, 'core':coreId, 'irqId':irqId}
 
         elif eventId == TRACE_ISR_EXIT:
-            print("[t=" + str(self.time) + "us] TRACE_ISR_EXIT") 
+            print("[t=" + str(self.time) + "us] TRACE_ISR_EXIT" + " Core: " + str(coreId)) 
             evt = {'type':TRACE_ISR_EXIT, 'ts':self.time, 'core':coreId} 
 
         elif eventId == TRACE_ISR_EXIT_TO_SCHEDULER:
-            print("[t=" + str(self.time) + "us] TRACE_ISR_EXIT_TO_SCHEDULER") 
+            print("[t=" + str(self.time) + "us] TRACE_ISR_EXIT_TO_SCHEDULER" + " Core: " + str(coreId)) 
             evt = {'type':TRACE_ISR_EXIT_TO_SCHEDULER, 'ts':self.time, 'core':coreId} 
 
         else:
