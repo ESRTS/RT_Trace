@@ -285,7 +285,9 @@ def extractTraceInfo(events, eventFilePath, tickIds):
                         taskEvts.append(evt)
                 
                 # Remember the previous ISR events.
-                if (evt.get('type') is TRACE_ISR_ENTER) or (evt.get('type') is TRACE_ISR_EXIT) or (evt.get('type') is TRACE_ISR_EXIT_TO_SCHEDULER):
+                if (evt.get('type') is TRACE_TASK_START_EXEC):# or (evt.get('type') is TRACE_TASK_STOP_EXEC) or (evt.get('type') is TRACE_TASK_START_READY) or (evt.get('type') is TRACE_TASK_STOP_READY):
+                    prevTaskEvt = evt
+                elif (evt.get('type') is TRACE_ISR_ENTER) or (evt.get('type') is TRACE_ISR_EXIT) or (evt.get('type') is TRACE_ISR_EXIT_TO_SCHEDULER):
                     prevIrqEvt = evt
 
             elif isIdleTask is True:
