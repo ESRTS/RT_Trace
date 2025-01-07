@@ -94,6 +94,7 @@ class TraceTask():
         self.priority = priority    # Task priority
         self.jobs = []              # Jobs of the task
         self.currentJob = None
+        self.delayUntil = False     # Flag to indicate if delay until was called
 
         # Used for the visualization only
         self.taskColor = color      # Color of the task in the trace
@@ -165,6 +166,17 @@ class TraceTask():
                 maxRt = rt
         return maxRt
 
+def findTaskByName(tasks, name):
+    for task in tasks:
+        if task.name == name:
+            return task
+    return None
+
+def findTaskById(tasks, id):
+    for task in tasks:
+        if task.id == id:
+            return task
+    return None
 if __name__ == "__main__":
     """
     Debugging.
