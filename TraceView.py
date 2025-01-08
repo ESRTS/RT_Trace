@@ -8,37 +8,39 @@ class TraceView(customtkinter.CTkCanvas):
 
     def __init__(self, master):
         super().__init__(master, scrollregion = (0,0,100,500))
-        
+
         """
         Variables that indicate a value in pixel have the ending '_px'
         Variables that indicate a value in time ticks have the ending '_tks'
         """
         # --> Variables to alter the dimensions of different elements in the trace <--
-        self.borderX_px = 40            # Border that is added to the left and right of the plot
-        self.borderY_px = 30            # Border that is added on top and bottom
-        self.legend_px = 90             # Size that is reserved for the legend (left of the trace)
-        self.scaleFactor = 1            # Factor to scale the complete view (not used)
-        self.taskTimelineHeight_px = 40 # Describes the height of one task's timeline
-        self.taskHeight_px = 25         # Describes the height of one task
-        self.releaseArrowWidth_px = 2   # Stroke width of release arrow
-        self.releaseArrowLength_px = 10 # Length of the release arrow
-        self.releaseArrowD_px = 4       # D parameter of release arrow
-        self.releaseArrowH_px = 4       # H parameter of release arrow
-        self.maxTicks = 20              # Maximum number of tick marks plotted in view
+        self.borderX_px = 40                                    # Border that is added to the left and right of the plot
+        self.borderY_px = 30                                    # Border that is added on top and bottom
+        self.legend_px = 90                                     # Size that is reserved for the legend (left of the trace)
+        self.scaleFactor = 1                                    # Factor to scale the complete view (not used)
+        self.taskTimelineHeight_px = 40                         # Describes the height of one task's timeline
+        self.taskHeight_px = 25                                 # Describes the height of one task
+        self.releaseArrowWidth_px = 2                           # Stroke width of release arrow
+        self.releaseArrowLength_px = 10                         # Length of the release arrow
+        self.releaseArrowD_px = 4                               # D parameter of release arrow
+        self.releaseArrowH_px = 4                               # H parameter of release arrow
+        self.maxTicks = 20                                      # Maximum number of tick marks plotted in view
 
         # --> Internal variables. No manual configuration needed! <--
-        self.sizeX_px = 0               # Width of the canvas
-        self.view_tks = 0               # Length of the visible interval in time ticks
-        self.tickScale = 1              # Tick scale 0 = us, 1 = ms, 2 = s
-        self.leftBound_tks = 0          # Smallest time value of the visible trace
-        self.rightBound_tks = 50000     # Largest time value of the visible trace (50 ms)
-        self.oldLeftBound_tks = 0       # Last value of leftBound_tks before the view was updated 
-        self.oldRightBound_tks = 0      # Last value of rightBound_tks before the view was updated
-        self.zoomFactor = 1.2           # Factor used to compute zoom areas
-        self.zoomMax = 50               # Maximum zoom level 50us
-        self.zoomMin = 0                # Minimum zoom level, this is set to the last trace event.
-        self.moveView = False           # Flag to indicate that the view is moved
-        self.moveInitialX = 0           # Initial X-position if the view is moved
+        self.sizeX_px = 0                                       # Width of the canvas
+        self.view_tks = 0                                       # Length of the visible interval in time ticks
+        self.tickScale = 1                                      # Tick scale 0 = us, 1 = ms, 2 = s
+        self.leftBound_tks = 0                                  # Smallest time value of the visible trace
+        self.rightBound_tks = 50000                             # Largest time value of the visible trace (50 ms)
+        self.oldLeftBound_tks = 0                               # Last value of leftBound_tks before the view was updated 
+        self.oldRightBound_tks = 0                              # Last value of rightBound_tks before the view was updated
+        self.zoomFactor = 1.2                                   # Factor used to compute zoom areas
+        self.zoomMax = 50                                       # Maximum zoom level 50us
+        self.zoomMin = 0                                        # Minimum zoom level, this is set to the last trace event.
+        self.moveView = False                                   # Flag to indicate that the view is moved
+        self.moveInitialX = 0                                   # Initial X-position if the view is moved
+        self.coreColors = [(98, 152, 210), (51, 156, 156)]        # Colors to indicate that a task executes on a CPU, used if the trace contains more than one CPU
+        self.cores = 1                                           # Number of cores in the trace (will be set automatically)
 
         self.ctk_textbox_scrollbar = customtkinter.CTkScrollbar(self, command=self.yview)
         self.ctk_textbox_scrollbar.place(relx=1,rely=0,relheight=1,anchor='ne')
@@ -62,9 +64,10 @@ class TraceView(customtkinter.CTkCanvas):
             # Find the maximum time to display in ticks
             self.rightBound_tks = 0
             for task in self.tasks:
-                if task.id > 100:   # We are only interested in user tasks (all ISR task id < 100).
+                if task.id > 200:   # We are only interested in user tasks (all ISR task id < 100).
                     if task.jobs[-1].getFinishTime() > self.rightBound_tks:
-                        self.rightBound_tks = task.jobs[-1].getFinishTime()
+                        if task.name[:4] != 'IDLE':
+                            self.rightBound_tks = task.jobs[-1].getFinishTime()
 
                 # Get the width of the task name on the canvas. We need to make sure that the legend width is large enough to hold the task name.
                 tmpElement = self.create_text(200, 200, anchor=customtkinter.N, text=task.name) # Create the text
@@ -78,11 +81,26 @@ class TraceView(customtkinter.CTkCanvas):
             self.rightBound_tks = self.rightBound_tks + 1000 
             self.zoomMin = self.rightBound_tks
 
+            # Check how many cores are used in the trace. If there is one core, the task colors are used. If there are multiple cores, 
+            # one color is used per core. 
+            coresFound = []
+            for task in self.tasks:
+                for job in task.jobs:
+                    for exec in job.execIntervals:
+                        if exec.core not in coresFound:
+                            coresFound.append(exec.core)
+            
+            self.cores = len(coresFound)
+
+            # Make sure that enough core colors are specified
+            assert max(coresFound) <= len(self.coreColors) - 1
+
         else:
             # If there is no task, reset bounds and legend width to default values.
             self.leftBound_tks = 0
             self.rightBound_tks = 50000
             self.legend_px = 90
+            self.core = 1
             self.clearTrace()
 
     def clearTrace(self):
@@ -177,7 +195,7 @@ class TraceView(customtkinter.CTkCanvas):
 
         if self.leftBound_tks <= job.releaseTime and self.rightBound_tks >= job.releaseTime:
             # Draw the release arrow if this is not an ISR
-            if task.id > 100:
+            if task.id > 200:
                 if task.name[:4] != 'IDLE': # Idle tasks don't have jobs.
                     rel_px = self.tickToPixel(job.releaseTime)
                     self.canvasItems.append(self.create_line(rel_px, y, rel_px, y - self.releaseArrowLength_px, arrow=customtkinter.LAST, arrowshape=(self.releaseArrowH_px, self.releaseArrowH_px, self.releaseArrowD_px / 2), width=self.releaseArrowWidth_px))
@@ -207,7 +225,12 @@ class TraceView(customtkinter.CTkCanvas):
                     execeWidth_px = 1  # Minimum with of an execution segment on the trace is 1px
                 
                 # Draw the execution on the trace
-                self.canvasItems.append(self.create_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = task.taskColor))
+                if self.cores == 1:
+                    color = task.taskColor
+                else:
+                    color = '#%02X%02X%02X' % (self.coreColors[interval.core][0],self.coreColors[interval.core][1],self.coreColors[interval.core][2])
+
+                self.canvasItems.append(self.create_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = color))
     
     def updateVisibleJobs(self, task):
         """

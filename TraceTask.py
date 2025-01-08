@@ -34,7 +34,8 @@ class TraceJob():
         self.releaseTime = releaseTime      # Stores the release time of the job
         self.deadline = deadline            # Stores the deadline of the job
         self.activeInterval = None          # Stores the current execution interval (i.e. this interval is not complete)
-    
+        self.incomplete = False             # A flag to indicate if this job was stopped before completion (i.e. cut at the end of the trace)
+
     def __str__(self) -> str:
         return self.task.name + "-" + str(self.id)
 
@@ -152,6 +153,17 @@ class TraceTask():
         Finish this job.
         """
         assert self.currentJob != None
+        self.jobs.append(self.currentJob)
+        self.currentJob = None
+
+    def finishJobIncomplete(self):
+        """
+        Finish this job as incomplete.
+        This happens at the end of the trace. 
+        We distingush those jobs from complete jobs to be able to exclude those from statistics.
+        """
+        assert self.currentJob != None
+        self.currentJob.incomplete = True
         self.jobs.append(self.currentJob)
         self.currentJob = None
 
