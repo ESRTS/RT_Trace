@@ -10,13 +10,13 @@
 /**
  * Set the platform that is used.
  */
-#define TRACE_STM32L476RG
-//#define TRACE_PICO2
+//#define TRACE_STM32L476RG
+#define TRACE_PICO2
 
 /**
  * Size of the trace buffer for each core, in uint32_t. 
  */
-#define TRACE_BUFFER_SIZE 1000
+#define TRACE_BUFFER_SIZE 500
 
 /**
  * Enable this to trace IRQ enter/exit
@@ -50,7 +50,6 @@
 
 // Not yet supported
 /*
-#define TRACE_EVTID_ISR_TO_SCHEDULER    (18u)
 #define TRACE_EVTID_TIMER_ENTER         (19u)
 #define TRACE_EVTID_TIMER_EXIT          (20u)
 #define TRACE_EVTID_STACK_INFO          (21u)

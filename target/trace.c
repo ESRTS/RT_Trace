@@ -7,6 +7,10 @@
 #include "stm32l4xx_hal.h"
 #include "core_cm4.h"
 #endif
+#ifdef TRACE_PICO2
+#include "pico/stdlib.h"
+#include "pico/sync.h"
+#endif
 
 /****************************************************************************************************************
  * Variable declarations. For multiple cores, each core has its own copies.
@@ -244,8 +248,12 @@ uint32_t trace_encodeTime(uint16_t event) {
 	if (*enabled == false) return 0;                    					/* Only increment the timestamps if treacing is still enabled. */
 
 	uint64_t* lastTs = getLastTimestamp();              					/* Get the timestamp of the last event that was written */
+#ifdef TRACE_STM32L476RG
 	uint64_t ts = timer_time_us_64();          								/* 1us timestamp, can be accessed from both cores */
-
+#endif
+#ifdef TRACE_PICO2
+	uint64_t ts = timer_time_us_64(timer0_hw);          					/* 1us timestamp, can be accessed from both cores */
+#endif
 	uint16_t delta = ((ts - *lastTs) & 0xffff);
 	*lastTs = ts;
 
