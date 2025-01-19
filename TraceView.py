@@ -65,9 +65,13 @@ class TraceView(customtkinter.CTkCanvas):
             self.rightBound_tks = 0
             for task in self.tasks:
                 if task.id > 200:   # We are only interested in user tasks (all ISR task id < 100).
-                    if task.jobs[-1].getFinishTime() > self.rightBound_tks:
-                        if task.name[:4] != 'IDLE':
-                            self.rightBound_tks = task.jobs[-1].getFinishTime()
+                   
+                    lastExecution = self.findLastExecution(task)
+
+                    if lastExecution != None:
+                        if lastExecution > self.rightBound_tks:
+                            if task.name[:4] != 'IDLE':
+                                self.rightBound_tks = lastExecution
 
                 # Get the width of the task name on the canvas. We need to make sure that the legend width is large enough to hold the task name.
                 tmpElement = self.create_text(200, 200, anchor=customtkinter.N, text=task.name) # Create the text
@@ -175,6 +179,10 @@ class TraceView(customtkinter.CTkCanvas):
         """
         start_px = self.tickToPixel(job.getStartTime())
         finish_px = self.tickToPixel(job.getFinishTime())
+
+        if start_px == None and finish_px == None:
+            start_px = 0
+            finish_px = 0
 
         windowStart_px = self.tickToPixel(self.leftBound_tks)
         windowStop_px = self.tickToPixel(self.rightBound_tks)
@@ -384,6 +392,9 @@ class TraceView(customtkinter.CTkCanvas):
         """
         This function converts a tick time value into it's respective pixel x-coordinate on the canvas.
         """
+        if tick == None:
+            return None
+        
         plotWidth = self.sizeX_px - self.borderX_px - self.borderX_px - self.legend_px
         plotXOffset = self.borderX_px + self.legend_px
 
@@ -476,3 +487,12 @@ class TraceView(customtkinter.CTkCanvas):
         Function stops the sequence to move the view.
         """
         self.moveView = False
+
+    def findLastExecution(self, task):
+        id = len(task.jobs) - 1
+        
+        while id >= 0:
+            if task.jobs[id].getFinishTime() != None:
+                return task.jobs[id].getFinishTime()
+            id = id - 1
+        return None
