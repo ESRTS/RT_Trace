@@ -25,6 +25,7 @@ TRACE_ISR_ENTER                 = 10
 TRACE_ISR_EXIT                  = 11
 TRACE_ISR_EXIT_TO_SCHEDULER     = 12
 TRACE_DELAY                     = 13
+TRACE_TIME_ZERO                 = 14
 
 # Those events are not in the original trace and are created during parsing
 TRACE_IDLE_START                = 20
@@ -43,7 +44,8 @@ eventMap = {
     TRACE_ISR_ENTER : "TRACE_ISR_ENTER",
     TRACE_ISR_EXIT : "TRACE_ISR_EXIT",
     TRACE_ISR_EXIT_TO_SCHEDULER : "TRACE_ISR_EXIT_TO_SCHEDULER",
-    TRACE_DELAY : "TRACE_DELAY"
+    TRACE_DELAY : "TRACE_DELAY",
+    TRACE_TIME_ZERO : "TRACE_TIME_ZERO"
 }
 """
 ISR's have specific task id's (the ISR id). Those are not registered in the trace itself.
@@ -162,6 +164,22 @@ def extractTraceInfo(events, eventFilePath, tickIds):
     """
     tasks = []
 
+    traceStart = None
+
+    # Check if there is a TRACE_TIME_ZERO. If so, set trace start (i.e. t=0) to the first tick before the event.
+    for evt in events:
+        if evt.get('type') == TRACE_TIME_ZERO:
+            core = evt.get('core')
+            
+            index = events.index(evt)
+            tmpList = events[0:index]
+            for tve in reversed(tmpList):
+                if tve.get('type') == TRACE_ISR_ENTER:
+                    if tve.get('irqId') == 15:
+                        traceStart = tve.get('ts')
+                        break
+            break
+
     # Create tasks to represent the scheduler, tick ISR for each core.
     if len(tickIds) == 1:
         # Exclude the core in the name if there is only one core
@@ -174,8 +192,6 @@ def extractTraceInfo(events, eventFilePath, tickIds):
             tasks.append(TraceTask(schedulerId + coreId, "Scheduler Core " + str(coreId), None, getTaskColor(schedulerId + coreId)))
             coreId = coreId + 1
 
-    traceStart = None
-
     # All other tasks are parsed from the trace events. 
     for evt in events:
         if evt.get('type') is TRACE_TASK_CREATE:    # Parse all task create events and create trace tasks for each.
@@ -185,7 +201,7 @@ def extractTraceInfo(events, eventFilePath, tickIds):
             name = evt.get('name').split('\x00', 1)[0]
             tmpTask = TraceTask(id, name, prio, getTaskColor(id))
             tasks.append(tmpTask)
-        if evt.get('type') is TRACE_TASK_START_READY:   # We set the trace time t=0 to the first task ready event.
+        if evt.get('type') is TRACE_TASK_START_READY:   # We set the trace time t=0 to the first task ready event (if no TRACE_TIME_ZERO event was found).
             if traceStart is None:
                 traceStart = evt.get('ts')  # By convention we set the start of the first task to t=0
 
@@ -395,6 +411,10 @@ class EventParser:
         elif eventId == TRACE_DELAY:
             delayTime = self.readInteger()
             evt = {'type':TRACE_DELAY, 'ts':self.time, 'core':coreId, 'delayTime':delayTime} 
+        
+        elif eventId == TRACE_TIME_ZERO:
+            evt = {'type':TRACE_TIME_ZERO, 'ts':self.time, 'core':coreId} 
+
         else:
             #print("ERROR Unknown Event!")
             evt = None
@@ -471,7 +491,7 @@ def smParser(traceStart, sortedEvents, allTasks, numCores):
     for evt in sortedEvents:
         core = evt.get('core')
         type = evt.get('type')
-        ts = evt.get('ts')# - traceStart
+        ts = evt.get('ts') - traceStart
 
         #STATE_IDLE####################################################################################
         # The idle task is executing.
@@ -546,6 +566,8 @@ def smParser(traceStart, sortedEvents, allTasks, numCores):
                 task = findTaskById(tasks, evt.get('taskId'))
                 task.newJob(ts, None)                                                                               # Release a new job for this task
                 # Remain in the same state
+            elif type == TRACE_TIME_ZERO:
+                pass # Nothing to do here...
             else:
                 print("Unexpected event in state STATE_TASK: " + str(type), file=sys.stderr)
         #STATE_IRQ#####################################################################################
