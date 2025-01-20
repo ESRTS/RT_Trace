@@ -36,7 +36,11 @@ class TraceApp(customtkinter.CTk):
         self.ps2pdf_path = config.get('general','ps2pdf_path', fallback = '/usr/local/bin')
 
         ''' Set the default size of the GUI window and give it a name. '''
-        self.geometry(str(self.winfo_screenwidth()) + "x600")
+        self.windowSizeY = 600
+        self.windowSizeX = self.winfo_screenwidth()
+        self.maxScreenSizeY = self.winfo_screenheight()
+
+        self.geometry("{}x{}".format(self.windowSizeX, self.windowSizeY))
         self.minsize(800, 400)
         self.title("RT-Trace View")
 

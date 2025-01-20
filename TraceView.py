@@ -39,8 +39,9 @@ class TraceView(customtkinter.CTkCanvas):
         self.zoomMin = 0                                        # Minimum zoom level, this is set to the last trace event.
         self.moveView = False                                   # Flag to indicate that the view is moved
         self.moveInitialX = 0                                   # Initial X-position if the view is moved
-        self.coreColors = [(98, 152, 210), (51, 156, 156)]        # Colors to indicate that a task executes on a CPU, used if the trace contains more than one CPU
-        self.cores = 1                                           # Number of cores in the trace (will be set automatically)
+        self.coreColors = [(98, 152, 210), (51, 156, 156)]      # Colors to indicate that a task executes on a CPU, used if the trace contains more than one CPU
+        self.cores = 1                                          # Number of cores in the trace (will be set automatically)
+        self.gui = master                                       # GUI instance, needed to change the Y-dimension to fit the trace.
 
         self.ctk_textbox_scrollbar = customtkinter.CTkScrollbar(self, command=self.yview)
         self.ctk_textbox_scrollbar.place(relx=1,rely=0,relheight=1,anchor='ne')
@@ -154,6 +155,8 @@ class TraceView(customtkinter.CTkCanvas):
             self.paintLegend()
         
         self.configure(scrollregion = (0,0,100,traceHeight))
+
+        self.updateWindowHeight(traceHeight)
 
     def paintLegend(self):
         """
@@ -496,3 +499,12 @@ class TraceView(customtkinter.CTkCanvas):
                 return task.jobs[id].getFinishTime()
             id = id - 1
         return None
+    
+    def updateWindowHeight(self, traceHeight):
+
+        newHeight = traceHeight + 310
+        if newHeight <= self.gui.maxScreenSizeY:
+            self.gui.windowSizeY = newHeight
+        else:
+            self.gui.windowSizeY = self.gui.maxScreenSizeY
+        self.gui.geometry("{}x{}".format(self.gui.windowSizeX, self.gui.windowSizeY))
