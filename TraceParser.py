@@ -65,6 +65,8 @@ every time a color is assigned to a task. The index wraps around if it reaches t
 taskColorIndex = 0
 taskColors = [(100, 237, 157), (100, 143, 237), (212, 237, 76), (237, 123, 100), (141, 100, 237)]
 
+enable_event_print = False
+
 def getTaskColor(taskId):
     """
     Function returns the task colors for the trace. The colors are selected in sequence from the list, wrapping around when the end of the list is reached. 
@@ -88,6 +90,10 @@ def parseTraceFiles(gui, numCores):
     To not block the GUI, this is done in a separate thread.
     """
     global taskColorIndex
+    global enable_event_print
+
+    #enable_event_print = gui.printEvents_var.get()
+
     taskColorIndex = 0      # Reset the task color index, so we always start with the same task color assignments.
     thread = Thread(target = parser_thread, args = (gui, numCores))
     thread.start()
@@ -497,7 +503,7 @@ def smParser(traceStart, sortedEvents, allTasks, numCores):
         # The idle task is executing.
         if state[core] == STATE_IDLE:
             if type == TRACE_ISR_ENTER:
-                print("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_IDLE - Evt: TRACE_ISR_ENTER] Stopping Idle Task, starting ISR " + str(evt.get('irqId')) + ".")
+                eventPrint("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_IDLE - Evt: TRACE_ISR_ENTER] Stopping Idle Task, starting ISR " + str(evt.get('irqId')) + ".")
                 idleTask[core].stopExec(ts)                                                                        # Finish the execution of the idle task
                 idleTask[core].finishJob()
                 
@@ -512,7 +518,7 @@ def smParser(traceStart, sortedEvents, allTasks, numCores):
                 state[core] = STATE_IRQ                                                                            # Set next state
             elif type == TRACE_TASK_START_EXEC:
                 # This seems to happen only once in the SMP version of FreeRTOS at startup.
-                print("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_IDLE - Evt: TRACE_TASK_START_EXEC] Stopping Idle Task, starting task " + findTaskById(tasks, evt.get('taskId')).name + ".")
+                eventPrint("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_IDLE - Evt: TRACE_TASK_START_EXEC] Stopping Idle Task, starting task " + findTaskById(tasks, evt.get('taskId')).name + ".")
                 idleTask[core].stopExec(ts)                                                                        # Finish the execution of the idle task
                 idleTask[core].finishJob()
 
@@ -525,16 +531,16 @@ def smParser(traceStart, sortedEvents, allTasks, numCores):
         # One of the 'normal' tasks are executing
         elif state[core] == STATE_TASK:
             if type == TRACE_DELAY_UNTIL:
-                print("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_TASK - Evt: TRACE_DELAY_UNTIL] Setting delay until flag for task " + running[core].name + ".")
+                eventPrint("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_TASK - Evt: TRACE_DELAY_UNTIL] Setting delay until flag for task " + running[core].name + ".")
                 running[core].delayUntil = True                                                                    # Set the flag to indicate that this job is about to finish
                 running[core].setCurrentJobDeadline(running[core].currentJob.releaseTime + evt.get('timeToWake'))  # Now we can also set the job's deadline by adding the time of the next release to its release time 
                 # Remain in the same state
             elif type == TRACE_DELAY:
-                print("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_TASK - Evt: TRACE_DELAY] Setting delay until flag for task " + running[core].name + ".")
+                eventPrint("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_TASK - Evt: TRACE_DELAY] Setting delay until flag for task " + running[core].name + ".")
                 running[core].delayUntil = True  
                 # Remain in the same state
             elif type == TRACE_ISR_ENTER:
-                print("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_TASK - Evt: TRACE_ISR_ENTER] Stopping task " + running[core].name + " and starting tick.")
+                eventPrint("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_TASK - Evt: TRACE_ISR_ENTER] Stopping task " + running[core].name + " and starting tick.")
                 running[core].stopExec(ts)                                                                         # Stop the execution of the task
                 beforeIsr[core] = running[core]
 
@@ -547,7 +553,7 @@ def smParser(traceStart, sortedEvents, allTasks, numCores):
 
                 state[core] = STATE_IRQ # Set next state to IRQ
             elif type == TRACE_TASK_STOP_EXEC:
-                print("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_TASK - Evt: TRACE_TASK_STOP_EXEC] Stopping task " + running[core].name + " delayUntilFlag: " + str(running[core].delayUntil))
+                eventPrint("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_TASK - Evt: TRACE_TASK_STOP_EXEC] Stopping task " + running[core].name + " delayUntilFlag: " + str(running[core].delayUntil))
                 running[core].stopExec(ts)                                                                          # Stop the execution of the task
                 if running[core].delayUntil is True:                                                                # If the delayUntil flag is set, finish the job
                     running[core].finishJob()
@@ -562,7 +568,7 @@ def smParser(traceStart, sortedEvents, allTasks, numCores):
                                           )
                 state[core] = STATE_SCHEDULER # Set next state to SCHEDULER
             elif type == TRACE_TASK_START_READY:
-                print("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_TASK - Evt: TRACE_TASK_START_READY] Release job of task " + findTaskById(tasks, evt.get('taskId')).name + ".")
+                eventPrint("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_TASK - Evt: TRACE_TASK_START_READY] Release job of task " + findTaskById(tasks, evt.get('taskId')).name + ".")
                 task = findTaskById(tasks, evt.get('taskId'))
                 task.newJob(ts, None)                                                                               # Release a new job for this task
                 # Remain in the same state
@@ -574,12 +580,12 @@ def smParser(traceStart, sortedEvents, allTasks, numCores):
         # An interrupt is executing
         elif state[core] == STATE_IRQ:
             if type == TRACE_TASK_START_READY:
-                print("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_IRQ - Evt: TRACE_TASK_START_READY] Release job of task " + findTaskById(tasks, evt.get('taskId')).name + ".")
+                eventPrint("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_IRQ - Evt: TRACE_TASK_START_READY] Release job of task " + findTaskById(tasks, evt.get('taskId')).name + ".")
                 task = findTaskById(tasks, evt.get('taskId'))
                 task.newJob(ts, None)                                                                               # Release a new job for this task
                 # Remain in the same state
             elif type == TRACE_ISR_EXIT_TO_SCHEDULER:
-                print("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_IRQ - Evt: TRACE_ISR_EXIT_TO_SCHEDULER] Stop tick task and start scheduler.")
+                eventPrint("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_IRQ - Evt: TRACE_ISR_EXIT_TO_SCHEDULER] Stop tick task and start scheduler.")
                 tick[core].stopExec(ts)                                                                             # Finish the execution of the ISR. (For now we assume there is only the tick ISR!)
                 tick[core].finishJob()
 
@@ -587,7 +593,7 @@ def smParser(traceStart, sortedEvents, allTasks, numCores):
                 scheduler[core].startExec(ts, core, ExecutionType.EXECUTE)
                 state[core] = STATE_SCHEDULER # Set next state to SCHEDULER
             elif type == TRACE_ISR_EXIT:
-                print("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_IRQ - Evt: TRACE_ISR_EXIT] Stop tick task and start task " + beforeIsr[core].name + ".")
+                eventPrint("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_IRQ - Evt: TRACE_ISR_EXIT] Stop tick task and start task " + beforeIsr[core].name + ".")
                 tick[core].stopExec(ts)                                                                             # Finish the execution of the ISR. (For now we assume there is only the tick ISR!)
                 tick[core].finishJob()
 
@@ -599,7 +605,7 @@ def smParser(traceStart, sortedEvents, allTasks, numCores):
                     beforeIsr[core].startExec(ts, core, ExecutionType.EXECUTE) 
                     state[core] = STATE_IDLE                                                                        # Set next state to IDLE
                 else:
-                    print("Unexpected task before ISR: " + beforeIsr[core].name, file=sys.stderr)
+                    eventPrint("Unexpected task before ISR: " + beforeIsr[core].name, file=sys.stderr)
                 beforeIsr[core] = None
                 
             else:
@@ -608,7 +614,7 @@ def smParser(traceStart, sortedEvents, allTasks, numCores):
         # The scheduler is currently executing
         elif state[core] == STATE_SCHEDULER:
             if type == TRACE_IDLE:
-                print("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_SCHEDULER - Evt: TRACE_IDLE] Stop scheduler and start idle task.")
+                eventPrint("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_SCHEDULER - Evt: TRACE_IDLE] Stop scheduler and start idle task.")
                 # Start the idle task
                 scheduler[core].stopExec(ts)                                                                        # Finish the execution of the scheduler on this core
                 scheduler[core].finishJob()
@@ -618,7 +624,7 @@ def smParser(traceStart, sortedEvents, allTasks, numCores):
                 
                 state[core] = STATE_IDLE                                                                            # Set next state to IDLE
             elif type == TRACE_TASK_STOP_EXEC:
-                print("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_SCHEDULER - Evt: TRACE_TASK_STOP_EXEC] Remove the task " + running[core].name + " as running task.")
+                eventPrint("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_SCHEDULER - Evt: TRACE_TASK_STOP_EXEC] Remove the task " + running[core].name + " as running task.")
 
                 running[core] = None                                                                                # No task running on the core. The task execution is already stopped when transitioning into the scheduler state or before
                 # Remain in the same state
@@ -626,11 +632,11 @@ def smParser(traceStart, sortedEvents, allTasks, numCores):
                 
                 task = findTaskById(tasks, evt.get('taskId'))
                 if task is not None:
-                    print("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_SCHEDULER - Evt: TRACE_TASK_START_READY] Release job of task " + findTaskById(tasks, evt.get('taskId')).name + ".")
+                    eventPrint("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_SCHEDULER - Evt: TRACE_TASK_START_READY] Release job of task " + findTaskById(tasks, evt.get('taskId')).name + ".")
                     task.newJob(ts, None)                                                                           # Start a new job for this task
                 # Remain in the same state
             elif type == TRACE_TASK_START_EXEC:
-                print("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_SCHEDULER - Evt: TRACE_TASK_START_EXEC] Stop the execution of the scheduler and start execution of task " + findTaskById(tasks, evt.get('taskId')).name + ".")
+                eventPrint("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_SCHEDULER - Evt: TRACE_TASK_START_EXEC] Stop the execution of the scheduler and start execution of task " + findTaskById(tasks, evt.get('taskId')).name + ".")
                 scheduler[core].stopExec(ts)                                                                        # Finish the execution oft he scheduler on this core
                 scheduler[core].finishJob()
 
@@ -638,7 +644,7 @@ def smParser(traceStart, sortedEvents, allTasks, numCores):
                 running[core].startExec(ts, core, ExecutionType.EXECUTE)
                 state[core] = STATE_TASK                                                                            # Set next state to TASK
             elif type == TRACE_TASK_CREATE:
-                print("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_SCHEDULER - Evt: TRACE_TASK_CREATE] .")
+                eventPrint("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_SCHEDULER - Evt: TRACE_TASK_CREATE] .")
                 # Nothing to do here...
                 pass
             else:
@@ -654,6 +660,11 @@ def smParser(traceStart, sortedEvents, allTasks, numCores):
                 task.stopExec(ts)
             task.finishJobIncomplete()
 
+def eventPrint(*args, **kwargs):
+    global enable_event_print
+    if enable_event_print:
+        return print(*args, **kwargs)
+    
 if __name__ == "__main__":
     """
     Debugging.

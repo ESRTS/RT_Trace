@@ -91,6 +91,18 @@ class TraceApp(customtkinter.CTk):
         self.traceView = TraceView(self)
         self.traceView.grid(row=0, column=1, rowspan=3, columnspan=1, sticky="nswe", padx=5, pady=5)
 
+        ''' Print Events Switch '''
+       #self.printEvents_var = customtkinter.BooleanVar(value=False)
+       # self.switch = customtkinter.CTkSwitch(self.sidebar_frame, text="Print Events", command=self.printEventsSwitch_event,
+       #                          variable=self.printEvents_var, onvalue=True, offvalue=False)
+       # self.switch.grid(row=4, column=0, padx=20, pady=5, sticky="ew")
+
+        ''' Show System Tasks Switch '''
+       # self.showSysTasks_var = customtkinter.BooleanVar(value=True)
+       # self.switch = customtkinter.CTkSwitch(self.sidebar_frame, text="Show System Tasks", command=self.showSystemTasks_event,
+       #                          variable=self.showSysTasks_var, onvalue=True, offvalue=False)
+       # self.switch.grid(row=5, column=0, padx=20, pady=5, sticky="ew")
+
         ''' Bind the key handler function. '''
         self.bind("<Key>", self.keyHandler)
 
@@ -104,6 +116,12 @@ class TraceApp(customtkinter.CTk):
 
         ''' Print the requirement string for the initially selected target. '''
         print(self.targets[self.selectedTarget].get('requirement_str'))
+
+    def printEventsSwitch_event(self):
+        pass
+
+    def showSystemTasks_event(self):
+        pass
 
     def resize_window_function(self, event):
         """
