@@ -37,13 +37,22 @@
 uint32_t __attribute__((section(".traceRAMsection"))) traceBuffer[TRACE_BUFFER_SIZE];
 #endif
 #ifdef TRACE_PICO2
+#ifndef PICO_USE_PSRAM
 /**
  * The trace buffer for each core is allocated in SRAM banks 8 and 9, respectively.
  * This way there is no access conflicts between the two cores.
  */
 static uint32_t __scratch_x("traceBufferCore0") traceBuffer_core0[TRACE_BUFFER_SIZE];
 static uint32_t __scratch_y("traceBufferCore1") traceBuffer_core1[TRACE_BUFFER_SIZE];
-#endif
+#else
+/**
+ * If PSRAM is available, the buffer is stored in PSRAM. This way the latency to create 
+ * trace events is larger, but the buffer is significantly larger as well.
+ */
+static uint32_t *traceBuffer_core0 = (uint32_t*)0x15000000; /* PSRAM access without cache! */
+static uint32_t *traceBuffer_core1 = (uint32_t*)(0x15000000 + (TRACE_BUFFER_SIZE * 4)); /* Start of the second buffer in PSRAM, access without cache. */
+#endif /* PICO_USE_PSRAM */
+#endif /* TRACE_PICO2 */
 
 /**
  * @brief Index to the next free element in the trace buffer for each core.

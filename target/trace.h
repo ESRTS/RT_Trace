@@ -2,32 +2,18 @@
 #define TRACE_H
 
 #include "stdint.h"
-
-/****************************************************************************************************************
- * Variable declarations. For multiple cores, each core has its own copies.
- ****************************************************************************************************************/
-
-/**
- * Set the platform that is used.
- */
-//#define TRACE_STM32L476RG
-#define TRACE_PICO2
+#include "traceConfig.h"
 
 /**
  * Size of the trace buffer for each core, in uint32_t. 
  */
+#ifndef PICO_USE_PSRAM
+/* Use 2KB of SRAM in scratchpad memory for each core. */
 #define TRACE_BUFFER_SIZE 500
-
-/**
- * Enable this to trace IRQ enter/exit
- */
-#define TRACE_ENABLE_IRQ_TRACE
-
-/** 
- * Enable this to trace idle events
- */
-#define TRACE_ENABLE_IDLE_TRACE
-
+#else
+/* Use 2MB of PSRAM for each core. */
+#define TRACE_BUFFER_SIZE 500000
+#endif /* PICO_USE_PSRAM */
 /****************************************************************************************************************
  * Defines and function declarations.
  ****************************************************************************************************************/
