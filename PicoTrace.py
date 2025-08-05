@@ -16,8 +16,21 @@ Usually this happens if the target is not connected. We check this variable in t
 before trying to connect to openocd via telnet.
 """
 errorMsg = None
+configName = ""
 
 def loadPico2TraceBuffers(gui):
+    global configName 
+    configName = "Pico2_FreeRTOS"
+    loadPico2TraceBuffersUniversal(gui)
+
+def loadPico2TraceBuffersPSRAM(gui):
+    global configName 
+    configName = "Pico2_FreeRTOS_PSRAM"
+    loadPico2TraceBuffersUniversal(gui)
+
+def loadPico2TraceBuffersUniversal(gui):
+
+    
 
     thread = Thread(target = pico_thread, args = (gui,))
     thread.start()
@@ -102,26 +115,32 @@ def readTraceBuffers():
     openocd stderr to indicate that something went wrong before starting the telnet session.
     """
     global errorMsg
-    
+    global configName 
+
     # Read the configuration from the ini-file
     config = configparser.ConfigParser()
     config.read(FileHelper.getConfigFilePath())
-    size = config.get('Pico2_FreeRTOS','bufferSize', fallback = '2000')
+    size = config.get(configName,'bufferSize', fallback = '2000')
     print("Size is: " + str(size))
-    buffer0 = config.get('Pico2_FreeRTOS','buffer0', fallback = '0x2008001c') #"0x2008001c"  # SRAM8_BASE
-    buffer1 = config.get('Pico2_FreeRTOS','buffer1', fallback = '0x2008100c') #"0x2008100c"  # SRAM9_BASE
-    openocdPath = config.get('Pico2_FreeRTOS','openocd_path', fallback = '/usr/local/bin') 
+    buffer0 = config.get(configName,'buffer0', fallback = '0x2008001c') #"0x2008001c"  # SRAM8_BASE
+    buffer1 = config.get(configName,'buffer1', fallback = '0x2008100c') #"0x2008100c"  # SRAM9_BASE
+    openocdPath = config.get(configName,'openocd_path', fallback = '/usr/local/bin') 
 
     traceBuffer = []
 
     my_env = os.environ.copy()
     my_env["PATH"] = f"{my_env['PATH']}:{openocdPath}" # This is not final, a config file for the openocd path should be added
     
-    debugger = subprocess.Popen([r"openocd",
+    command = [r'{}'.format(os.path.join(openocdPath, "openocd")),
+            "-s", r'{}'.format(os.path.join(openocdPath, "scripts")),
             "-f", r"interface/cmsis-dap.cfg",
             "-f", r"target/rp2350.cfg",
-            "-c", "telnet_port 4444",
-            "-c", "adapter speed 4000"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, bufsize=1, text=True, env=my_env)
+            "-c", r"telnet_port 4444",
+            "-c", r"adapter speed 4000"]
+    
+    printCommand(command)
+
+    debugger = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, bufsize=1, text=True, env=my_env)
     
     # A thread to read stderr and print it in the textbox
     stderrThread = Thread(target = textRedirectErrThread, args = (debugger,))
@@ -199,7 +218,16 @@ def read_data(tel):
     Helper function to read a response from telnet.
     """
     return tel.read_until(b">", 5)
-    
+
+def printCommand(command):
+    """
+    Helper function to print a command list.
+    """
+
+    for element in command:
+        print(element + " ", end='')
+    print("")
+
 if __name__ == "__main__":
     """
     Debugging.
