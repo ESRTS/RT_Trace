@@ -168,7 +168,7 @@ def readTraceBuffers():
 
     sleep(0.25)
     tmpCmd = "read_memory " + buffer0 + " " + str(8) + " " + str(size)
-    #print("Send Command: " + tmpCmd)
+    print("Telnet: " + tmpCmd)
     tmpCore0 = cmd(tel, tmpCmd).decode("utf-8")
 
     lines = tmpCore0.splitlines()
@@ -185,7 +185,7 @@ def readTraceBuffers():
     traceBuffer.append(dataCore0)
 
     tmpCmd = "read_memory " + buffer1 + " " + str(8) + " " + str(size)
-    #print("Send Command: " + tmpCmd)
+    print("Telnet: " + tmpCmd)
     tmpCore1 = cmd(tel, tmpCmd).decode("utf-8")
 
     lines = tmpCore1.splitlines()
@@ -202,7 +202,9 @@ def readTraceBuffers():
     traceBuffer.append(dataCore1)
 
     tel.close()
+    print("Closing Telnet session")
     debugger.terminate()
+    print("Closing OpenOCD session")
 
     return traceBuffer
 

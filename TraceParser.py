@@ -65,7 +65,15 @@ every time a color is assigned to a task. The index wraps around if it reaches t
 taskColorIndex = 0
 taskColors = [(100, 237, 157), (100, 143, 237), (212, 237, 76), (237, 123, 100), (141, 100, 237)]
 
+"""
+Set to True to print state machine events when parsing execution.
+"""
 enable_event_print = False
+
+"""
+Set to true to print events read from the trace buffer.
+"""
+enable_entry_print = False
 
 def getTaskColor(taskId):
     """
@@ -357,68 +365,90 @@ class EventParser:
         self.time = self.time + deltaTime # Compute the current timestamp in absolute time
         
         if eventId == TRACE_IDLE:
-            #print("[t=" + str(self.time) + "us] TRACE_IDLE" + " Core: " + str(coreId))
+            entryPrint("[t=" + str(self.time) + "us] TRACE_IDLE" + " Core: " + str(coreId))
             evt = {'type':TRACE_IDLE, 'ts':self.time, 'core':coreId}
 
         elif eventId == TRACE_TASK_START_EXEC:
             taskId = self.readInteger()
-            #print("[t=" + str(self.time) + "us] TRACE_TASK_START_EXEC  -> taskId: " + str(taskId) + " Core: " + str(coreId))
+            if taskId is None:
+                return None
+            entryPrint("[t=" + str(self.time) + "us] TRACE_TASK_START_EXEC  -> taskId: " + str(taskId) + " Core: " + str(coreId))
             evt = {'type':TRACE_TASK_START_EXEC, 'ts':self.time, 'core':coreId, 'taskId':taskId}
 
         elif eventId == TRACE_TASK_STOP_EXEC:
             taskId = self.readInteger()
-            #print("[t=" + str(self.time) + "us] TRACE_TASK_STOP_EXEC   -> taskId: " + str(taskId) + " Core: " + str(coreId))
+            if taskId is None:
+                return None
+            entryPrint("[t=" + str(self.time) + "us] TRACE_TASK_STOP_EXEC   -> taskId: " + str(taskId) + " Core: " + str(coreId))
             evt = {'type':TRACE_TASK_STOP_EXEC, 'ts':self.time, 'core':coreId, 'taskId':taskId}
 
         elif eventId == TRACE_TASK_START_READY:
             taskId = self.readInteger()
-            #print("[t=" + str(self.time) + "us] TRACE_TASK_START_READY -> taskId: " + str(taskId) + " Core: " + str(coreId))
+            if taskId is None:
+                return None
+            entryPrint("[t=" + str(self.time) + "us] TRACE_TASK_START_READY -> taskId: " + str(taskId) + " Core: " + str(coreId))
             evt = {'type':TRACE_TASK_START_READY, 'ts':self.time, 'core':coreId, 'taskId':taskId}
 
         elif eventId == TRACE_TASK_STOP_READY:
             taskId = self.readInteger()
-            #print("[t=" + str(self.time) + "us] TRACE_TASK_STOP_READY  -> taskId: " + str(taskId) + " Core: " + str(coreId))
+            if taskId is None:
+                return None
+            entryPrint("[t=" + str(self.time) + "us] TRACE_TASK_STOP_READY  -> taskId: " + str(taskId) + " Core: " + str(coreId))
             evt = {'type':TRACE_TASK_STOP_READY, 'ts':self.time, 'core':coreId, 'taskId':taskId}
 
         elif eventId == TRACE_TASK_CREATE:
             taskId = self.readInteger()
+            if taskId is None:
+                return None
             strLen = self.readInteger()
+            if strLen is None:
+                return None
             priority = self.readInteger()
+            if priority is None:
+                return None
             name = self.readBytes(strLen * 4).decode('UTF-8')
-            #print("[t=" + str(self.time) + "us] TRACE_TASK_CREATE      -> Task: " + name + " ID: " + str(taskId) + " with priority: " + str(priority) + " Core: " + str(coreId))
+            entryPrint("[t=" + str(self.time) + "us] TRACE_TASK_CREATE      -> Task: " + name + " ID: " + str(taskId) + " with priority: " + str(priority) + " Core: " + str(coreId))
             evt = {'type':TRACE_TASK_CREATE, 'ts':self.time, 'core':coreId, 'taskId':taskId, 'name':name, 'priority':priority}
 
         elif eventId == TRACE_START:
-            #print("[t=" + str(self.time) + "us] TRACE_START" + " Core: " + str(coreId))
+            entryPrint("[t=" + str(self.time) + "us] TRACE_START" + " Core: " + str(coreId))
             evt = {'type':TRACE_START, 'ts':self.time, 'core':coreId}
 
         elif eventId == TRACE_STOP:
-            #print("[t=" + str(self.time) + "us] TRACE_STOP" + " Core: " + str(coreId))
+            entryPrint("[t=" + str(self.time) + "us] TRACE_STOP" + " Core: " + str(coreId))
             evt = {'type':TRACE_STOP, 'ts':self.time, 'core':coreId}
 
         elif eventId == TRACE_DELAY_UNTIL:
             timeToWake = self.readInteger()
-            #print("[t=" + str(self.time) + "us] TRACE_DELAY_UNTIL      -> timeToWake: " + str(timeToWake) + " ms" + " Core: " + str(coreId))
+            if timeToWake is None:
+                return None
+            entryPrint("[t=" + str(self.time) + "us] TRACE_DELAY_UNTIL      -> timeToWake: " + str(timeToWake) + " ms" + " Core: " + str(coreId))
             evt = {'type':TRACE_DELAY_UNTIL, 'ts':self.time, 'core':coreId, 'timeToWake':timeToWake}
 
         elif eventId == TRACE_ISR_ENTER:
             irqId = self.readInteger()
-            #print("[t=" + str(self.time) + "us] TRACE_ISR_ENTER        -> irqId: " + str(irqId) + " Core: " + str(coreId))
+            if irqId is None:
+                return None
+            entryPrint("[t=" + str(self.time) + "us] TRACE_ISR_ENTER        -> irqId: " + str(irqId) + " Core: " + str(coreId))
             evt = {'type':TRACE_ISR_ENTER, 'ts':self.time, 'core':coreId, 'irqId':irqId}
 
         elif eventId == TRACE_ISR_EXIT:
-            #print("[t=" + str(self.time) + "us] TRACE_ISR_EXIT" + " Core: " + str(coreId)) 
+            entryPrint("[t=" + str(self.time) + "us] TRACE_ISR_EXIT" + " Core: " + str(coreId)) 
             evt = {'type':TRACE_ISR_EXIT, 'ts':self.time, 'core':coreId} 
 
         elif eventId == TRACE_ISR_EXIT_TO_SCHEDULER:
-            #print("[t=" + str(self.time) + "us] TRACE_ISR_EXIT_TO_SCHEDULER" + " Core: " + str(coreId)) 
+            entryPrint("[t=" + str(self.time) + "us] TRACE_ISR_EXIT_TO_SCHEDULER" + " Core: " + str(coreId)) 
             evt = {'type':TRACE_ISR_EXIT_TO_SCHEDULER, 'ts':self.time, 'core':coreId} 
 
         elif eventId == TRACE_DELAY:
             delayTime = self.readInteger()
+            if delayTime is None:
+                return None
+            entryPrint("[t=" + str(self.time) + "us] TRACE_DELAY.           -> delayTime: " + str(delayTime) + " ms Core: " + str(coreId)) 
             evt = {'type':TRACE_DELAY, 'ts':self.time, 'core':coreId, 'delayTime':delayTime} 
         
         elif eventId == TRACE_TIME_ZERO:
+            entryPrint("[t=" + str(self.time) + "us] TRACE_TIME_ZERO" + " Core: " + str(coreId)) 
             evt = {'type':TRACE_TIME_ZERO, 'ts':self.time, 'core':coreId} 
 
         else:
@@ -663,6 +693,11 @@ def smParser(traceStart, sortedEvents, allTasks, numCores):
 def eventPrint(*args, **kwargs):
     global enable_event_print
     if enable_event_print:
+        return print(*args, **kwargs)
+    
+def entryPrint(*args, **kwargs):
+    global enable_entry_print
+    if enable_entry_print:
         return print(*args, **kwargs)
     
 if __name__ == "__main__":
