@@ -4,25 +4,25 @@ A tool to visualize scheduling traces. Several trace sources can be configured. 
 
 ## Supported Features
 * <b>Recording</b> the trace buffers from the target device (one for each core). This requires ```openocd``` and ```telnet``` to be on the path.
-* <b>Loading</b> the trace. This parses the trace buffers to an internal, per task, data model. The trace is the visuallized in the GUI. 
+* <b>Loading</b> the trace. This parses the trace buffers to an internal, per task, data model. The trace is the visuallized in the GUI.
 * <b>Save</b> the trace as PDF. The current view of the trace is exported to a PDF.
-  
-## Generate Application
-Use pyinstaller to generate the packaged application. To generate the application for Windows this must be executed on under Windows. 
-Executables for Linux and OSX can be created on OSX directly. 
 
-```$ pyinstaller main.py --noconsole --icon ./icon.icns --add-data "Resources/config.ini:." --noconfirm```
+## Generate Application
+Use pyinstaller to generate the packaged application. To generate the application for Windows this must be executed on under Windows.
+Executables for Linux and OSX can be created on OSX directly.
+
+```$ pyinstaller RT-Trace.py --noconsole --icon ./icon/icon.icns --add-data "Resources/config.ini:." --noconfirm```
 
 ## Supported Platforms
 
 ### Raspberry Pi Pico2 with FreeRTOS SMP
 
-In our trace implementation on the Pico2, each core loggs trace events to its own trace buffer. The source for the timestamp on each core is the same, which allows for an easy combination of events from both trace buffers. 
+In our trace implementation on the Pico2, each core loggs trace events to its own trace buffer. The source for the timestamp on each core is the same, which allows for an easy combination of events from both trace buffers.
 
 ### Nucleo-L476RG with FreeRTOS
 
 #### Required Source Code Modifications
-<b>File:</b> ```port.c``` 
+<b>File:</b> ```port.c```
 
 Tracing calls must be added to the tick handler.
 ```
@@ -71,6 +71,3 @@ void vTaskDelayUntil( TickType_t * const pxPreviousWakeTime, const TickType_t xT
 		configASSERT( pxPreviousWakeTime );
         ...
 ```
-
-
-

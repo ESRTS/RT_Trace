@@ -121,12 +121,14 @@ def readTraceBuffers():
     config = configparser.ConfigParser()
     config.read(FileHelper.getConfigFilePath())
     size = config.get(configName,'bufferSize', fallback = '2000')
-    print("Size is: " + str(size))
+    #print("Size is: " + str(size))
     buffer0 = config.get(configName,'buffer0', fallback = '0x2008001c') #"0x2008001c"  # SRAM8_BASE
     buffer1 = config.get(configName,'buffer1', fallback = '0x2008100c') #"0x2008100c"  # SRAM9_BASE
     openocdPath = config.get(configName,'openocd_path', fallback = '/usr/local/bin') 
 
     traceBuffer = []
+
+    print("\r\n==READ TRACE BUFFERS ====================================================================")
 
     my_env = os.environ.copy()
     my_env["PATH"] = f"{my_env['PATH']}:{openocdPath}" # This is not final, a config file for the openocd path should be added
@@ -135,7 +137,7 @@ def readTraceBuffers():
             "-s", r'{}'.format(os.path.join(openocdPath, "scripts")),
             "-f", r"interface/cmsis-dap.cfg",
             "-f", r"target/rp2350.cfg",
-            "-c", r"telnet_port 4444",
+            "-c", r"telnet port 4444",
             "-c", r"adapter speed 4000"]
     
     printCommand(command)
@@ -205,6 +207,8 @@ def readTraceBuffers():
     print("Closing Telnet session")
     debugger.terminate()
     print("Closing OpenOCD session")
+    
+    print("=========================================================================")
 
     return traceBuffer
 

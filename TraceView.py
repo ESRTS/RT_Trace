@@ -288,7 +288,7 @@ class TraceView(customtkinter.CTkCanvas):
             stop = False
 
             while stop is not True:
-                if task.rightIndex is maxIndex: # If the last job is already in view we can stop
+                if task.rightIndex == maxIndex: # If the last job is already in view we can stop
                     stop = True
                 else:
                     job = task.jobs[task.rightIndex + 1] # Get the next larger job

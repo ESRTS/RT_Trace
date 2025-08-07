@@ -25,8 +25,8 @@ class TraceApp(customtkinter.CTk):
         'recordTraceFunc' is a target specific function that loads the trace buffer
         """
         self.targets = [
-            {'name': 'Pico2 FreeRTOS', 'numCores': 2, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : loadPico2TraceBuffers},
-            {'name': 'Pico2 FreeRTOS PSRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : loadPico2TraceBuffersPSRAM},
+            {'name': 'Pico2 FreeRTOS', 'numCores': 2, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet need to be on the path.', 'recordTraceFunc' : loadPico2TraceBuffers},
+            {'name': 'Pico2 FreeRTOS PSRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet need to be on the path.', 'recordTraceFunc' : loadPico2TraceBuffersPSRAM},
             #{'name': 'STM FreeRTOS', 'numCores': 1, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : loadSTM32L476TraceBuffers},
             #{'name': 'RPI QNX', 'numCores': 4, 'implemented': False, 'requirement_str' : 'To load the trace buffer, telnet needs to be on the path.', 'recordTraceFunc' : None},
             #{'name': 'RPI Linux', 'numCores': 4, 'implemented': False, 'requirement_str' : 'To load the trace buffer, ...', 'recordTraceFunc' : None}
@@ -44,7 +44,7 @@ class TraceApp(customtkinter.CTk):
 
         self.geometry("{}x{}".format(self.windowSizeX, self.windowSizeY))
         self.minsize(800, 400)
-        self.title("RT-Trace View")
+        self.title("RT-Trace")
 
         self.grid_columnconfigure(0, weight=0)
         self.grid_columnconfigure(1, weight=1)
