@@ -197,4 +197,4 @@ if __name__ == "__main__":
     """
     Debugging.
     """
-    loadPico2TraceBuffers(None)
+    #loadPico2TraceBuffers(None)
