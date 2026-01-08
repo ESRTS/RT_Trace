@@ -134,6 +134,9 @@ class TraceView(customtkinter.CTkCanvas):
             # In case the view was updated, make sure to delete all canvas items first
             self.clearTrace()
 
+            # Add a white background to the trace
+            self.canvasItems.append(self.create_rectangle(self.borderX_px + self.legend_px, 0, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (len(self.tasks)) - 1), fill="#FFFFFF"))
+
             # Compute the length of the visible view in ticks
             self.view_tks = self.rightBound_tks - self.leftBound_tks
 

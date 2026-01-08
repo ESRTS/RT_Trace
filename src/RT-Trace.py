@@ -210,12 +210,12 @@ class TraceApp(customtkinter.CTk):
             now = datetime.now()
 
             cwd = FileHelper.getCwd()
-            targetPath = os.path.join(cwd, 'output')
+            targetPath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'output'))
             Path(targetPath).mkdir(parents=True, exist_ok=True)
             pdfFilename = self.targets[self.selectedTarget].get('name') + "_Trace_" + now.strftime("%d_%m_%Y_%H_%M_%S")
-            pdfFilename = os.path.join(cwd, 'output', pdfFilename + '.pdf')
+            pdfFilename = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'output', pdfFilename + ".pdf"))
 
-            psFilename = os.path.join(cwd, 'output', "tmp.ps")
+            psFilename = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'output', "tmp.ps"))
 
             self.traceView.postscript(file=psFilename, colormode="color")                 # Generate the postscript of the trace canvas
 

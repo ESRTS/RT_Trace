@@ -122,7 +122,7 @@ def parser_thread(gui, numCores):
 
         cwd = FileHelper.getCwd()
 
-        filename = os.path.join(cwd, 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'raw_buffer' + str(c))
+        filename = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'raw_buffer' + str(c)))
 
         bufferPaths.append(Path(filename + ".txt"))
         if not bufferPaths[-1].is_file():
@@ -136,7 +136,8 @@ def parser_thread(gui, numCores):
         print("Loaded trace buffer: " + str(buffer))
 
     cwd = FileHelper.getCwd()
-    eventFilePath = os.path.join(cwd, 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'events.txt')
+    #eventFilePath = os.path.join(cwd, 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'events.txt')
+    eventFilePath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'events.txt'))
 
     tasks = parser(allBuffers, eventFilePath, tickIds)    # Parse the content of the trace buffers
 

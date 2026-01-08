@@ -17,8 +17,4 @@ def getConfigFilePath():
     """
     cwd = getCwd()
 
-    # Use thos to export the application
     return os.path.abspath(os.path.join(os.path.dirname( cwd ), 'Resources', 'config.ini'))
-
-    # Use this for development
-    #return os.path.abspath(os.path.join(cwd, 'Resources', 'config.ini'))

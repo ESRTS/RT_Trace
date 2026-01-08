@@ -46,12 +46,12 @@ def pico_thread(gui):
 
         cwd = FileHelper.getCwd()
 
-        targetPath = os.path.join(cwd, 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'))
+        targetPath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_')))
         print("targetPath: " + targetPath)
         Path(targetPath).mkdir(parents=True, exist_ok=True)
         
-        filename1 = os.path.join(cwd, 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'raw_buffer0')
-        filename2 = os.path.join(cwd, 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'raw_buffer1')
+        filename1 = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'raw_buffer0'))
+        filename2 = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'raw_buffer1'))
 
         # Parse the trace buffers
         writeFile(traceBuffer[0], filename1)
