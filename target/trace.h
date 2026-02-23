@@ -5,7 +5,7 @@
 #include "traceConfig.h"
 
 /**
- * Size of the trace buffer for each core, in uint32_t. 
+ * Size of the trace buffer for each core, in uint32_t.
  */
 #ifndef PICO_USE_PSRAM
 /* Use 2KB of SRAM in scratchpad memory for each core. */
@@ -33,6 +33,8 @@
 #define TRACE_ISR_ENTER                 (10u)
 #define TRACE_ISR_EXIT                  (11u)
 #define TRACE_ISR_EXIT_TO_SCHEDULER     (12u)
+#define TRACE_DELAY                     (13u)
+#define TRACE_TIME_START                (14u)
 
 // Not yet supported
 /*
@@ -60,9 +62,11 @@ void trace_taskCreate(uint32_t taskId, uint32_t priority, const char* name);
 void trace_start(void);
 void trace_stop(void);
 void trace_delayUntil(uint32_t* prev, uint32_t timeInc);
+void trace_delay(uint32_t delayTime);
 void trace_isrEnter(void);
 void trace_isrExit(void);
 void trace_isrExitToScheduler(void);
+void trace_timeZero(void);
 
 /****************************************************************************************************************
  * FreeRTOS trace defines to map to the trace infrastructure.
@@ -104,12 +108,14 @@ void trace_isrExitToScheduler(void);
                                                                         );                                                   \
                                                         }
 
-//#define traceENTER_xTaskCreateStaticAffinitySet( pxTaskCode, pcName, uxStackDepth, pvParameters, uxPriority, puxStackBuffer, pxTaskBuffer, uxCoreAffinityMask )     trace_taskCreate((uint32_t)NULL, uxPriority,  pcName)                                                  
+//#define traceENTER_xTaskCreateStaticAffinitySet( pxTaskCode, pcName, uxStackDepth, pvParameters, uxPriority, puxStackBuffer, pxTaskBuffer, uxCoreAffinityMask )     trace_taskCreate((uint32_t)NULL, uxPriority,  pcName)
 
 
 #define traceMOVED_TASK_TO_READY_STATE( pxTCB )         trace_readyStart((uint32_t)pxTCB)
 
 #define traceENTER_xTaskDelayUntil( x, y )              trace_delayUntil(x, y)
+
+#define traceENTER_vTaskDelay( x )                      trace_delay(x)
 
 #define traceMOVED_TASK_TO_SUSPENDED_LIST( pxTCB )      trace_readyStop((uint32_t)pxTCB)
 
@@ -117,11 +123,11 @@ void trace_isrExitToScheduler(void);
     #define traceISR_EXIT()                             trace_isrExit()
 
     #define traceISR_EXIT_TO_SCHEDULER()                trace_isrExitToScheduler()
-    
+
     #define traceISR_ENTER()                            trace_isrEnter()
 #endif
 
-
+#define traceTimeZero()                                 trace_timeZero()
 
 
 
