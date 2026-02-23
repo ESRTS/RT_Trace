@@ -5,6 +5,11 @@
 #include "traceConfig.h"
 
 /**
+ * Used for other code to check if the trace infrastructure is included.
+ */
+#define TRACE_AVAILABLE
+
+/**
  * Size of the trace buffer for each core, in uint32_t.
  */
 #ifndef PICO_USE_PSRAM
