@@ -17,7 +17,7 @@
 #define TRACE_BUFFER_SIZE 500
 #else
 /* Use 2MB of PSRAM for each core. */
-#define TRACE_BUFFER_SIZE 500000
+#define TRACE_BUFFER_SIZE 5000
 #endif /* PICO_USE_PSRAM */
 /****************************************************************************************************************
  * Defines and function declarations.
