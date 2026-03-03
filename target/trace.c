@@ -254,7 +254,7 @@ void trace_init() {
  */
 uint32_t trace_encodeTime(uint16_t event) {
 	bool* enabled = getTraceState();
-	if (*enabled == false) return 0;                    					/* Only increment the timestamps if treacing is still enabled. */
+	if (*enabled == false) return 0;                    					/* Only increment the timestamps if tracing is still enabled. */
 
 	uint64_t* lastTs = getLastTimestamp();              					/* Get the timestamp of the last event that was written */
 #ifdef TRACE_STM32L476RG
