@@ -39,7 +39,7 @@ class TraceView(customtkinter.CTkCanvas):
         self.zoomMin = 0                                        # Minimum zoom level, this is set to the last trace event.
         self.moveView = False                                   # Flag to indicate that the view is moved
         self.moveInitialX = 0                                   # Initial X-position if the view is moved
-        self.coreColors = [(98, 152, 210), (51, 156, 156)]      # Colors to indicate that a task executes on a CPU, used if the trace contains more than one CPU
+        self.coreColors = [(98, 152, 210), (51, 156, 156), (255, 209, 102), (255, 209, 102)]      # Colors to indicate that a task executes on a CPU, used if the trace contains more than one CPU
         self.cores = 1                                          # Number of cores in the trace (will be set automatically)
         self.gui = master                                       # GUI instance, needed to change the Y-dimension to fit the trace.
 
