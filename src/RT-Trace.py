@@ -13,6 +13,7 @@ import os
 from datetime import datetime
 import FileHelper
 import configparser
+import queue
 
 class TraceApp(customtkinter.CTk):
     """
@@ -244,15 +245,33 @@ class TextRedirector(object):
         self.widget = widget
         self.tag = tag
 
+        self.queue = queue.Queue()
+        self._scheduled = False
+
     def write(self, string):
-        self.widget.configure(state="normal")
-        self.widget.insert("end", string, (self.tag,))  # Add the string to the textbox
-        self.widget.configure(state="disabled")
-        self.widget.see("end")                          # Scroll the view to the end
+        #self.widget.configure(state="normal")
+        #self.widget.insert("end", string, (self.tag,))  # Add the string to the textbox
+        #self.widget.configure(state="disabled")
+        #self.widget.see("end")                          # Scroll the view to the end
+
+        if string:
+            self.queue.put(string)
+            if not self._scheduled:
+                self._scheduled = True
+                self.widget.after(30, self._flush)
 
     def flush(self):    # Needed to have the interface of a file-like object
         pass   
+    
+    def _flush(self):
+        self.widget.configure(state="normal")
 
+        while not self.queue.empty():
+            self.widget.insert("end", self.queue.get_nowait(), (self.tag,))
+
+        self.widget.configure(state="disabled")
+        self.widget.see("end")
+        self._scheduled = False
 def main():
     """
     Main Function of the program.

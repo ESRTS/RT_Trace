@@ -59,19 +59,19 @@ def recorderThread(gui):
         if check.returncode == 0:
             print(str(remoteScript) + " exists on " + remoteHost)
 
-            cmd = f"sudo chrt -f 50  python3 {remoteScript} -- {targetApplicationPath}"
+            cmd = f"sudo chrt -f 50  python3 -u {remoteScript} -- {targetApplicationPath}"
 
             print("CMD: " + cmd)
             proc = subprocess.Popen(
                 ["ssh", remoteHost, cmd],
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stderr=subprocess.PIPE,
                 bufsize=1,
                 text=True  # line-buffered text mode
             )
 
             for line in proc.stdout:
-                print(line, end="")  # live output from remote script
+                print("[REMOTE] " + line, end="", flush=True)  # live output from remote script
 
             proc.wait()
 

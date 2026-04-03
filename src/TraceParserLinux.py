@@ -27,15 +27,21 @@ taskColors = [(100, 237, 157), (100, 143, 237), (212, 237, 76), (237, 123, 100),
 """
 Scheduling events that are logged
 """
-EXECED      = 1
-SCHED_IN    = 2
-SCHED_OUT   = 3
-SLEEP_CALL  = 4
-WAKING      = 5
-WAKE        = 6
-WAKE_NEW    = 7
-FORKED      = 8
-WAIT        = 9
+EXECED                      = 1
+SCHED_IN                    = 2
+SCHED_OUT                   = 3
+SLEEP_CALL                  = 4
+WAKING                      = 5
+WAKE                        = 6
+WAKE_NEW                    = 7
+FORKED                      = 8
+WAIT                        = 9
+ID_USER_START_EVENT	        = 100
+ID_USER_END_EVENT			= 200
+ID_USER_RELEASE_EVENT		= 300
+ID_USER_REGISTER_PERIOD		= 501
+ID_USER_REGISTER_NAME 		= 503
+ID_USER_REGISTER_PRIORITY	= 505
 
 """
 Helper map to get back to the event string from event IDs
@@ -49,7 +55,13 @@ eventMap = {
     WAKE : "WAKE",
     WAKE_NEW : "WAKE_NEW",
     FORKED : "FORKED",
-    WAIT : "WAIT"
+    WAIT : "WAIT",
+    ID_USER_START_EVENT : "ID_USER_START_EVENT",
+    ID_USER_END_EVENT : "ID_USER_END_EVENT",
+    ID_USER_RELEASE_EVENT : "ID_USER_RELEASE_EVENT",
+    ID_USER_REGISTER_PERIOD : "ID_USER_REGISTER_PERIOD",
+    ID_USER_REGISTER_NAME : "ID_USER_REGISTER_NAME",
+    ID_USER_REGISTER_PRIORITY : "ID_USER_REGISTER_PRIORITY",
 }
 
 def getTaskColor(taskId):
@@ -306,10 +318,22 @@ def getEvtId(evtString):
         return FORKED
     elif evtString == "WAIT":
         return WAIT
+    elif evtString == "ID_USER_START_EVENT":
+        return ID_USER_START_EVENT
+    elif evtString == "ID_USER_END_EVENT":
+        return ID_USER_END_EVENT
+    elif evtString == "ID_USER_RELEASE_EVENT":
+        return ID_USER_RELEASE_EVENT
+    elif evtString == "ID_USER_REGISTER_PERIOD":
+        return ID_USER_REGISTER_PERIOD
+    elif evtString == "ID_USER_REGISTER_NAME":
+        return ID_USER_REGISTER_NAME
+    elif evtString == "ID_USER_REGISTER_PRIORITY":
+        return ID_USER_REGISTER_PRIORITY
     else:
         print("UNSUPPORTED TYPE: " + evtString)
         return None
-    
+
 def entryPrint(*args, **kwargs):
     """
     Helper function to have print output that can be globally disabled.
