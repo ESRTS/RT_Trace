@@ -4,6 +4,7 @@ from TraceView import TraceView
 from PicoTrace import loadPico2TraceBuffers
 from PicoTrace import loadPico2TraceBuffersPSRAM
 from L476Trace import loadSTM32L476TraceBuffers
+from LinuxTraceRecorder import loadLinuxraceBuffers
 from TraceParser import parseTraceFiles
 from TraceParserLinux import parseTraceFiles as linuxParseTraceFiles
 from pathlib import Path
@@ -30,7 +31,7 @@ class TraceApp(customtkinter.CTk):
             {'name': 'Pico2 FreeRTOS PSRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet need to be on the path.', 'recordTraceFunc' : loadPico2TraceBuffersPSRAM},
             #{'name': 'STM FreeRTOS', 'numCores': 1, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : loadSTM32L476TraceBuffers},
             #{'name': 'RPI QNX', 'numCores': 4, 'implemented': False, 'requirement_str' : 'To load the trace buffer, telnet needs to be on the path.', 'recordTraceFunc' : None},
-            {'name': 'RPI Linux', 'numCores': 4, 'implemented': True, 'requirement_str' : 'Experimental...', 'recordTraceFunc' : None}
+            {'name': 'RPI Linux', 'numCores': 4, 'implemented': True, 'requirement_str' : 'Experimental...', 'recordTraceFunc' : loadLinuxraceBuffers}
         ]
 
         ''' Get the path for ps2pdf. '''
