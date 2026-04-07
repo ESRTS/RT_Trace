@@ -103,6 +103,10 @@ def parser_thread(gui, numCores):
 
     config = configparser.ConfigParser()
     config.read(FileHelper.getConfigFilePath())
+
+    use_user_events = config.getboolean(configName, 'user_events', fallback=False)
+
+    print("Use User-Events: " + str(use_user_events))
     #tickIds = [int(x) for x in config.get(configName,'tickId').split(",")]
 
     cwd = FileHelper.getCwd()
@@ -119,7 +123,7 @@ def parser_thread(gui, numCores):
     else:
         eventFilePath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'events.txt'))
 
-    tasks = parser(filename, eventFilePath)    # Parse the content of the trace buffers
+    tasks = parser(filename, eventFilePath, use_user_events)    # Parse the content of the trace buffers
 
     # If this was called from the GUI, enable the buttons and update the GUI
     if gui is not None:
@@ -128,7 +132,7 @@ def parser_thread(gui, numCores):
         gui.traceView.draw()
         gui.update()
 
-def parser(buffers, eventFilePath):
+def parser(buffers, eventFilePath, use_user_events):
     """
     Function parses the trace file to internal events.
     Trace events are then converted to tasks, jobs and execution segments.
@@ -146,7 +150,11 @@ def parser(buffers, eventFilePath):
             entryPrint(evt)
             f.write("ts: " + str(evt['ts']) + " " + eventMap.get(evt['type']) + " " + str(evt) + "\r\n")
  
-    allTasks = extractTraceInfo(events)     # Parse all trace tasks from the event trace (afterwards we have trace tasks, jobs and execution segments). 
+    if not use_user_events:
+        allTasks = extractTraceInfo(events)     # Parse all trace tasks from the event trace (afterwards we have trace tasks, jobs and execution segments). 
+    else:
+        allTasks = extractTraceInfoUserEvents(events, eventFilePath)
+        
     tasks = []
     print("Found trace data for tasks:")
 
@@ -180,6 +188,23 @@ def parseTraceEvents(events, filename):
         tid = int(parts[2].split('=')[1])
         cpu = int(parts[3].split('=')[1])
         
+        if (event == ID_USER_REGISTER_PERIOD):
+            period = int(parts[5].split('=')[1])
+        else:
+            period = None
+
+        if (event == ID_USER_REGISTER_NAME):
+            taskName = parts[5].split('=')[1]
+            taskName = taskName[2:]
+            taskName = taskName[:-1]
+        else:
+            taskName = None
+
+        if (event == ID_USER_REGISTER_PRIORITY):
+            priority = int(parts[5].split('=')[1])
+        else:
+            priority = None
+
         """
         Events are not necessarily delivered in order. The event with type EXECED markes the start,
         and then later adjust all timestamps relative to this one.
@@ -191,7 +216,10 @@ def parseTraceEvents(events, filename):
             'ts': ts,
             'type': event,
             'taskId': tid,
-            'core': cpu
+            'core': cpu,
+            'period': period,
+            'taskName': taskName,
+            'priority': priority
         }
 
         if evt is None:
@@ -221,7 +249,7 @@ def extractTraceInfo(events):
 
     # For each task ID a trace task is created
     for id in taskIds:
-        tmpTask = TraceTask(id, "Task_" + (str(id)), 0, getTaskColor(id))
+        tmpTask = TraceTask(id, "Task_" + (str(id)), None, getTaskColor(id))
         tasks.append(tmpTask)
 
     # The events are individual for each task, i.e. start, stop, sleep and wakeup. 
@@ -293,6 +321,150 @@ def extractTraceInfo(events):
                         parsingPrint("ts=" + str(evt['ts']) + " - Core: " + str(evt['core']) + " WAIT, TASK_ID: " + str(evt['taskId']))
                         # This is a simplification. If a task is blocked on something (i.e. waiting) we start a new job. 
                         task.delayUntil = True
+
+    return tasks
+
+def extractTraceInfoUserEvents(events, eventFilePath):
+    """
+    Method used to convert the individual trace events into tasks, jobs and execution segments.
+    This method considers the user-events that add additional information for tracing.
+    """
+
+    tasks = []
+
+    # Find all task IDs
+    taskIds = []
+    for evt in events:
+        taskId = evt['taskId']
+        if taskId not in taskIds:
+            taskIds.append(taskId)
+
+    # For each task ID a trace task is created
+    for id in taskIds:
+        tmpTask = TraceTask(id, "Task_" + (str(id)), None, getTaskColor(id))
+        tasks.append(tmpTask)
+
+    # Identify the base task that starts the program
+    baseTaskId = events[0]['taskId']
+    baseTask = findTaskById(tasks, baseTaskId)
+    baseTask.name = "BaseTask"
+
+    # Get the extra information on all tasks form the user events
+    for evt in events:
+        if evt['ts'] >= 0:
+                    if evt['type'] == ID_USER_REGISTER_PERIOD:
+                        taskId = evt['taskId']
+                        task = findTaskById(tasks, taskId)
+                        task.period = int(evt['period'])
+                        
+                    elif evt['type'] == ID_USER_REGISTER_NAME:
+                        taskId = evt['taskId']
+                        task = findTaskById(tasks, taskId)
+                        task.name = evt['taskName']
+                        
+                    elif evt['type'] == ID_USER_REGISTER_PRIORITY:
+                        taskId = evt['taskId']
+                        task = findTaskById(tasks, taskId)
+                        task.priority = int(evt['priority'])
+
+    # Finds the initial release time of the user tasks. 
+    # The C-code follows the convention: base task: ID_USER_RELEASE_EVENT -> (all user tasks: ... SLEEP_CALL -> WAKING -> WAKE)
+    # The first user task that reaches the WAKE state after the sequence above indicates the initial release time of all
+    # user tasks. 
+    sleepCallsTaskId = []
+    sleepCallsTs = []
+    releaseEventTs = None
+    initialReleaseTime = None
+
+    for evt in events:
+        if evt['type'] == ID_USER_RELEASE_EVENT:
+            releaseEventTs = evt['ts']
+        if evt['taskId'] != baseTask.id and releaseEventTs != None:
+            if evt['type'] == SLEEP_CALL:
+
+                if evt['taskId'] not in sleepCallsTaskId:
+                    sleepCallsTaskId.append(evt['taskId'])
+                    sleepCallsTs.append(evt['ts'])
+
+            if len(sleepCallsTaskId) > 0:
+                if evt['type'] == WAKE:
+                    if evt['taskId'] in sleepCallsTaskId:
+                        initialReleaseTime = evt['ts']
+                        break
+
+    # We adjust all trace events with t=0 at the release time. Because of this, we also write the events file again here.
+    with open(eventFilePath, "w") as f:
+        for evt in events:
+            evt['ts'] -= initialReleaseTime
+            entryPrint(evt)
+            f.write("ts: " + str(evt['ts']) + " " + eventMap.get(evt['type']) + " " + str(evt) + "\r\n")
+
+    # Parse the user task execution. As without user events, we can do this for each thread individually
+    for task in tasks:
+        if task is not baseTask:
+            parsingPrint("=== THREAD ID: " + str(task.id) + " NAME: " + task.name + "===")
+            for evt in events:
+                """
+                EXECED -> Start of the traced program.
+                SCHED_IN -> Task starts to run on the CPU
+                SCHED_OUT -> Task is removed from the CPU
+                SLEEP_CALL -> Task signals to sleep (user-level, not sleeping yet!)
+                WAKING -> Something is trying to wake the task
+                WAKE -> The task is now in the run-queue
+                WAKE_NEW -> A forked thread is in run-queue for the first time
+                FORKED -> A new thread is created
+                """
+
+                if evt['taskId'] == task.id:
+                    if evt['ts'] >= 0:
+                        if evt['type'] == SCHED_IN:
+                            # There should always be a job with SCHED_IN 
+                            parsingPrint("ts=" + str(evt['ts']) + " - Core: " + str(evt['core']) + " SCHED_IN, TASK_ID: " + str(evt['taskId']))
+                            task.startExec(evt['ts'], evt['core'], ExecutionType.EXECUTE)
+
+                        elif evt['type'] == SCHED_OUT:
+                            if task.delayUntil is True: 
+                                parsingPrint("ts=" + str(evt['ts']) + " - Core: " + str(evt['core']) + " SCHED_OUT, FINISHED JOB, TASK_ID: " + str(evt['taskId']))
+                                task.stopExec(evt['ts'])  
+                                task.finishJob()
+                                task.delayUntil = False
+                            else:
+                                parsingPrint("ts=" + str(evt['ts']) + " - Core: " + str(evt['core']) + " SCHED_OUT, PREEMPTED, TASK_ID: " + str(evt['taskId']))
+                                task.stopExec(evt['ts'])  
+                                    
+                        elif evt['type'] == ID_USER_END_EVENT:
+                            parsingPrint("ts=" + str(evt['ts']) + " - Core: " + str(evt['core']) + " ID_USER_END_EVENT, TASK_ID: " + str(evt['taskId']))
+                            task.delayUntil = True
+                                
+                        elif evt['type'] == WAKING:
+                            # We don't do anything with this event for now.
+                            pass
+                        elif evt['type'] == WAKE:
+                                
+                            if task.currentJob is not None:
+                                parsingPrint("ts=" + str(evt['ts']) + " - Core: " + str(evt['core']) + " WAKE (TASK WAS NOT SLEEPING!), TASK_ID: " + str(evt['taskId']))
+                                # It can happen that the task is not going to sleep after a sleep call (e.g. if the absolute sleep time has already passed.)
+                                # In those cases, we have to finish the previous job and start the new job directly.
+                                task.stopExec(evt['ts'])  
+                                task.finishJob()
+                                task.delayUntil = False
+                                task.newJob(evt['ts'], None)
+                                task.startExec(evt['ts'], evt['core'], ExecutionType.EXECUTE)
+                            else:
+                                parsingPrint("ts=" + str(evt['ts']) + " - Core: " + str(evt['core']) + " WAKE, TASK_ID: " + str(evt['taskId']))
+                                # For normal cases we only need to release the next job.
+                                task.newJob(evt['ts'], None)
+                        elif evt['type'] == WAKE_NEW:
+                            parsingPrint("ts=" + str(evt['ts']) + " - Core: " + str(evt['core']) + " WAKE_NEW, First job of TASK_ID: " + str(evt['taskId']))
+                            task.newJob(evt['ts'], None)
+                        elif evt['type'] == WAIT:
+                            parsingPrint("ts=" + str(evt['ts']) + " - Core: " + str(evt['core']) + " WAIT, TASK_ID: " + str(evt['taskId']))
+                            # This is a simplification. If a task is blocked on something (i.e. waiting) we start a new job. 
+                            task.delayUntil = True
+
+    for task in tasks:
+        if task.currentJob != None:
+            task.finishJob()
 
     return tasks
 
