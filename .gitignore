@@ -9,3 +9,4 @@ dist/*
 *.spec
 data/*
 output/*
+.vscode/settings.json
