@@ -138,7 +138,7 @@ def parser(buffers, eventFilePath, use_user_events):
     Trace events are then converted to tasks, jobs and execution segments.
     The function returns an array with all trace tasks.
     """
-    print("Parsing Files!")
+    FileHelper.printHeader("Parsing Trace Files")
 
     events = []
     parseTraceEvents(events, buffers)       # Parse the raw events from the trace files of each core
@@ -156,7 +156,7 @@ def parser(buffers, eventFilePath, use_user_events):
         allTasks = extractTraceInfoUserEvents(events, eventFilePath)
         
     tasks = []
-    print("Found trace data for tasks:")
+    FileHelper.printState("Found trace data for tasks:")
 
     for task in allTasks:                   # Some tasks might be created in the trace but never execute. We exclue those here. 
         if len(task.jobs) != 0:
@@ -164,7 +164,7 @@ def parser(buffers, eventFilePath, use_user_events):
 
     for task in tasks:                      # Print a list with parsed tasks and the number of jobs they have in the trace.
         print("\t" + str(task))
-        task.printAll()
+        #task.printAll()
 
     return tasks
 

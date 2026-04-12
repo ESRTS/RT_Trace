@@ -76,9 +76,15 @@ def recorderThread(gui):
             proc.wait()
 
             if proc.returncode == 0:
+
+                cwd = FileHelper.getCwd()
+                targetPath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_')))
+
+                os.makedirs(targetPath, exist_ok=True)  
+
                 # Copy the generated file back
                 result = subprocess.run(
-                    ["scp", f"{remoteHost}:{remoteTrace}", str(localTrace)],
+                    ["scp", f"{remoteHost}:{remoteTrace}", str(targetPath)],
                     check=True
                 )
                 

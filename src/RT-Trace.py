@@ -78,7 +78,7 @@ class TraceApp(customtkinter.CTk):
         self.btn_loadTrace.grid(row=2, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Button to save the current trace. '''
-        self.btn_saveTrace = customtkinter.CTkButton(self.sidebar_frame, text="Save Trace", command=self.save_image_function)
+        self.btn_saveTrace = customtkinter.CTkButton(self.sidebar_frame, text="Save PDF", command=self.save_image_function)
         self.btn_saveTrace.grid(row=3, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Textbox to display stdout. '''
