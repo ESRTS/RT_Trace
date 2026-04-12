@@ -164,7 +164,7 @@ def parser(buffers, eventFilePath, use_user_events):
 
     for task in tasks:                      # Print a list with parsed tasks and the number of jobs they have in the trace.
         print("\t" + str(task))
-        #task.printAll()
+        task.printAll()
 
     return tasks
 
@@ -445,11 +445,15 @@ def extractTraceInfoUserEvents(events, eventFilePath):
                                 parsingPrint("ts=" + str(evt['ts']) + " - Core: " + str(evt['core']) + " WAKE (TASK WAS NOT SLEEPING!), TASK_ID: " + str(evt['taskId']))
                                 # It can happen that the task is not going to sleep after a sleep call (e.g. if the absolute sleep time has already passed.)
                                 # In those cases, we have to finish the previous job and start the new job directly.
-                                task.stopExec(evt['ts'])  
-                                task.finishJob()
-                                task.delayUntil = False
-                                task.newJob(evt['ts'], None)
-                                task.startExec(evt['ts'], evt['core'], ExecutionType.EXECUTE)
+                                if task.currentJob.activeInterval is not None:
+                                    core = task.currentJob.activeInterval.core
+                                
+
+                                    task.stopExec(evt['ts'])  
+                                    task.finishJob()
+                                    task.delayUntil = False
+                                    task.newJob(evt['ts'], None)
+                                    task.startExec(evt['ts'], core, ExecutionType.EXECUTE)
                             else:
                                 parsingPrint("ts=" + str(evt['ts']) + " - Core: " + str(evt['core']) + " WAKE, TASK_ID: " + str(evt['taskId']))
                                 # For normal cases we only need to release the next job.
