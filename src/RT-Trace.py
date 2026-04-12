@@ -82,7 +82,8 @@ class TraceApp(customtkinter.CTk):
         self.btn_saveTrace.grid(row=3, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Textbox to display stdout. '''
-        self.textbox = customtkinter.CTkTextbox(self, corner_radius=10)
+        font = customtkinter.CTkFont(family="DejaVu Sans Mono", size=14)
+        self.textbox = customtkinter.CTkTextbox(self, corner_radius=10, font=font)
         self.textbox.grid(row=3, column=1, rowspan=1, columnspan=1, sticky="nswe", padx=5, pady=5)
         
         ''' Redirect stdout and stderr to the textbox. '''
@@ -168,7 +169,7 @@ class TraceApp(customtkinter.CTk):
         """
         self.btn_recordTrace.configure(state="disabled")
         self.update()
-        print("Reading the trace buffer for each core. Might take a few seconds...")
+        FileHelper.printHeader("recording trace")
         self.targets[self.selectedTarget].get('recordTraceFunc')(self)   # Call the target specific function to load the trace buffers
         
 
@@ -178,7 +179,7 @@ class TraceApp(customtkinter.CTk):
         """
         self.btn_loadTrace.configure(state="disabled")
         self.update()
-        print("Loading trace from files...")
+        FileHelper.printHeader("Loading trace from files")
         if self.targets[self.selectedTarget].get('name') != 'RPI Linux':
             parseTraceFiles(self, self.targets[self.selectedTarget].get('numCores'))
         else:
@@ -203,13 +204,14 @@ class TraceApp(customtkinter.CTk):
             print(self.targets[self.selectedTarget].get('requirement_str'))
             self.enableAllButtons()
         else:
-            print("Target " + self.targets[self.selectedTarget].get('name') + " is not yet supported!")
+            FileHelper.printState("Target not yet supported", info = self.targets[self.selectedTarget].get('name'))
             self.disableAllButtons()
 
     def save_image_function(self):
         """
         Function generates a PDF of the current trace view.
         """
+        FileHelper.printHeader("export trace to pdf")
         if self.traceView.tasks is not None:    # Only save the trace as PDF if some tasks are loaded
 
             now = datetime.now()
@@ -230,12 +232,12 @@ class TraceApp(customtkinter.CTk):
             streamdata = process.communicate()[0]                                       # Get the return code of the process
             rc = process.returncode
             if rc == 0:
-                print("Saved trace as " + pdfFilename + ".")
+                FileHelper.printState("Saved trace as ", info = pdfFilename)
             else:
                 print("Cound not generate PDF file.", file=sys.stderr)
             os.remove(psFilename)                                                         # Delete the temporary postscript file
         else:
-            print("No trace loaded!", file=sys.stderr)
+            FileHelper.printState("No trace loaded!")
 
 class TextRedirector(object):
     """
@@ -272,6 +274,7 @@ class TextRedirector(object):
         self.widget.configure(state="disabled")
         self.widget.see("end")
         self._scheduled = False
+
 def main():
     """
     Main Function of the program.

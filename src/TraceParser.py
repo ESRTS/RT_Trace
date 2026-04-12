@@ -73,7 +73,7 @@ enable_event_print = False
 """
 Set to true to print events read from the trace buffer.
 """
-enable_entry_print = False
+enable_entry_print = True
 
 def getTaskColor(taskId):
     """
@@ -129,11 +129,15 @@ def parser_thread(gui, numCores):
             print("Error: File " + str(bufferPaths[-1]) + " does not exist!")
 
     allBuffers = []
+    core = 0
     for buffer in bufferPaths:
         fh = open(buffer, "rb")
         traceBuffer = bytearray(fh.read())
         allBuffers.append(traceBuffer)
-        print("Loaded trace buffer: " + str(buffer))
+        
+        FileHelper.printState("Loaded trace buffer: ", info=str(buffer))
+        FileHelper.hexdump(traceBuffer, base_addr=int(config.get(configName, "buffer"+str(core)),16))
+        core = core + 1
 
     cwd = FileHelper.getCwd()
     #eventFilePath = os.path.join(cwd, 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'events.txt')
@@ -154,21 +158,21 @@ def parser(buffers, eventFilePath, tickIds):
     Trace events are then converted to tasks, jobs and execution segments.
     The function returns an array with all trace tasks.
     """
-    print("Parsing Files!")
+    FileHelper.printHeader("parsing files")
 
     events = []
     parseTraceEvents(events, buffers)       # Parse the raw events from the trace files of each core
 
     allTasks = extractTraceInfo(events, eventFilePath, tickIds)     # Parse all trace tasks from the event trace (afterwards we have trace tasks, jobs and execution segments). 
     tasks = []
-    print("Found trace data for tasks:")
-
+    
     for task in allTasks:                   # Some tasks might be created in the trace but never execute. We exclue those here. 
         if len(task.jobs) != 0:
             tasks.append(task)
 
+    FileHelper.printState("Found trace data for tasks:")
     for task in tasks:                      # Print a list with parsed tasks and the number of jobs they have in the trace.
-        print("\t" + str(task))
+        print("   " + str(task))
         #task.printAll()
 
     return tasks
@@ -251,7 +255,7 @@ def extractTraceInfo(events, eventFilePath, tickIds):
     smParser(traceStart, sortedEvents, tasks, len(tickIds))
 
     eventFile.close()
-    print("Wrote event file to: " + eventFilePath)
+    FileHelper.printState("Wrote event file to: ", info=eventFilePath)
 
     return tasks
     
@@ -268,12 +272,11 @@ def parseTraceEvents(events, buffers):
     bufferEvents = []
     
     for buffer in buffers:
-        print("Reading events of core " + str(coreId))
+        FileHelper.printState("Reading events of core " + str(coreId))
         bufferEvents.append([])
 
         parser = EventParser(buffer)
 
-        #parser.printBuffer()
         while True:
             evt = parser.read_event(coreId)
             #print(evt)
@@ -286,10 +289,11 @@ def parseTraceEvents(events, buffers):
     # Find timestamp last timestamp in any of the buffers
     minTs = -1
     for evts in bufferEvents:
-        if minTs == -1:
-            minTs = evts[-1].get('ts')
-        elif minTs > evts[-1].get('ts'):
-            minTs = evts[-1].get('ts')
+        if len(evts) > 0 :
+            if minTs == -1:
+                minTs = evts[-1].get('ts')
+            elif minTs > evts[-1].get('ts'):
+                minTs = evts[-1].get('ts')
 
     # From each buffer, add all events to 'events' that appear up to t=minTs
     for evts in bufferEvents:
@@ -310,9 +314,7 @@ class EventParser:
         self.maxBytes = len(inBuffer)
         self.buffer = file = io.BytesIO(inBuffer)
         self.time = 0
-        self.bytesRead = 0
-
-        
+        self.bytesRead = 0   
 
     def printBuffer(self):
         """
@@ -601,6 +603,14 @@ def smParser(traceStart, sortedEvents, allTasks, numCores):
             elif type == TRACE_TASK_START_READY:
                 eventPrint("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_TASK - Evt: TRACE_TASK_START_READY] Release job of task " + findTaskById(tasks, evt.get('taskId')).name + ".")
                 task = findTaskById(tasks, evt.get('taskId'))
+                
+                #=== This part is experiments! Check if this is actually correct! ===
+                if task.currentJob != None:
+                    if task.currentJob.activeInterval != None:
+                        task.stopExec(ts)
+                    task.finishJob()
+                #=== End of experimental part.
+                
                 task.newJob(ts, None)                                                                               # Release a new job for this task
                 # Remain in the same state
             elif type == TRACE_TIME_ZERO:
