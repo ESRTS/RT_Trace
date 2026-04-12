@@ -41,13 +41,13 @@ def pico_thread(gui):
 
     if traceBuffer is not None:
     
-        print("Size trace buffer core 0: " + str(len(traceBuffer[0])) + "b")
-        print("Size trace buffer core 1: " + str(len(traceBuffer[1])) + "b")
+        #print("Size trace buffer core 0: " + str(len(traceBuffer[0])) + "b")
+        #print("Size trace buffer core 1: " + str(len(traceBuffer[1])) + "b")
 
         cwd = FileHelper.getCwd()
 
         targetPath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_')))
-        print("targetPath: " + targetPath)
+        #FileHelper.printState("targetPath: ", info = targetPath)
         Path(targetPath).mkdir(parents=True, exist_ok=True)
         
         filename1 = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'raw_buffer0'))
@@ -78,7 +78,7 @@ def writeFile(data, filename):
     # Close file
     binary_file.close()
 
-    print("Created File: " + filename + ".txt")
+    FileHelper.printState("Created File: ", info = filename + ".txt")
 
 def textRedirectErrThread(output):
     """
@@ -128,7 +128,7 @@ def readTraceBuffers():
 
     traceBuffer = []
 
-    print("\r\n==READ TRACE BUFFERS ====================================================================")
+    FileHelper.printState("read trace buffers")
 
     my_env = os.environ.copy()
     my_env["PATH"] = f"{my_env['PATH']}:{openocdPath}" # This is not final, a config file for the openocd path should be added
@@ -204,11 +204,10 @@ def readTraceBuffers():
     traceBuffer.append(dataCore1)
 
     tel.close()
-    print("Closing Telnet session")
+    FileHelper.printState("Closing Telnet session")
     debugger.terminate()
-    print("Closing OpenOCD session")
-    
-    print("=========================================================================")
+    debugger.wait()
+    FileHelper.printState("Closing OpenOCD session")
 
     return traceBuffer
 

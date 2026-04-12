@@ -96,6 +96,7 @@ class TraceTask():
         self.jobs = []              # Jobs of the task
         self.currentJob = None
         self.delayUntil = False     # Flag to indicate if delay until was called
+        self.period = None          # Period of the task, if set by user-event
 
         # Used for the visualization only
         self.taskColor = color      # Color of the task in the trace
@@ -106,10 +107,17 @@ class TraceTask():
         return self.name + " (" + str(len(self.jobs)) + " jobs)"
 
     def printInfo(self):
+        value = "Task: " + self.name + " ID: " + str(self.id) + " Priority: "
         if self.priority == None:
-            print("Task: " + self.name + " ID: " + str(self.id) + " Priority: -")
+            value = value + "-"
         else:
-            print("Task: " + self.name + " ID: " + str(self.id) + " Priority: " + str(self.priority))
+            value = value + str(self.priority)
+
+        if self.priority == None:
+            value = value + " Period: -"
+        else:
+            value = value + " Period: " + str(self.period)
+        print(value)
 
     def printAll(self):
         self.printInfo()
