@@ -5,7 +5,7 @@ from time import sleep
 import os
 import sys
 from pathlib import Path
-import FileHelper
+import HelperFunctions
 import configparser
 
 """
@@ -30,7 +30,7 @@ def pico_thread(gui):
     
         print("Size trace buffer: " + str(len(traceBuffer[0])) + "b")
 
-        cwd = FileHelper.getCwd()
+        cwd = HelperFunctions.getCwd()
 
         targetPath = os.path.join(cwd, 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'))
         print("targetPath: " + targetPath)
@@ -117,7 +117,7 @@ def readTraceBuffers():
     
     # Read the configuration from the ini-file
     config = configparser.ConfigParser()
-    config.read(FileHelper.getConfigFilePath())
+    config.read(HelperFunctions.getConfigFilePath())
     size = config.get('STM_FreeRTOS','bufferSize', fallback = '4000')
     print("Size is: " + str(size))
     buffer0 = config.get('STM_FreeRTOS','buffer0', fallback = '0x10000000') 

@@ -1,4 +1,5 @@
 import customtkinter
+import tkinter as tk
 import sys
 from TraceView import TraceView
 from PicoTrace import loadPico2TraceBuffers
@@ -11,7 +12,7 @@ from pathlib import Path
 import subprocess
 import os
 from datetime import datetime
-import FileHelper
+import HelperFunctions
 import configparser
 import queue
 
@@ -37,7 +38,7 @@ class TraceApp(customtkinter.CTk):
 
         ''' Get the path for ps2pdf. '''
         config = configparser.ConfigParser()
-        config.read(FileHelper.getConfigFilePath())
+        config.read(HelperFunctions.getConfigFilePath())
         fallback_path = os.path.join("/", "usr", "local", "bin")
         self.ps2pdf_path = config.get('general','ps2pdf_path', fallback = fallback_path)
 
@@ -82,7 +83,8 @@ class TraceApp(customtkinter.CTk):
         self.btn_recordTrace.grid(row=3, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Entry to specify the trace name. '''
-        self.txt_traceName = customtkinter.CTkEntry(self.sidebar_frame, placeholder_text=self.targets[self.selectedTarget].get('name').replace(' ', '_'))
+        recordTraceName = tk.StringVar(value=self.targets[self.selectedTarget].get('name').replace(' ', '_'))
+        self.txt_traceName = customtkinter.CTkEntry(self.sidebar_frame, textvariable=recordTraceName)
         self.txt_traceName.grid(row=4, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Label for the trace visualization section. '''
@@ -192,7 +194,7 @@ class TraceApp(customtkinter.CTk):
         """
         self.btn_recordTrace.configure(state="disabled")
         self.update()
-        FileHelper.printHeader("recording trace")
+        HelperFunctions.printHeader("recording trace")
         self.targets[self.selectedTarget].get('recordTraceFunc')(self)   # Call the target specific function to load the trace buffers
         
 
@@ -202,7 +204,7 @@ class TraceApp(customtkinter.CTk):
         """
         self.btn_loadTrace.configure(state="disabled")
         self.update()
-        FileHelper.printHeader("Loading trace from files")
+        HelperFunctions.printHeader("Loading trace from files")
         if self.targets[self.selectedTarget].get('name') != 'RPI Linux':
             parseTraceFiles(self, self.targets[self.selectedTarget].get('numCores'))
         else:
@@ -227,7 +229,7 @@ class TraceApp(customtkinter.CTk):
             print(self.targets[self.selectedTarget].get('requirement_str'))
             self.enableAllButtons()
         else:
-            FileHelper.printState("Target not yet supported", info = self.targets[self.selectedTarget].get('name'))
+            HelperFunctions.printState("Target not yet supported", info = self.targets[self.selectedTarget].get('name'))
             self.disableAllButtons()
 
     def selectRecordedTrace(self, recordedTrace: str):
@@ -240,12 +242,12 @@ class TraceApp(customtkinter.CTk):
         """
         Function generates a PDF of the current trace view.
         """
-        FileHelper.printHeader("export trace to pdf")
+        HelperFunctions.printHeader("export trace to pdf")
         if self.traceView.tasks is not None:    # Only save the trace as PDF if some tasks are loaded
 
             now = datetime.now()
 
-            cwd = FileHelper.getCwd()
+            cwd = HelperFunctions.getCwd()
             targetPath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'output'))
             Path(targetPath).mkdir(parents=True, exist_ok=True)
             pdfFilename = self.targets[self.selectedTarget].get('name') + "_Trace_" + now.strftime("%d_%m_%Y_%H_%M_%S")
@@ -261,12 +263,12 @@ class TraceApp(customtkinter.CTk):
             streamdata = process.communicate()[0]                                       # Get the return code of the process
             rc = process.returncode
             if rc == 0:
-                FileHelper.printState("Saved trace as ", info = pdfFilename)
+                HelperFunctions.printState("Saved trace as ", info = pdfFilename)
             else:
                 print("Cound not generate PDF file.", file=sys.stderr)
             os.remove(psFilename)                                                         # Delete the temporary postscript file
         else:
-            FileHelper.printState("No trace loaded!")
+            HelperFunctions.printState("No trace loaded!")
 
 class TextRedirector(object):
     """

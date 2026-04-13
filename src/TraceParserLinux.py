@@ -3,7 +3,7 @@ from pathlib import Path
 import io
 from TraceTask import *
 import os
-import FileHelper
+import HelperFunctions
 import configparser
 import sys
 
@@ -102,21 +102,21 @@ def parser_thread(gui, numCores):
         configName = gui.targets[gui.selectedTarget].get('name').replace(' ', '_')    # Get the configuration name
 
     config = configparser.ConfigParser()
-    config.read(FileHelper.getConfigFilePath())
+    config.read(HelperFunctions.getConfigFilePath())
 
     use_user_events = config.getboolean(configName, 'user_events', fallback=False)
 
     print("Use User-Events: " + str(use_user_events))
     #tickIds = [int(x) for x in config.get(configName,'tickId').split(",")]
 
-    cwd = FileHelper.getCwd()
+    cwd = HelperFunctions.getCwd()
 
     if gui == None:
         filename = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'parsing', 'events_multi.txt'))
     else:
         filename = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'trace.txt'))
 
-    cwd = FileHelper.getCwd()
+    cwd = HelperFunctions.getCwd()
     #eventFilePath = os.path.join(cwd, 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'events.txt')
     if gui == None:
         eventFilePath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'parsing', 'parsedEvents.txt'))
@@ -138,7 +138,7 @@ def parser(buffers, eventFilePath, use_user_events):
     Trace events are then converted to tasks, jobs and execution segments.
     The function returns an array with all trace tasks.
     """
-    FileHelper.printHeader("Parsing Trace Files")
+    HelperFunctions.printHeader("Parsing Trace Files")
 
     events = []
     parseTraceEvents(events, buffers)       # Parse the raw events from the trace files of each core
@@ -156,7 +156,7 @@ def parser(buffers, eventFilePath, use_user_events):
         allTasks = extractTraceInfoUserEvents(events, eventFilePath)
         
     tasks = []
-    FileHelper.printState("Found trace data for tasks:")
+    HelperFunctions.printState("Found trace data for tasks:")
 
     for task in allTasks:                   # Some tasks might be created in the trace but never execute. We exclue those here. 
         if len(task.jobs) != 0:

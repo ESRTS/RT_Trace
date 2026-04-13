@@ -1,7 +1,7 @@
 import subprocess
 from threading import Thread
 from pathlib import PurePosixPath
-import FileHelper
+import HelperFunctions
 import configparser
 import os
 
@@ -13,7 +13,7 @@ def recorderThread(gui):
     configName = "RPI_Linux"
     # Read the configuration from the ini-file
     config = configparser.ConfigParser()
-    config.read(FileHelper.getConfigFilePath())
+    config.read(HelperFunctions.getConfigFilePath())
     remoteHost = config.get(configName,'target', fallback = None)
     targetApplicationPath = config.get(configName,'target_path', fallback = None)
     remoteBasePath = config.get(configName,'recorderBase_path', fallback = None)
@@ -77,7 +77,7 @@ def recorderThread(gui):
 
             if proc.returncode == 0:
 
-                cwd = FileHelper.getCwd()
+                cwd = HelperFunctions.getCwd()
                 targetPath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_')))
 
                 os.makedirs(targetPath, exist_ok=True)  
