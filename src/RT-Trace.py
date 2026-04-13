@@ -51,12 +51,16 @@ class TraceApp(customtkinter.CTk):
 
         self.grid_columnconfigure(0, weight=0)
         self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure((0, 1, 2, 3), weight=1)
+        self.grid_rowconfigure((0, 1, 2, 3, 4, 5, 6, 7, 8), weight=1)
 
         ''' Create a frame for each main GUI area. '''
         self.sidebar_frame = customtkinter.CTkFrame(self, width=140, corner_radius=10)
-        self.sidebar_frame.grid(row=0, column=0, rowspan=4, sticky="nsew", padx=5, pady=5)
-        self.sidebar_frame.grid_rowconfigure(4, weight=1)
+        self.sidebar_frame.grid(row=0, column=0, rowspan=9, sticky="nsew", padx=5, pady=5)
+        self.sidebar_frame.grid_rowconfigure(9, weight=1)
+
+        ''' Label for the platform selection. '''
+        self.lbl_selectPlatform = customtkinter.CTkLabel(self.sidebar_frame, text="Platform Selection:", font=customtkinter.CTkFont(size=15, weight="bold"))
+        self.lbl_selectPlatform.grid(row=0, column=0, padx=(0, 0), pady=(10, 0))
 
         ''' Option to select the trace source. '''
         self.selectValues = []
@@ -66,25 +70,43 @@ class TraceApp(customtkinter.CTk):
             self.selectValues.append(target.get('name'))        # Create a list with all target names for the option menu
 
         self.opt_selectSource = customtkinter.CTkOptionMenu(self.sidebar_frame, values=self.selectValues, command=self.selectTraceSource)
-        self.opt_selectSource.grid(row=0, column=0, padx=20, pady=(20, 5), sticky="ew")
+        self.opt_selectSource.grid(row=1, column=0, padx=20, pady=(0, 5), sticky="ew")
         
+        ''' Label for the trace recorder section. '''
+        self.lbl_recording = customtkinter.CTkLabel(self.sidebar_frame, text="Record Trace", font=customtkinter.CTkFont(size=15, weight="bold"), anchor="w")
+        self.lbl_recording.grid(row=2, column=0, padx=(0, 0), pady=(10, 0))
 
         ''' Button to start recording a new trace from a target. '''
         self.btn_recordTrace = customtkinter.CTkButton(self.sidebar_frame, text="Record Trace", command=self.button_record_function)
-        self.btn_recordTrace.grid(row=1, column=0, padx=20, pady=5, sticky="ew")
+        self.btn_recordTrace.grid(row=3, column=0, padx=20, pady=5, sticky="ew")
+
+        ''' Entry to specify the trace name. '''
+        self.txt_traceName = customtkinter.CTkEntry(self.sidebar_frame, placeholder_text=self.targets[self.selectedTarget].get('name').replace(' ', '_'))
+        self.txt_traceName.grid(row=4, column=0, padx=20, pady=5, sticky="ew")
+        
+        ''' Label for the trace visualization section. '''
+        self.lbl_view = customtkinter.CTkLabel(self.sidebar_frame, text="View Trace", font=customtkinter.CTkFont(size=15, weight="bold"), anchor="w")
+        self.lbl_view.grid(row=5, column=0, padx=(0, 0), pady=(10, 0))
+
+        ''' Option to select which of the recorded traces to display. '''
+        self.selectTrace = []
+        self.selectTrace.append('Test')
+        self.selectTrace.append('Test_2')
+        self.opt_selectTrace = customtkinter.CTkOptionMenu(self.sidebar_frame, values=self.selectTrace, command=self.selectRecordedTrace)
+        self.opt_selectTrace.grid(row=6, column=0, padx=20, pady=(0, 5), sticky="ew")
 
         ''' Button to load an existing trace. '''
         self.btn_loadTrace = customtkinter.CTkButton(self.sidebar_frame, text="Load Trace", command=self.load_function)
-        self.btn_loadTrace.grid(row=2, column=0, padx=20, pady=5, sticky="ew")
+        self.btn_loadTrace.grid(row=7, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Button to save the current trace. '''
         self.btn_saveTrace = customtkinter.CTkButton(self.sidebar_frame, text="Save PDF", command=self.save_image_function)
-        self.btn_saveTrace.grid(row=3, column=0, padx=20, pady=5, sticky="ew")
+        self.btn_saveTrace.grid(row=8, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Textbox to display stdout. '''
         font = customtkinter.CTkFont(family="DejaVu Sans Mono", size=14)
         self.textbox = customtkinter.CTkTextbox(self, corner_radius=10, font=font)
-        self.textbox.grid(row=3, column=1, rowspan=1, columnspan=1, sticky="nswe", padx=5, pady=5)
+        self.textbox.grid(row=7, column=1, rowspan=2, columnspan=1, sticky="nswe", padx=5, pady=5)
         
         ''' Redirect stdout and stderr to the textbox. '''
         self.textbox.tag_config('stderr', foreground="red")
@@ -95,7 +117,7 @@ class TraceApp(customtkinter.CTk):
 
         ''' Execution Trace Widget. '''
         self.traceView = TraceView(self)
-        self.traceView.grid(row=0, column=1, rowspan=3, columnspan=1, sticky="nswe", padx=5, pady=5)
+        self.traceView.grid(row=0, column=1, rowspan=7, columnspan=1, sticky="nswe", padx=5, pady=5)
 
         ''' Print Events Switch '''
        #self.printEvents_var = customtkinter.BooleanVar(value=False)
@@ -206,6 +228,12 @@ class TraceApp(customtkinter.CTk):
         else:
             FileHelper.printState("Target not yet supported", info = self.targets[self.selectedTarget].get('name'))
             self.disableAllButtons()
+
+    def selectRecordedTrace(self, recordedTrace: str):
+        """
+        Callback that is called if a new recorded trace is selected from the option menu. 
+        """
+        print("Now selected: " + recordedTrace)
 
     def save_image_function(self):
         """
