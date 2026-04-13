@@ -38,7 +38,8 @@ class TraceApp(customtkinter.CTk):
         ''' Get the path for ps2pdf. '''
         config = configparser.ConfigParser()
         config.read(FileHelper.getConfigFilePath())
-        self.ps2pdf_path = config.get('general','ps2pdf_path', fallback = '/usr/local/bin')
+        fallback_path = os.path.join("/", "usr", "local", "bin")
+        self.ps2pdf_path = config.get('general','ps2pdf_path', fallback = fallback_path)
 
         ''' Set the default size of the GUI window and give it a name. '''
         self.windowSizeY = 600
@@ -83,7 +84,7 @@ class TraceApp(customtkinter.CTk):
         ''' Entry to specify the trace name. '''
         self.txt_traceName = customtkinter.CTkEntry(self.sidebar_frame, placeholder_text=self.targets[self.selectedTarget].get('name').replace(' ', '_'))
         self.txt_traceName.grid(row=4, column=0, padx=20, pady=5, sticky="ew")
-        
+
         ''' Label for the trace visualization section. '''
         self.lbl_view = customtkinter.CTkLabel(self.sidebar_frame, text="View Trace", font=customtkinter.CTkFont(size=15, weight="bold"), anchor="w")
         self.lbl_view.grid(row=5, column=0, padx=(0, 0), pady=(10, 0))

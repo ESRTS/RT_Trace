@@ -121,7 +121,8 @@ def readTraceBuffers():
     size = config.get('STM_FreeRTOS','bufferSize', fallback = '4000')
     print("Size is: " + str(size))
     buffer0 = config.get('STM_FreeRTOS','buffer0', fallback = '0x10000000') 
-    openocdPath = config.get('STM_FreeRTOS','openocd_path', fallback = '/usr/local/bin') 
+    fallback_path = os.path.join("/", "usr", "local", "bin")
+    openocdPath = config.get('STM_FreeRTOS','openocd_path', fallback = fallback_path) 
 
     traceBuffer = []
 

@@ -124,7 +124,8 @@ def readTraceBuffers():
     #print("Size is: " + str(size))
     buffer0 = config.get(configName,'buffer0', fallback = '0x2008001c') #"0x2008001c"  # SRAM8_BASE
     buffer1 = config.get(configName,'buffer1', fallback = '0x2008100c') #"0x2008100c"  # SRAM9_BASE
-    openocdPath = config.get(configName,'openocd_path', fallback = '/usr/local/bin') 
+    fallback_path = os.path.join("/", "usr", "local", "bin")
+    openocdPath = config.get(configName,'openocd_path', fallback = fallback_path) 
 
     traceBuffer = []
 
