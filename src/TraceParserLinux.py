@@ -10,7 +10,7 @@ import sys
 """
 Set to True to print state machine events when parsing execution.
 """
-enable_parsing_print = False
+enable_parsing_print = True
 
 """
 Flag to enable or disable the print output when parsing events from the eBPF trace file.
@@ -95,33 +95,16 @@ def parser_thread(gui, numCores):
     Thread used to parse and convert the trace information into task execution.
     As dedicated thread to not block the GUI while parsing.
     """
-    # Get the tick id for each core from the config file.
-    if gui == None:
-        configName = None
-    else:
-        configName = gui.targets[gui.selectedTarget].get('name').replace(' ', '_')    # Get the configuration name
-
+    configName = gui.targets[gui.selectedTarget].get('name').replace(' ', '_')    # Get the configuration name
     config = configparser.ConfigParser()
     config.read(HelperFunctions.getConfigFilePath())
 
     use_user_events = config.getboolean(configName, 'user_events', fallback=False)
 
-    print("Use User-Events: " + str(use_user_events))
-    #tickIds = [int(x) for x in config.get(configName,'tickId').split(",")]
+    HelperFunctions.printState("Use User-Events: ", info=str(use_user_events))
 
-    cwd = HelperFunctions.getCwd()
-
-    if gui == None:
-        filename = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'parsing', 'events_multi.txt'))
-    else:
-        filename = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'trace.txt'))
-
-    cwd = HelperFunctions.getCwd()
-    #eventFilePath = os.path.join(cwd, 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'events.txt')
-    if gui == None:
-        eventFilePath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'parsing', 'parsedEvents.txt'))
-    else:
-        eventFilePath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'events.txt'))
+    filename = os.path.abspath(os.path.join(HelperFunctions.getViewingFolderName(gui), 'trace.txt'))
+    eventFilePath = os.path.abspath(os.path.join(HelperFunctions.getViewingFolderName(gui), 'events.txt'))
 
     tasks = parser(filename, eventFilePath, use_user_events)    # Parse the content of the trace buffers
 
@@ -513,15 +496,18 @@ def getEvtId(evtString):
 def entryPrint(*args, **kwargs):
     """
     Helper function to have print output that can be globally disabled.
+    This one is used for event information.
     """
     global enable_entry_print
     if enable_entry_print:
         return print(*args, **kwargs)
 
 def parsingPrint(*args, **kwargs):
+    """
+    Helper function to have print output that can be globally disabled.
+    This one is used for parsing information.
+    """
     global enable_parsing_print
     if enable_parsing_print:
         return print(*args, **kwargs)
     
-if __name__ == '__main__':
-    parseTraceFiles(None, 4)

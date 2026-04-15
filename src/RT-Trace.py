@@ -83,7 +83,7 @@ class TraceApp(customtkinter.CTk):
         self.btn_recordTrace.grid(row=3, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Entry to specify the trace name. '''
-        recordTraceName = tk.StringVar(value=self.targets[self.selectedTarget].get('name').replace(' ', '_'))
+        recordTraceName = tk.StringVar(value="Record")#self.targets[self.selectedTarget].get('name').replace(' ', '_'))
         self.txt_traceName = customtkinter.CTkEntry(self.sidebar_frame, textvariable=recordTraceName)
         self.txt_traceName.grid(row=4, column=0, padx=20, pady=5, sticky="ew")
 
@@ -93,8 +93,12 @@ class TraceApp(customtkinter.CTk):
 
         ''' Option to select which of the recorded traces to display. '''
         self.selectTrace = []
-        self.selectTrace.append('Test')
-        self.selectTrace.append('Test_2')
+        existingTraces = HelperFunctions.getRecordedTraces(self)
+        if len(existingTraces) > 0:
+            self.selectTrace.extend(existingTraces)
+        else:
+            self.selectTrace.append('None')
+
         self.opt_selectTrace = customtkinter.CTkOptionMenu(self.sidebar_frame, values=self.selectTrace, command=self.selectRecordedTrace)
         self.opt_selectTrace.grid(row=6, column=0, padx=20, pady=(0, 5), sticky="ew")
 
@@ -148,6 +152,12 @@ class TraceApp(customtkinter.CTk):
         ''' Print the requirement string for the initially selected target. '''
         print(self.targets[self.selectedTarget].get('requirement_str'))
 
+        # If there is no existing trace to load, disable the buttons
+        if len(existingTraces) > 0:
+            self.enableTraceView()
+        else:
+            self.disableTraceView()
+
     def printEventsSwitch_event(self):
         pass
 
@@ -188,20 +198,39 @@ class TraceApp(customtkinter.CTk):
         self.btn_saveTrace.configure(state="enabled")
         self.update()
 
+    def disableTraceView(self):
+        """
+        Function disables all elements of the trace view. 
+        """
+        self.btn_loadTrace.configure(state="disabled")
+        self.btn_saveTrace.configure(state="disabled")
+        self.opt_selectTrace.configure(state="disabled")
+        self.update()
+
+    def enableTraceView(self):
+        """
+        Function enables all elements of the trace view. 
+        """
+        self.btn_loadTrace.configure(state="enabled")
+        self.btn_saveTrace.configure(state="enabled")
+        self.opt_selectTrace.configure(state="enabled")
+        self.update()
+
     def button_record_function(self):
         """
         Callback that ius called if the button "Record Trace" is clicked.
         """
+
         self.btn_recordTrace.configure(state="disabled")
         self.update()
         HelperFunctions.printHeader("recording trace")
         self.targets[self.selectedTarget].get('recordTraceFunc')(self)   # Call the target specific function to load the trace buffers
-        
 
     def load_function(self):
         """
         Callback that is called if the button "Load Trace" is clicked.
         """
+        
         self.btn_loadTrace.configure(state="disabled")
         self.update()
         HelperFunctions.printHeader("Loading trace from files")
@@ -218,13 +247,16 @@ class TraceApp(customtkinter.CTk):
             if target.get('name') is traceSource:
                 self.selectedTarget = self.targets.index(target)
 
-        self.textbox.configure(state=customtkinter.NORMAL)  # Reset the textbox if a different target is selected
+        # Reset the textbox if a different target is selected
+        self.textbox.configure(state=customtkinter.NORMAL)  
         self.textbox.delete(1.0, 'end')
         self.textbox.configure(state=customtkinter.DISABLED)
 
+        # Reset the trace view
         self.traceView.setTasks(None)
         self.traceView.draw()
 
+        # Finalize the new platform target
         if self.targets[self.selectedTarget].get('implemented') is True:    # Make sure only to load from supported targets
             print(self.targets[self.selectedTarget].get('requirement_str'))
             self.enableAllButtons()
@@ -232,11 +264,37 @@ class TraceApp(customtkinter.CTk):
             HelperFunctions.printState("Target not yet supported", info = self.targets[self.selectedTarget].get('name'))
             self.disableAllButtons()
 
+        # Load new options for the configured platform type
+        self.updateTraceViewOptions()
+
+    def updateTraceViewOptions(self):
+        """
+        Function updates the trace view options.
+        """
+        self.selectTrace = []
+        existingTraces = HelperFunctions.getRecordedTraces(self)
+        if len(existingTraces) > 0:
+            self.selectTrace.extend(existingTraces)
+            self.enableTraceView()
+        else:
+            self.selectTrace.append('None')
+            self.disableTraceView()
+        self.opt_selectTrace.configure(values= self.selectTrace) 
+        self.opt_selectTrace.set(self.selectTrace[0])
+
     def selectRecordedTrace(self, recordedTrace: str):
         """
         Callback that is called if a new recorded trace is selected from the option menu. 
         """
-        print("Now selected: " + recordedTrace)
+        HelperFunctions.printState("Now selected: ", info = recordedTrace)
+        # Reset the textbox if a different target is selected
+        self.textbox.configure(state=customtkinter.NORMAL)  
+        self.textbox.delete(1.0, 'end')
+        self.textbox.configure(state=customtkinter.DISABLED)
+
+        # Reset the trace view
+        self.traceView.setTasks(None)
+        self.traceView.draw()
 
     def save_image_function(self):
         """
@@ -248,12 +306,15 @@ class TraceApp(customtkinter.CTk):
             now = datetime.now()
 
             cwd = HelperFunctions.getCwd()
-            targetPath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'output'))
-            Path(targetPath).mkdir(parents=True, exist_ok=True)
-            pdfFilename = self.targets[self.selectedTarget].get('name') + "_Trace_" + now.strftime("%d_%m_%Y_%H_%M_%S")
-            pdfFilename = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'output', pdfFilename + ".pdf"))
+            #targetPath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'output'))
+            #Path(targetPath).mkdir(parents=True, exist_ok=True)
 
-            psFilename = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'output', "tmp.ps"))
+            outputPath = HelperFunctions.getOutputPath(self)
+            HelperFunctions.makeFolder(outputPath)
+            #pdfFilename = self.targets[self.selectedTarget].get('name') + "_Trace_" + now.strftime("%d_%m_%Y_%H_%M_%S")
+            pdfFilename = os.path.abspath(os.path.join(outputPath, "Trace_" + now.strftime("%d_%m_%Y_%H_%M_%S") + ".pdf"))
+
+            psFilename = os.path.abspath(os.path.join(os.path.dirname( cwd ), outputPath, "tmp.ps"))
 
             self.traceView.postscript(file=psFilename, colormode="color")                 # Generate the postscript of the trace canvas
 

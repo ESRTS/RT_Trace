@@ -46,12 +46,14 @@ def pico_thread(gui):
 
         cwd = HelperFunctions.getCwd()
 
-        targetPath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_')))
+        #targetPath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_')))
         #FileHelper.printState("targetPath: ", info = targetPath)
-        Path(targetPath).mkdir(parents=True, exist_ok=True)
+        #Path(targetPath).mkdir(parents=True, exist_ok=True)
         
-        filename1 = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'raw_buffer0'))
-        filename2 = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'raw_buffer1'))
+        folderName = HelperFunctions.getRecordingFolderName(gui)
+        HelperFunctions.makeFolder(folderName)
+        filename1 = os.path.abspath(os.path.join(folderName, 'raw_buffer0'))
+        filename2 = os.path.abspath(os.path.join(folderName, 'raw_buffer1'))
 
         # Parse the trace buffers
         writeFile(traceBuffer[0], filename1)
@@ -63,6 +65,8 @@ def pico_thread(gui):
     # Enable the buttons and update the GUI
     if gui is not None:
         gui.btn_recordTrace.configure(state="normal")
+        # Update trace view option menu
+        gui.updateTraceViewOptions()
         gui.update()
 
 def writeFile(data, filename):

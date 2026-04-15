@@ -1,6 +1,8 @@
 import sys
 import os
+from pathlib import Path
 import platform
+from datetime import datetime
 
 def getCwd():
     """
@@ -51,3 +53,57 @@ def hexdump(buffer: bytes, base_addr: int = 0, width: int = 16):
 
             print(f"0x{addr:08x}  {hex_bytes}  |{ascii_part}|") 
 
+def getTimeString():
+    """
+    Returns a time string. 
+    """
+    now = datetime.now()
+    formatted = now.strftime("%Y-%m-%d_%H:%M:%S")
+    
+    return formatted
+
+def getRecordedTraces(gui):
+    """
+    Gets the recorded trace folders of the current platform configuration. Sorted by the folder creation time, most recent first.
+    """
+    recordedTraces = []
+
+    folderName = os.path.abspath(os.path.join(os.path.dirname( getCwd() ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_')))
+
+    path = Path(folderName)
+
+    if path.exists() and path.is_dir():
+
+        recordedTraces = [p for p in path.iterdir() if p.is_dir()]
+
+        # Sort by creation time (most recent first)
+        recordedTraces.sort(key=lambda p: p.stat().st_ctime, reverse=True)
+
+        # Return only folder names
+        return [p.name for p in recordedTraces]
+    else:
+        return []
+
+
+def getRecordingFolderName(gui):
+    """ Helper to create the absolute path for this experiment configuration. """
+    targetName = gui.targets[gui.selectedTarget].get('name').replace(' ', '_')
+    measurementName = f"{gui.txt_traceName.get()}_{getTimeString()}"
+    return os.path.abspath(os.path.join(os.path.dirname( getCwd() ), 'data', targetName, measurementName))
+    
+def getViewingFolderName(gui):
+    """ Helper to create the absolute path for the trace visualization. """
+    targetName = gui.targets[gui.selectedTarget].get('name').replace(' ', '_')
+    measurementName = gui.opt_selectTrace.get()
+    return os.path.abspath(os.path.join(os.path.dirname( getCwd() ), 'data', targetName, measurementName))
+
+def getOutputPath(gui):
+    """ Helper to create the absolute path for the trace visualization. """
+    targetName = gui.targets[gui.selectedTarget].get('name').replace(' ', '_')
+    measurementName = gui.opt_selectTrace.get()
+    return os.path.abspath(os.path.join(os.path.dirname( getCwd() ), 'output', targetName, measurementName))
+
+def makeFolder(pathstring: str):
+    """ Wrapper to create a folder. """
+    path = Path(pathstring)
+    path.mkdir(parents=True, exist_ok=True)

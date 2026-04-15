@@ -45,7 +45,7 @@ def recorderThread(gui):
     if configError is False:
         remoteScript = PurePosixPath(remoteBasePath, scriptName)
         remoteTrace = PurePosixPath(remoteBasePath, traceName)
-        localTrace = os.path.join('data', 'RPI_Linux')
+        #localTrace = os.path.join('data', 'RPI_Linux')
 
         print(remoteScript)
         print(remoteTrace)
@@ -77,8 +77,9 @@ def recorderThread(gui):
 
             if proc.returncode == 0:
 
-                cwd = HelperFunctions.getCwd()
-                targetPath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_')))
+                targetPath = HelperFunctions.getRecordingFolderName(gui)
+                #cwd = HelperFunctions.getCwd()
+                #targetPath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_')))
 
                 os.makedirs(targetPath, exist_ok=True)  
 
@@ -89,9 +90,9 @@ def recorderThread(gui):
                 )
                 
                 if result.returncode == 0:
-                    print("Downloaded " + traceName + " to " + str(localTrace))
+                    HelperFunctions.printState("Downloaded: ", info= traceName + " to " + str(targetPath))
                 else:
-                    print("[ERROR] Could not download the file " + traceName)
+                    HelperFunctions.printState("[ERROR] Could not download the file", info= traceName)
             else:
                 print("[ERROR] Something went wrong...")
 
@@ -103,4 +104,6 @@ def recorderThread(gui):
     # Enable the buttons and update the GUI
     if gui is not None:
         gui.btn_recordTrace.configure(state="normal")
+        # Update trace view option menu
+        gui.updateTraceViewOptions()
         gui.update()
