@@ -5,7 +5,7 @@ from time import sleep
 import os
 import sys
 from pathlib import Path
-import FileHelper
+import HelperFunctions
 import configparser
 
 """
@@ -44,14 +44,16 @@ def pico_thread(gui):
         #print("Size trace buffer core 0: " + str(len(traceBuffer[0])) + "b")
         #print("Size trace buffer core 1: " + str(len(traceBuffer[1])) + "b")
 
-        cwd = FileHelper.getCwd()
+        cwd = HelperFunctions.getCwd()
 
-        targetPath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_')))
+        #targetPath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_')))
         #FileHelper.printState("targetPath: ", info = targetPath)
-        Path(targetPath).mkdir(parents=True, exist_ok=True)
+        #Path(targetPath).mkdir(parents=True, exist_ok=True)
         
-        filename1 = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'raw_buffer0'))
-        filename2 = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'raw_buffer1'))
+        folderName = HelperFunctions.getRecordingFolderName(gui)
+        HelperFunctions.makeFolder(folderName)
+        filename1 = os.path.abspath(os.path.join(folderName, 'raw_buffer0'))
+        filename2 = os.path.abspath(os.path.join(folderName, 'raw_buffer1'))
 
         # Parse the trace buffers
         writeFile(traceBuffer[0], filename1)
@@ -63,6 +65,8 @@ def pico_thread(gui):
     # Enable the buttons and update the GUI
     if gui is not None:
         gui.btn_recordTrace.configure(state="normal")
+        # Update trace view option menu
+        gui.updateTraceViewOptions()
         gui.update()
 
 def writeFile(data, filename):
@@ -78,7 +82,7 @@ def writeFile(data, filename):
     # Close file
     binary_file.close()
 
-    FileHelper.printState("Created File: ", info = filename + ".txt")
+    HelperFunctions.printState("Created File: ", info = filename + ".txt")
 
 def textRedirectErrThread(output):
     """
@@ -119,16 +123,17 @@ def readTraceBuffers():
 
     # Read the configuration from the ini-file
     config = configparser.ConfigParser()
-    config.read(FileHelper.getConfigFilePath())
+    config.read(HelperFunctions.getConfigFilePath())
     size = config.get(configName,'bufferSize', fallback = '2000')
     #print("Size is: " + str(size))
     buffer0 = config.get(configName,'buffer0', fallback = '0x2008001c') #"0x2008001c"  # SRAM8_BASE
     buffer1 = config.get(configName,'buffer1', fallback = '0x2008100c') #"0x2008100c"  # SRAM9_BASE
-    openocdPath = config.get(configName,'openocd_path', fallback = '/usr/local/bin') 
+    fallback_path = os.path.join("/", "usr", "local", "bin")
+    openocdPath = config.get(configName,'openocd_path', fallback = fallback_path) 
 
     traceBuffer = []
 
-    FileHelper.printState("read trace buffers")
+    HelperFunctions.printState("read trace buffers")
 
     my_env = os.environ.copy()
     my_env["PATH"] = f"{my_env['PATH']}:{openocdPath}" # This is not final, a config file for the openocd path should be added
@@ -204,10 +209,10 @@ def readTraceBuffers():
     traceBuffer.append(dataCore1)
 
     tel.close()
-    FileHelper.printState("Closing Telnet session")
+    HelperFunctions.printState("Closing Telnet session")
     debugger.terminate()
     debugger.wait()
-    FileHelper.printState("Closing OpenOCD session")
+    HelperFunctions.printState("Closing OpenOCD session")
 
     return traceBuffer
 

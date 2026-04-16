@@ -1,4 +1,5 @@
 import customtkinter
+import tkinter as tk
 import sys
 from TraceView import TraceView
 from PicoTrace import loadPico2TraceBuffers
@@ -11,7 +12,7 @@ from pathlib import Path
 import subprocess
 import os
 from datetime import datetime
-import FileHelper
+import HelperFunctions
 import configparser
 import queue
 
@@ -37,8 +38,9 @@ class TraceApp(customtkinter.CTk):
 
         ''' Get the path for ps2pdf. '''
         config = configparser.ConfigParser()
-        config.read(FileHelper.getConfigFilePath())
-        self.ps2pdf_path = config.get('general','ps2pdf_path', fallback = '/usr/local/bin')
+        config.read(HelperFunctions.getConfigFilePath())
+        fallback_path = os.path.join("/", "usr", "local", "bin")
+        self.ps2pdf_path = config.get('general','ps2pdf_path', fallback = fallback_path)
 
         ''' Set the default size of the GUI window and give it a name. '''
         self.windowSizeY = 600
@@ -51,12 +53,16 @@ class TraceApp(customtkinter.CTk):
 
         self.grid_columnconfigure(0, weight=0)
         self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure((0, 1, 2, 3), weight=1)
+        self.grid_rowconfigure((0, 1, 2, 3, 4, 5, 6, 7, 8), weight=1)
 
         ''' Create a frame for each main GUI area. '''
         self.sidebar_frame = customtkinter.CTkFrame(self, width=140, corner_radius=10)
-        self.sidebar_frame.grid(row=0, column=0, rowspan=4, sticky="nsew", padx=5, pady=5)
-        self.sidebar_frame.grid_rowconfigure(4, weight=1)
+        self.sidebar_frame.grid(row=0, column=0, rowspan=9, sticky="nsew", padx=5, pady=5)
+        self.sidebar_frame.grid_rowconfigure(9, weight=1)
+
+        ''' Label for the platform selection. '''
+        self.lbl_selectPlatform = customtkinter.CTkLabel(self.sidebar_frame, text="Platform Selection:", font=customtkinter.CTkFont(size=15, weight="bold"))
+        self.lbl_selectPlatform.grid(row=0, column=0, padx=(0, 0), pady=(10, 0))
 
         ''' Option to select the trace source. '''
         self.selectValues = []
@@ -66,25 +72,48 @@ class TraceApp(customtkinter.CTk):
             self.selectValues.append(target.get('name'))        # Create a list with all target names for the option menu
 
         self.opt_selectSource = customtkinter.CTkOptionMenu(self.sidebar_frame, values=self.selectValues, command=self.selectTraceSource)
-        self.opt_selectSource.grid(row=0, column=0, padx=20, pady=(20, 5), sticky="ew")
+        self.opt_selectSource.grid(row=1, column=0, padx=20, pady=(0, 5), sticky="ew")
         
+        ''' Label for the trace recorder section. '''
+        self.lbl_recording = customtkinter.CTkLabel(self.sidebar_frame, text="Record Trace", font=customtkinter.CTkFont(size=15, weight="bold"), anchor="w")
+        self.lbl_recording.grid(row=2, column=0, padx=(0, 0), pady=(10, 0))
 
         ''' Button to start recording a new trace from a target. '''
         self.btn_recordTrace = customtkinter.CTkButton(self.sidebar_frame, text="Record Trace", command=self.button_record_function)
-        self.btn_recordTrace.grid(row=1, column=0, padx=20, pady=5, sticky="ew")
+        self.btn_recordTrace.grid(row=3, column=0, padx=20, pady=5, sticky="ew")
+
+        ''' Entry to specify the trace name. '''
+        recordTraceName = tk.StringVar(value="Record")#self.targets[self.selectedTarget].get('name').replace(' ', '_'))
+        self.txt_traceName = customtkinter.CTkEntry(self.sidebar_frame, textvariable=recordTraceName)
+        self.txt_traceName.grid(row=4, column=0, padx=20, pady=5, sticky="ew")
+
+        ''' Label for the trace visualization section. '''
+        self.lbl_view = customtkinter.CTkLabel(self.sidebar_frame, text="View Trace", font=customtkinter.CTkFont(size=15, weight="bold"), anchor="w")
+        self.lbl_view.grid(row=5, column=0, padx=(0, 0), pady=(10, 0))
+
+        ''' Option to select which of the recorded traces to display. '''
+        self.selectTrace = []
+        existingTraces = HelperFunctions.getRecordedTraces(self)
+        if len(existingTraces) > 0:
+            self.selectTrace.extend(existingTraces)
+        else:
+            self.selectTrace.append('None')
+
+        self.opt_selectTrace = customtkinter.CTkOptionMenu(self.sidebar_frame, values=self.selectTrace, command=self.selectRecordedTrace)
+        self.opt_selectTrace.grid(row=6, column=0, padx=20, pady=(0, 5), sticky="ew")
 
         ''' Button to load an existing trace. '''
         self.btn_loadTrace = customtkinter.CTkButton(self.sidebar_frame, text="Load Trace", command=self.load_function)
-        self.btn_loadTrace.grid(row=2, column=0, padx=20, pady=5, sticky="ew")
+        self.btn_loadTrace.grid(row=7, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Button to save the current trace. '''
         self.btn_saveTrace = customtkinter.CTkButton(self.sidebar_frame, text="Save PDF", command=self.save_image_function)
-        self.btn_saveTrace.grid(row=3, column=0, padx=20, pady=5, sticky="ew")
+        self.btn_saveTrace.grid(row=8, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Textbox to display stdout. '''
         font = customtkinter.CTkFont(family="DejaVu Sans Mono", size=14)
         self.textbox = customtkinter.CTkTextbox(self, corner_radius=10, font=font)
-        self.textbox.grid(row=3, column=1, rowspan=1, columnspan=1, sticky="nswe", padx=5, pady=5)
+        self.textbox.grid(row=7, column=1, rowspan=2, columnspan=1, sticky="nswe", padx=5, pady=5)
         
         ''' Redirect stdout and stderr to the textbox. '''
         self.textbox.tag_config('stderr', foreground="red")
@@ -95,7 +124,7 @@ class TraceApp(customtkinter.CTk):
 
         ''' Execution Trace Widget. '''
         self.traceView = TraceView(self)
-        self.traceView.grid(row=0, column=1, rowspan=3, columnspan=1, sticky="nswe", padx=5, pady=5)
+        self.traceView.grid(row=0, column=1, rowspan=7, columnspan=1, sticky="nswe", padx=5, pady=5)
 
         ''' Print Events Switch '''
        #self.printEvents_var = customtkinter.BooleanVar(value=False)
@@ -122,6 +151,12 @@ class TraceApp(customtkinter.CTk):
 
         ''' Print the requirement string for the initially selected target. '''
         print(self.targets[self.selectedTarget].get('requirement_str'))
+
+        # If there is no existing trace to load, disable the buttons
+        if len(existingTraces) > 0:
+            self.enableTraceView()
+        else:
+            self.disableTraceView()
 
     def printEventsSwitch_event(self):
         pass
@@ -163,23 +198,42 @@ class TraceApp(customtkinter.CTk):
         self.btn_saveTrace.configure(state="enabled")
         self.update()
 
+    def disableTraceView(self):
+        """
+        Function disables all elements of the trace view. 
+        """
+        self.btn_loadTrace.configure(state="disabled")
+        self.btn_saveTrace.configure(state="disabled")
+        self.opt_selectTrace.configure(state="disabled")
+        self.update()
+
+    def enableTraceView(self):
+        """
+        Function enables all elements of the trace view. 
+        """
+        self.btn_loadTrace.configure(state="enabled")
+        self.btn_saveTrace.configure(state="enabled")
+        self.opt_selectTrace.configure(state="enabled")
+        self.update()
+
     def button_record_function(self):
         """
         Callback that ius called if the button "Record Trace" is clicked.
         """
+
         self.btn_recordTrace.configure(state="disabled")
         self.update()
-        FileHelper.printHeader("recording trace")
+        HelperFunctions.printHeader("recording trace")
         self.targets[self.selectedTarget].get('recordTraceFunc')(self)   # Call the target specific function to load the trace buffers
-        
 
     def load_function(self):
         """
         Callback that is called if the button "Load Trace" is clicked.
         """
+        
         self.btn_loadTrace.configure(state="disabled")
         self.update()
-        FileHelper.printHeader("Loading trace from files")
+        HelperFunctions.printHeader("Loading trace from files")
         if self.targets[self.selectedTarget].get('name') != 'RPI Linux':
             parseTraceFiles(self, self.targets[self.selectedTarget].get('numCores'))
         else:
@@ -193,36 +247,69 @@ class TraceApp(customtkinter.CTk):
             if target.get('name') is traceSource:
                 self.selectedTarget = self.targets.index(target)
 
-        self.textbox.configure(state=customtkinter.NORMAL)  # Reset the textbox if a different target is selected
+        # Reset the textbox if a different target is selected
+        self.textbox.configure(state=customtkinter.NORMAL)  
         self.textbox.delete(1.0, 'end')
         self.textbox.configure(state=customtkinter.DISABLED)
 
+        # Reset the trace view
         self.traceView.setTasks(None)
         self.traceView.draw()
 
+        # Finalize the new platform target
         if self.targets[self.selectedTarget].get('implemented') is True:    # Make sure only to load from supported targets
             print(self.targets[self.selectedTarget].get('requirement_str'))
             self.enableAllButtons()
         else:
-            FileHelper.printState("Target not yet supported", info = self.targets[self.selectedTarget].get('name'))
+            HelperFunctions.printState("Target not yet supported", info = self.targets[self.selectedTarget].get('name'))
             self.disableAllButtons()
+
+        # Load new options for the configured platform type
+        self.updateTraceViewOptions()
+
+    def updateTraceViewOptions(self):
+        """
+        Function updates the trace view options.
+        """
+        self.selectTrace = []
+        existingTraces = HelperFunctions.getRecordedTraces(self)
+        if len(existingTraces) > 0:
+            self.selectTrace.extend(existingTraces)
+            self.enableTraceView()
+        else:
+            self.selectTrace.append('None')
+            self.disableTraceView()
+        self.opt_selectTrace.configure(values= self.selectTrace) 
+        self.opt_selectTrace.set(self.selectTrace[0])
+
+    def selectRecordedTrace(self, recordedTrace: str):
+        """
+        Callback that is called if a new recorded trace is selected from the option menu. 
+        """
+        HelperFunctions.printState("Now selected: ", info = recordedTrace)
+        # Reset the textbox if a different target is selected
+        self.textbox.configure(state=customtkinter.NORMAL)  
+        self.textbox.delete(1.0, 'end')
+        self.textbox.configure(state=customtkinter.DISABLED)
+
+        # Reset the trace view
+        self.traceView.setTasks(None)
+        self.traceView.draw()
 
     def save_image_function(self):
         """
         Function generates a PDF of the current trace view.
         """
-        FileHelper.printHeader("export trace to pdf")
+        HelperFunctions.printHeader("export trace to pdf")
         if self.traceView.tasks is not None:    # Only save the trace as PDF if some tasks are loaded
 
             now = datetime.now()
 
-            cwd = FileHelper.getCwd()
-            targetPath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'output'))
-            Path(targetPath).mkdir(parents=True, exist_ok=True)
-            pdfFilename = self.targets[self.selectedTarget].get('name') + "_Trace_" + now.strftime("%d_%m_%Y_%H_%M_%S")
-            pdfFilename = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'output', pdfFilename + ".pdf"))
+            outputPath = HelperFunctions.getOutputPath(self)
+            HelperFunctions.makeFolder(outputPath)
+            pdfFilename = os.path.abspath(os.path.join(outputPath, "Trace_" + now.strftime("%d_%m_%Y_%H_%M_%S") + ".pdf"))
 
-            psFilename = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'output', "tmp.ps"))
+            psFilename = os.path.abspath(os.path.join(outputPath, "tmp.ps"))
 
             self.traceView.postscript(file=psFilename, colormode="color")                 # Generate the postscript of the trace canvas
 
@@ -232,12 +319,12 @@ class TraceApp(customtkinter.CTk):
             streamdata = process.communicate()[0]                                       # Get the return code of the process
             rc = process.returncode
             if rc == 0:
-                FileHelper.printState("Saved trace as ", info = pdfFilename)
+                HelperFunctions.printState("Saved trace as ", info = pdfFilename)
             else:
                 print("Cound not generate PDF file.", file=sys.stderr)
             os.remove(psFilename)                                                         # Delete the temporary postscript file
         else:
-            FileHelper.printState("No trace loaded!")
+            HelperFunctions.printState("No trace loaded!")
 
 class TextRedirector(object):
     """

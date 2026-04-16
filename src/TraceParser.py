@@ -3,7 +3,7 @@ from pathlib import Path
 import io
 from TraceTask import *
 import os
-import FileHelper
+import HelperFunctions
 import configparser
 import sys
 
@@ -115,14 +115,15 @@ def parser_thread(gui, numCores):
     # Get the tick id for each core from the config file.
     configName = gui.targets[gui.selectedTarget].get('name').replace(' ', '_')    # Get the configuration name
     config = configparser.ConfigParser()
-    config.read(FileHelper.getConfigFilePath())
+    config.read(HelperFunctions.getConfigFilePath())
     tickIds = [int(x) for x in config.get(configName,'tickId').split(",")]
 
     for c in range(0,numCores):
 
-        cwd = FileHelper.getCwd()
+        cwd = HelperFunctions.getCwd()
 
-        filename = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'raw_buffer' + str(c)))
+        filename = os.path.abspath(os.path.join(HelperFunctions.getViewingFolderName(gui), 'raw_buffer' + str(c)))
+        #filename = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'raw_buffer' + str(c)))
 
         bufferPaths.append(Path(filename + ".txt"))
         if not bufferPaths[-1].is_file():
@@ -135,13 +136,14 @@ def parser_thread(gui, numCores):
         traceBuffer = bytearray(fh.read())
         allBuffers.append(traceBuffer)
         
-        FileHelper.printState("Loaded trace buffer: ", info=str(buffer))
-        FileHelper.hexdump(traceBuffer, base_addr=int(config.get(configName, "buffer"+str(core)),16))
+        HelperFunctions.printState("Loaded trace buffer: ", info=str(buffer))
+        HelperFunctions.hexdump(traceBuffer, base_addr=int(config.get(configName, "buffer"+str(core)),16))
         core = core + 1
 
-    cwd = FileHelper.getCwd()
+    cwd = HelperFunctions.getCwd()
     #eventFilePath = os.path.join(cwd, 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'events.txt')
-    eventFilePath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'events.txt'))
+    eventFilePath = os.path.abspath(os.path.join(HelperFunctions.getViewingFolderName(gui), 'events.txt'))
+    #eventFilePath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_'), 'events.txt'))
 
     tasks = parser(allBuffers, eventFilePath, tickIds)    # Parse the content of the trace buffers
 
@@ -158,7 +160,7 @@ def parser(buffers, eventFilePath, tickIds):
     Trace events are then converted to tasks, jobs and execution segments.
     The function returns an array with all trace tasks.
     """
-    FileHelper.printHeader("parsing files")
+    HelperFunctions.printHeader("parsing files")
 
     events = []
     parseTraceEvents(events, buffers)       # Parse the raw events from the trace files of each core
@@ -170,7 +172,7 @@ def parser(buffers, eventFilePath, tickIds):
         if len(task.jobs) != 0:
             tasks.append(task)
 
-    FileHelper.printState("Found trace data for tasks:")
+    HelperFunctions.printState("Found trace data for tasks:")
     for task in tasks:                      # Print a list with parsed tasks and the number of jobs they have in the trace.
         print("   " + str(task))
         #task.printAll()
@@ -255,7 +257,7 @@ def extractTraceInfo(events, eventFilePath, tickIds):
     smParser(traceStart, sortedEvents, tasks, len(tickIds))
 
     eventFile.close()
-    FileHelper.printState("Wrote event file to: ", info=eventFilePath)
+    HelperFunctions.printState("Wrote event file to: ", info=eventFilePath)
 
     return tasks
     
@@ -272,7 +274,7 @@ def parseTraceEvents(events, buffers):
     bufferEvents = []
     
     for buffer in buffers:
-        FileHelper.printState("Reading events of core " + str(coreId))
+        HelperFunctions.printState("Reading events of core " + str(coreId))
         bufferEvents.append([])
 
         parser = EventParser(buffer)
