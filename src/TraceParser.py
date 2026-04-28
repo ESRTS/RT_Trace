@@ -684,6 +684,13 @@ def smParser(traceStart, sortedEvents, allTasks, numCores):
                 scheduler[core].finishJob()
 
                 running[core] = findTaskById(tasks, evt.get('taskId'))                                              # Start the execution of the task
+                
+                #???
+                # If a deadline was missed, the job might continue directly!
+                if (running[core].currentJob is None):
+                    running[core].newJob(ts, None)
+                #???
+
                 running[core].startExec(ts, core, ExecutionType.EXECUTE)
                 state[core] = STATE_TASK                                                                            # Set next state to TASK
             elif type == TRACE_TASK_CREATE:
