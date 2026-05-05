@@ -589,7 +589,14 @@ def smParser(traceStart, sortedEvents, allTasks, numCores):
                 state[core] = STATE_IRQ # Set next state to IRQ
             elif type == TRACE_TASK_STOP_EXEC:
                 eventPrint("[ts=" + str(ts) + " - Core: " + str(core) + "-  State: STATE_TASK - Evt: TRACE_TASK_STOP_EXEC] Stopping task " + running[core].name + " delayUntilFlag: " + str(running[core].delayUntil))
-                running[core].stopExec(ts)                                                                          # Stop the execution of the task
+                
+                ##
+                ## ?? 
+                ##
+                if running[core].currentJob != None:
+                    if running[core].currentJob.activeInterval != None:
+                        running[core].stopExec(ts)                                                                          # Stop the execution of the task
+    
                 if running[core].delayUntil is True:                                                                # If the delayUntil flag is set, finish the job
                     running[core].finishJob()
                 elif running[core].name == "Tmr Svc":                                                               # The timer service task of freeRTOS is a special task and seen as one job per execution
