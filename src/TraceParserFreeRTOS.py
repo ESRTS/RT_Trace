@@ -124,7 +124,7 @@ def parser_thread(gui, numCores):
         allBuffers.append(traceBuffer)
         
         HelperFunctions.printState("Loaded trace buffer: ", info=str(buffer))
-        HelperFunctions.hexdump(traceBuffer, base_addr=int(config.get(configName, "buffer"+str(core)),16))
+        HelperFunctions.hexdump(traceBuffer, base_addr=int(config.get(configName, "buffer"+str(core), fallback="0x00000000"),16))
         core = core + 1
 
     eventFilePath = os.path.abspath(os.path.join(HelperFunctions.getViewingFolderName(gui), 'events.txt'))

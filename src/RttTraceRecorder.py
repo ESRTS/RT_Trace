@@ -32,8 +32,8 @@ def rtt_thread(gui):
 
     folderName = HelperFunctions.getRecordingFolderName(gui)
     HelperFunctions.makeFolder(folderName)
-    filename1 = os.path.abspath(os.path.join(folderName, 'raw_buffer0'))
-    filename2 = os.path.abspath(os.path.join(folderName, 'raw_buffer1'))
+    filename1 = os.path.abspath(os.path.join(folderName, 'raw_buffer0.txt'))
+    filename2 = os.path.abspath(os.path.join(folderName, 'raw_buffer1.txt'))
     
     config = configparser.ConfigParser()
     config.read(HelperFunctions.getConfigFilePath())
