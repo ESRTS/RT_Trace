@@ -86,6 +86,9 @@ class TraceView(customtkinter.CTkCanvas):
             self.rightBound_tks = self.rightBound_tks + 1000 
             self.zoomMin = self.rightBound_tks
 
+            if self.rightBound_tks > 100000:
+                self.rightBound_tks = 100000
+
             # Check how many cores are used in the trace. If there is one core, the task colors are used. If there are multiple cores, 
             # one color is used per core. 
             coresFound = []

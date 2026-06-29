@@ -30,12 +30,12 @@ class TraceApp(customtkinter.CTk):
         'recordTraceFunc' is a target specific function that loads the trace buffer
         """
         self.targets = [
-            {'name': 'Pico2 FreeRTOS', 'numCores': 2, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet need to be on the path.', 'recordTraceFunc' : loadPico2TraceBuffers},
-            {'name': 'Pico2 FreeRTOS PSRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet need to be on the path.', 'recordTraceFunc' : loadPico2TraceBuffersPSRAM},
-            {'name': 'Pico2 FreeRTOS RTT', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Experimental! Uses RTT to record the trace data. Specify elf-file in the ini-file.', 'recordTraceFunc' : loadPico2RttTraceBuffers},
+            {'name': 'Pico2 FreeRTOS', 'numCores': 2, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet need to be on the path.', 'recordTraceFunc' : loadPico2TraceBuffers, 'loadTraceFunc': parseTraceFiles},
+            {'name': 'Pico2 FreeRTOS PSRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet need to be on the path.', 'recordTraceFunc' : loadPico2TraceBuffersPSRAM, 'loadTraceFunc': parseTraceFiles},
+            {'name': 'Pico2 FreeRTOS RTT', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Experimental! Uses RTT to record the trace data. Specify elf-file in the ini-file.', 'recordTraceFunc' : loadPico2RttTraceBuffers, 'loadTraceFunc': parseTraceFiles},
             #{'name': 'STM FreeRTOS', 'numCores': 1, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : loadSTM32L476TraceBuffers},
             #{'name': 'RPI QNX', 'numCores': 4, 'implemented': False, 'requirement_str' : 'To load the trace buffer, telnet needs to be on the path.', 'recordTraceFunc' : None},
-            {'name': 'RPI Linux', 'numCores': 4, 'implemented': True, 'requirement_str' : 'Experimental...', 'recordTraceFunc' : loadLinuxraceBuffers}
+            {'name': 'RPI Linux', 'numCores': 4, 'implemented': True, 'requirement_str' : 'Experimental...', 'recordTraceFunc' : loadLinuxraceBuffers, 'loadTraceFunc': linuxParseTraceFiles}
         ]
 
         ''' Get the path for ps2pdf. '''
@@ -226,7 +226,7 @@ class TraceApp(customtkinter.CTk):
         self.btn_recordTrace.configure(state="disabled")
         self.update()
         HelperFunctions.printHeader("recording trace")
-        self.targets[self.selectedTarget].get('recordTraceFunc')(self)   # Call the target specific function to load the trace buffers
+        self.targets[self.selectedTarget].get('recordTraceFunc')(self)   # Call the target specific function to record the trace buffers
 
     def load_function(self):
         """
@@ -236,10 +236,7 @@ class TraceApp(customtkinter.CTk):
         self.btn_loadTrace.configure(state="disabled")
         self.update()
         HelperFunctions.printHeader("Loading trace from files")
-        if self.targets[self.selectedTarget].get('name') != 'RPI Linux':
-            parseTraceFiles(self, self.targets[self.selectedTarget].get('numCores'))
-        else:
-            linuxParseTraceFiles(self, self.targets[self.selectedTarget].get('numCores'))
+        self.targets[self.selectedTarget].get('loadTraceFunc')(self, self.targets[self.selectedTarget].get('numCores'))   # Call the target specific function to load the trace buffers
 
     def selectTraceSource(self, traceSource: str):
         """

@@ -239,7 +239,7 @@ def extractTraceInfo(events, eventFilePath, tickIds):
             evt['ts'] = evt['ts'] - traceStart
         eventFile.write('\tts: ' + "%06.3f" % (evt.get('ts')/1000) + "ms\t" + eventMap.get(evt.get('type')) + ":  " + str(evt) + "\n")
 
-    executionParser(sortedEvents, tasks, len(tickIds))
+    executionParser(sortedEvents, tasks, tickIds)
    #->  smParser(traceStart, sortedEvents, tasks, len(tickIds))
 
     eventFile.close()
@@ -247,26 +247,148 @@ def extractTraceInfo(events, eventFilePath, tickIds):
 
     return tasks
 
-def executionParser(sortedEvents, tasks, numCores):
+def executionParser(sortedEvents, tasks, tickIds):
 
     for task in tasks:
-        for evt in sortedEvents:
-            type = evt.get('type')
-            taskId = evt.get('taskId')
-            core = evt.get('core')
-            ts = evt.get('ts')
 
-            if type == TRACE_TASK_START_EXEC:
-                if taskId == task.id:
-                    task.newJob(ts, None)
-                    task.startExec(ts, core, ExecutionType.EXECUTE)
+        if "idle" in task.name.lower():
+            parseIdleTask(sortedEvents, task)
+        elif task.id < len(tickIds):    # scheduler IDs
+            pass
+        elif task.id in tickIds:
+            parseIrq(sortedEvents, task)
+        else:
+            parseTask(sortedEvents, task)
+        # for evt in sortedEvents:
+        #     type = evt.get('type')
+        #     taskId = evt.get('taskId')
+        #     core = evt.get('core')
+        #     ts = evt.get('ts')
+        #     irqId = evt.get('irqId')
 
-            elif type == TRACE_TASK_STOP_EXEC:
-                if taskId == task.id:
+        #     if irqId in tickIds and task.id == irqId:
+        #         if type == TRACE_ISR_ENTER:
+        #             task.newJob(ts, None)
+        #             task.startExec(ts, core, ExecutionType.EXECUTE)
+                
+        #         elif type == TRACE_ISR_EXIT or type == TRACE_ISR_EXIT_TO_SCHEDULER:
+        #             task.stopExec(ts)
+        #             task.finishJob()
+
+            # if type == TRACE_TASK_START_EXEC:
+            #     if taskId == task.id:
+            #         task.newJob(ts, None)
+            #         task.startExec(ts, core, ExecutionType.EXECUTE)
+
+            # elif type == TRACE_TASK_STOP_EXEC:
+            #     if taskId == task.id:
+            #         task.stopExec(ts)
+            #         task.finishJob()
+
+def parseIdleTask(sortedEvents, task):
+
+    
+    ts = 0
+
+    coreId = int(task.name[len("IDLE"):])
+
+    for evt in sortedEvents:
+        type = evt.get('type')
+        taskId = evt.get('taskId')
+        core = evt.get('core')
+        ts = evt.get('ts')
+
+        if type == TRACE_IDLE and coreId == core:
+            print(f"IDLE started at t={ts}")
+            task.newJob(ts, None)
+            task.startExec(ts, core, ExecutionType.EXECUTE)
+        
+        if task.currentJob is not None:
+            if type == TRACE_ISR_ENTER or type == TRACE_TASK_START_EXEC:
+                if core == coreId:
+                    print(f"IDLE finished at t={ts}")
                     task.stopExec(ts)
                     task.finishJob()
 
+    if task.currentJob is not None:
+        task.stopExec(ts)
+        task.finishJob()
 
+def parseTask(sortedEvents, task):
+    """
+    Parses the execution of a single task.
+    """
+    
+    finishJob = False
+    startExecCore = None
+
+    for evt in sortedEvents:
+        type = evt.get('type')
+        taskId = evt.get('taskId')
+        core = evt.get('core')
+        ts = evt.get('ts')
+
+        if task.id == taskId:
+            if type == TRACE_TASK_START_READY:
+                if task.currentJob == None: #If the job was blocked it might get the ready event again.
+                    #print(f"New Job released at {ts}")
+                    task.newJob(ts, None)
+            elif type == TRACE_TASK_START_EXEC:
+                #print(f"Start execution at {ts} on core {core}")
+                task.startExec(ts, core, ExecutionType.EXECUTE)
+                startExecCore = core
+            elif type == TRACE_TASK_STOP_EXEC:
+                #print(f"Stop execution at {ts}")
+                if task.currentJob.activeInterval is not None:
+                    task.stopExec(ts)
+                startExecCore = None
+                if finishJob == True:
+                    finishJob = False
+                    #print(f"Finish job at {ts}")
+                    task.finishJob()
+        if type == TRACE_ISR_ENTER:
+            if startExecCore == core:
+                #print(f"Stop execution due to ISR at {ts}")
+                task.stopExec(ts)
+        elif type == TRACE_DELAY_UNTIL:
+            if startExecCore == core:
+                #print(f"Delay Until called at {ts}")
+                finishJob = True
+        elif type == TRACE_DELAY:
+            if startExecCore == core:
+                #print(f"Delay called at {ts}")
+                finishJob = True
+
+def parseIrq(sortedEvents, irqTask):
+    """
+    This function parses the execution of a specific IRQ.
+    We assume that each IRQ-job runs to completion. In case an IRQ is interrupted by
+    a higher-priority IRQ, the execution is shown as multiple jobs.
+    """
+
+    enterCore = None
+    
+    for evt in sortedEvents:
+        type = evt.get('type')
+
+        if type in [TRACE_ISR_EXIT, TRACE_ISR_EXIT_TO_SCHEDULER, TRACE_ISR_ENTER]:
+            core = evt.get('core')
+            ts = evt.get('ts')
+            irqId = evt.get('irqId')
+
+            if irqId == irqTask.id:
+
+                if type == TRACE_ISR_ENTER:
+                    irqTask.newJob(ts, None)
+                    irqTask.startExec(ts, core, ExecutionType.EXECUTE)
+                    enterCore = core
+
+            if type == TRACE_ISR_EXIT or type == TRACE_ISR_EXIT_TO_SCHEDULER:
+                if core == enterCore:
+                    irqTask.stopExec(ts)
+                    irqTask.finishJob()
+                    enterCore = None
+    
 def parseTraceEvents(events, buffers):
     """
     This function converts the trace buffer of the traget into processable trace events.
