@@ -253,42 +253,39 @@ def executionParser(sortedEvents, tasks, tickIds):
 
         if "idle" in task.name.lower():
             parseIdleTask(sortedEvents, task)
-        elif task.id < len(tickIds):    # scheduler IDs
-            pass
+        elif 100 <= task.id <= len(tickIds) + 100:    # scheduler IDs
+            parseScheduler(sortedEvents, task)
         elif task.id in tickIds:
             parseIrq(sortedEvents, task)
         else:
             parseTask(sortedEvents, task)
-        # for evt in sortedEvents:
-        #     type = evt.get('type')
-        #     taskId = evt.get('taskId')
-        #     core = evt.get('core')
-        #     ts = evt.get('ts')
-        #     irqId = evt.get('irqId')
 
-        #     if irqId in tickIds and task.id == irqId:
-        #         if type == TRACE_ISR_ENTER:
-        #             task.newJob(ts, None)
-        #             task.startExec(ts, core, ExecutionType.EXECUTE)
-                
-        #         elif type == TRACE_ISR_EXIT or type == TRACE_ISR_EXIT_TO_SCHEDULER:
-        #             task.stopExec(ts)
-        #             task.finishJob()
+def parseScheduler(sortedEvents, schedulerTask):
 
-            # if type == TRACE_TASK_START_EXEC:
-            #     if taskId == task.id:
-            #         task.newJob(ts, None)
-            #         task.startExec(ts, core, ExecutionType.EXECUTE)
+    coreId = schedulerTask.id - 100   # For the scheduler task, the task id is equal to the core id
 
-            # elif type == TRACE_TASK_STOP_EXEC:
-            #     if taskId == task.id:
-            #         task.stopExec(ts)
-            #         task.finishJob()
+    for evt in sortedEvents:
+        type = evt.get('type')
+        core = evt.get('core')
+        ts = evt.get('ts')
+
+        if core == coreId:
+            if type == TRACE_ISR_EXIT_TO_SCHEDULER:
+                schedulerTask.newJob(ts, None)
+                schedulerTask.startExec(ts, core, ExecutionType.EXECUTE)
+            elif type == TRACE_TASK_STOP_EXEC:
+                # Here we need to distinguish if this was triggered by a task that finished executing between ticks or not.
+                if schedulerTask.currentJob is not None:
+                    pass    # Do nothing since the scheduler is already running.
+                else:
+                    schedulerTask.newJob(ts, None)
+                    schedulerTask.startExec(ts, core, ExecutionType.EXECUTE)
+            elif type == TRACE_IDLE or type == TRACE_TASK_START_EXEC:
+                if schedulerTask.currentJob is not None:
+                    schedulerTask.stopExec(ts)
+                    schedulerTask.finishJob()
 
 def parseIdleTask(sortedEvents, task):
-
-    
-    ts = 0
 
     coreId = int(task.name[len("IDLE"):])
 
