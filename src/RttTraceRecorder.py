@@ -37,7 +37,7 @@ def rtt_thread(gui):
     
     config = configparser.ConfigParser()
     config.read(HelperFunctions.getConfigFilePath())
-    elf = config.get(configName,'elf', fallback = None)
+    elf = HelperFunctions.getElfFilePath(gui)#config.get(configName,'elf', fallback = None)
     probe = config.get(configName,'probe', fallback = None)
     target = config.get(configName,'target', fallback = 'rp2350')
     frequency = int(config.get(configName,'frequency', fallback = '4_000_000'))

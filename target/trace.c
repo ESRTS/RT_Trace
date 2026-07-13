@@ -10,6 +10,7 @@
 #ifdef TRACE_PICO2
 #include "pico/stdlib.h"
 #include "pico/sync.h"
+#include "pico/multicore.h"
 #ifdef TRACE_RTT
 #include "SEGGER_RTT.h"
 #endif /* TRACE_RTT */
@@ -249,6 +250,8 @@ void trace_init() {
 void trace_init() {
 
 #ifndef TRACE_RTT
+    multicore_reset_core1();
+
     /* Set the complete trace buffer to 0x00 */
     for (int i = 0; i < TRACE_BUFFER_SIZE; i++) {
         traceBuffer_core0[i] = 0x00;

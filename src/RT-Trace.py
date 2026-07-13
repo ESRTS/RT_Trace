@@ -30,12 +30,12 @@ class TraceApp(customtkinter.CTk):
         'recordTraceFunc' is a target specific function that loads the trace buffer
         """
         self.targets = [
-            {'name': 'Pico2 FreeRTOS', 'numCores': 2, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet need to be on the path.', 'recordTraceFunc' : loadPico2TraceBuffers, 'loadTraceFunc': parseTraceFiles},
-            {'name': 'Pico2 FreeRTOS PSRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet need to be on the path.', 'recordTraceFunc' : loadPico2TraceBuffersPSRAM, 'loadTraceFunc': parseTraceFiles},
-            {'name': 'Pico2 FreeRTOS RTT', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Experimental! Uses RTT to record the trace data. Specify elf-file in the ini-file.', 'recordTraceFunc' : loadPico2RttTraceBuffers, 'loadTraceFunc': parseTraceFiles},
+            {'name': 'Pico2 FreeRTOS RTT', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Experimental! Uses RTT to record the trace data. Specify elf-file in the ini-file.', 'recordTraceFunc' : loadPico2RttTraceBuffers, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': HelperFunctions.validatePicoRtt},
+            {'name': 'Pico2 FreeRTOS SRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet need to be on the path.', 'recordTraceFunc' : loadPico2TraceBuffers, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': None},
+            {'name': 'Pico2 FreeRTOS PSRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet need to be on the path.', 'recordTraceFunc' : loadPico2TraceBuffersPSRAM, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': None},
             #{'name': 'STM FreeRTOS', 'numCores': 1, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : loadSTM32L476TraceBuffers},
             #{'name': 'RPI QNX', 'numCores': 4, 'implemented': False, 'requirement_str' : 'To load the trace buffer, telnet needs to be on the path.', 'recordTraceFunc' : None},
-            {'name': 'RPI Linux', 'numCores': 4, 'implemented': True, 'requirement_str' : 'Experimental...', 'recordTraceFunc' : loadLinuxraceBuffers, 'loadTraceFunc': linuxParseTraceFiles}
+            {'name': 'RPI Linux', 'numCores': 4, 'implemented': True, 'requirement_str' : 'Experimental...', 'recordTraceFunc' : loadLinuxraceBuffers, 'loadTraceFunc': linuxParseTraceFiles, 'pathValidationFunc': None}
         ]
 
         ''' Get the path for ps2pdf. '''
@@ -55,12 +55,12 @@ class TraceApp(customtkinter.CTk):
 
         self.grid_columnconfigure(0, weight=0)
         self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure((0, 1, 2, 3, 4, 5, 6, 7, 8), weight=1)
+        self.grid_rowconfigure((0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10), weight=1)
 
         ''' Create a frame for each main GUI area. '''
         self.sidebar_frame = customtkinter.CTkFrame(self, width=140, corner_radius=10)
-        self.sidebar_frame.grid(row=0, column=0, rowspan=9, sticky="nsew", padx=5, pady=5)
-        self.sidebar_frame.grid_rowconfigure(9, weight=1)
+        self.sidebar_frame.grid(row=0, column=0, rowspan=10, sticky="nsew", padx=5, pady=5)
+        self.sidebar_frame.grid_rowconfigure(10, weight=1)
 
         ''' Label for the platform selection. '''
         self.lbl_selectPlatform = customtkinter.CTkLabel(self.sidebar_frame, text="Platform Selection:", font=customtkinter.CTkFont(size=15, weight="bold"))
@@ -89,9 +89,20 @@ class TraceApp(customtkinter.CTk):
         self.txt_traceName = customtkinter.CTkEntry(self.sidebar_frame, textvariable=recordTraceName)
         self.txt_traceName.grid(row=4, column=0, padx=20, pady=5, sticky="ew")
 
+        ''' Label for the target program section. '''
+        self.lbl_progSelect = customtkinter.CTkLabel(self.sidebar_frame, text="Select Program", font=customtkinter.CTkFont(size=12, weight="bold"), anchor="w")
+        self.lbl_progSelect.grid(row=5, column=0, padx=(0, 0), pady=(5, 0))
+
+        ''' Option to select the target program. '''
+        self.possiblePrograms = ["Select a program..."] + HelperFunctions.getPossiblePrograms()
+        self.selectedProgram = self.possiblePrograms[0]
+        self.opt_selectProg = customtkinter.CTkOptionMenu(self.sidebar_frame, values=self.possiblePrograms, command=self.selectProgramSource)
+        self.opt_selectProg.grid(row=6, column=0, padx=20, pady=(0, 5), sticky="ew")
+        self.btn_recordTrace.configure(state="disabled")    # Enable the record button only after a valid program is selected
+
         ''' Label for the trace visualization section. '''
         self.lbl_view = customtkinter.CTkLabel(self.sidebar_frame, text="View Trace", font=customtkinter.CTkFont(size=15, weight="bold"), anchor="w")
-        self.lbl_view.grid(row=5, column=0, padx=(0, 0), pady=(10, 0))
+        self.lbl_view.grid(row=7, column=0, padx=(0, 0), pady=(10, 0))
 
         ''' Option to select which of the recorded traces to display. '''
         self.selectTrace = []
@@ -102,20 +113,20 @@ class TraceApp(customtkinter.CTk):
             self.selectTrace.append('None')
 
         self.opt_selectTrace = customtkinter.CTkOptionMenu(self.sidebar_frame, values=self.selectTrace, command=self.selectRecordedTrace)
-        self.opt_selectTrace.grid(row=6, column=0, padx=20, pady=(0, 5), sticky="ew")
+        self.opt_selectTrace.grid(row=8, column=0, padx=20, pady=(0, 5), sticky="ew")
 
         ''' Button to load an existing trace. '''
         self.btn_loadTrace = customtkinter.CTkButton(self.sidebar_frame, text="Load Trace", command=self.load_function)
-        self.btn_loadTrace.grid(row=7, column=0, padx=20, pady=5, sticky="ew")
+        self.btn_loadTrace.grid(row=9, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Button to save the current trace. '''
         self.btn_saveTrace = customtkinter.CTkButton(self.sidebar_frame, text="Save PDF", command=self.save_image_function)
-        self.btn_saveTrace.grid(row=8, column=0, padx=20, pady=5, sticky="ew")
+        self.btn_saveTrace.grid(row=10, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Textbox to display stdout. '''
         font = customtkinter.CTkFont(family="DejaVu Sans Mono", size=14)
         self.textbox = customtkinter.CTkTextbox(self, corner_radius=10, font=font)
-        self.textbox.grid(row=7, column=1, rowspan=2, columnspan=1, sticky="nswe", padx=5, pady=5)
+        self.textbox.grid(row=8, column=1, rowspan=2, columnspan=1, sticky="nswe", padx=5, pady=5)
         
         ''' Redirect stdout and stderr to the textbox. '''
         self.textbox.tag_config('stderr', foreground="red")
@@ -237,6 +248,33 @@ class TraceApp(customtkinter.CTk):
         self.update()
         HelperFunctions.printHeader("Loading trace from files")
         self.targets[self.selectedTarget].get('loadTraceFunc')(self, self.targets[self.selectedTarget].get('numCores'))   # Call the target specific function to load the trace buffers
+
+    def selectProgramSource(self, selectedFolder: str):
+        
+        # Remove the initial selection from the menu
+        if "Select a program..." in self.opt_selectProg.cget("values"):
+            self.opt_selectProg.configure(values=HelperFunctions.getPossiblePrograms())
+
+        # Remember which program is selected
+        self.selectedProgram = selectedFolder
+
+        HelperFunctions.printState("Select Program", info=selectedFolder)
+        
+        if self.targets[self.selectedTarget].get('pathValidationFunc') is not None:
+            if self.targets[self.selectedTarget].get('pathValidationFunc')(self) is True:
+                self.btn_recordTrace.configure(state="enable")
+        else:
+            self.btn_recordTrace.configure(state="enable")
+
+        # Validate if the selected program is ok
+        # if HelperFunctions.validateProgramFolder(self, selectedFolder):
+        #     HelperFunctions.printState("Select Program", info=selectedFolder)
+        #     HelperFunctions.printState("ELF File", info=HelperFunctions.getElfFilePath(self))
+        #     self.btn_recordTrace.configure(state="enable")
+        # else:
+        #     HelperFunctions.printState("Select Program", info=selectedFolder)
+        #     HelperFunctions.printState("ERROR", info="ELF file not found!")
+        #     self.btn_recordTrace.configure(state="disabled")
 
     def selectTraceSource(self, traceSource: str):
         """

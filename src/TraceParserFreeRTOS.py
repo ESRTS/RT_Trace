@@ -291,19 +291,18 @@ def parseIdleTask(sortedEvents, task):
 
     for evt in sortedEvents:
         type = evt.get('type')
-        taskId = evt.get('taskId')
         core = evt.get('core')
         ts = evt.get('ts')
 
         if type == TRACE_IDLE and coreId == core:
-            print(f"IDLE started at t={ts}")
+            #print(f"IDLE started at t={ts}")
             task.newJob(ts, None)
             task.startExec(ts, core, ExecutionType.EXECUTE)
         
         if task.currentJob is not None:
             if type == TRACE_ISR_ENTER or type == TRACE_TASK_START_EXEC:
                 if core == coreId:
-                    print(f"IDLE finished at t={ts}")
+                    #print(f"IDLE finished at t={ts}")
                     task.stopExec(ts)
                     task.finishJob()
 
