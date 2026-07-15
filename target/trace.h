@@ -40,6 +40,8 @@
 #define TRACE_ISR_EXIT_TO_SCHEDULER     (12u)
 #define TRACE_DELAY                     (13u)
 #define TRACE_TIME_START                (14u)
+#define TRACE_TASK_EVT_GROUP_WAIT       (15u)
+#define TRACE_TASK_EVT_GROUP_SYNC       (16u)
 
 // Not yet supported
 /*
@@ -72,6 +74,8 @@ void trace_isrEnter(void);
 void trace_isrExit(void);
 void trace_isrExitToScheduler(void);
 void trace_timeZero(void);
+void trace_eventGroupWait(uint32_t taskId);
+void trace_eventGroupSync(uint32_t taskId);
 
 /****************************************************************************************************************
  * FreeRTOS trace defines to map to the trace infrastructure.
@@ -134,9 +138,9 @@ void trace_timeZero(void);
 
 #define traceTimeZero()                                 trace_timeZero()
 
+#define traceENTER_xEventGroupWaitBits( x ,y, z, u, i ) trace_eventGroupWait((uint32_t)xTaskGetCurrentTaskHandle())
 
-
-
+#define traceENTER_xEventGroupSync( x, y, z, u )        trace_eventGroupSync((uint32_t)xTaskGetCurrentTaskHandle())
 /*
 
 #define traceSTARTING_SCHEDULER( xIdleTaskHandles )

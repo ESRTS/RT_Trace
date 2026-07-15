@@ -29,6 +29,8 @@ TRACE_ISR_EXIT                  = 11
 TRACE_ISR_EXIT_TO_SCHEDULER     = 12
 TRACE_DELAY                     = 13
 TRACE_TIME_ZERO                 = 14
+TRACE_EVT_GROUP_WAIT            = 15
+TRACE_EVT_GROUP_SYNC            =16
 
 # Those events are not in the original trace and are created during parsing
 TRACE_IDLE_START                = 20
@@ -48,7 +50,9 @@ eventMap = {
     TRACE_ISR_EXIT : "TRACE_ISR_EXIT",
     TRACE_ISR_EXIT_TO_SCHEDULER : "TRACE_ISR_EXIT_TO_SCHEDULER",
     TRACE_DELAY : "TRACE_DELAY",
-    TRACE_TIME_ZERO : "TRACE_TIME_ZERO"
+    TRACE_TIME_ZERO : "TRACE_TIME_ZERO",
+    TRACE_EVT_GROUP_WAIT: "TRACE_EVT_GROUP_WAIT",
+    TRACE_EVT_GROUP_SYNC: "TRACE_EVT_GROUP_SYNC"
 }
 
 """
@@ -342,6 +346,8 @@ def parseTask(sortedEvents, task):
                     finishJob = False
                     #print(f"Finish job at {ts}")
                     task.finishJob()
+            elif type == TRACE_EVT_GROUP_SYNC or type == TRACE_EVT_GROUP_WAIT:
+                finishJob = True
         if type == TRACE_ISR_ENTER:
             if startExecCore == core:
                 #print(f"Stop execution due to ISR at {ts}")
@@ -354,6 +360,12 @@ def parseTask(sortedEvents, task):
             if startExecCore == core:
                 #print(f"Delay called at {ts}")
                 finishJob = True
+    
+    # In case there are unfinished jobs, we handle them here.
+    if task.currentJob is not None:
+        if task.currentJob.activeInterval is not None:
+            task.stopExec(ts)
+        task.finishJob()
 
 def parseIrq(sortedEvents, irqTask):
     """
@@ -579,7 +591,18 @@ class EventParser:
         elif eventId == TRACE_TIME_ZERO:
             entryPrint("[t=" + str(self.time) + "us] TRACE_TIME_ZERO" + " Core: " + str(coreId)) 
             evt = {'type':TRACE_TIME_ZERO, 'ts':self.time, 'core':coreId} 
-
+        elif eventId == TRACE_EVT_GROUP_WAIT:
+            taskId = self.readInteger()
+            if taskId is None:
+                return None
+            entryPrint("[t=" + str(self.time) + "us] TRACE_EVT_GROUP_WAIT -> taskId: " + str(taskId) + " Core: " + str(coreId)) 
+            evt = {'type':TRACE_EVT_GROUP_WAIT, 'ts':self.time, 'core':coreId, 'taskId':taskId} 
+        elif eventId == TRACE_EVT_GROUP_SYNC:
+            taskId = self.readInteger()
+            if taskId is None:
+                return None
+            entryPrint("[t=" + str(self.time) + "us] TRACE_EVT_GROUP_SYNC -> taskId: " + str(taskId) + " Core: " + str(coreId)) 
+            evt = {'type':TRACE_EVT_GROUP_SYNC, 'ts':self.time, 'core':coreId, 'taskId':taskId} 
         else:
             #print("ERROR Unknown Event!")
             evt = None
