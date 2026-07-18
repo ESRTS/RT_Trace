@@ -42,6 +42,7 @@
 #define TRACE_TIME_START                (14u)
 #define TRACE_TASK_EVT_GROUP_WAIT       (15u)
 #define TRACE_TASK_EVT_GROUP_SYNC       (16u)
+#define TRACE_DEADLINE_MISS             (17u)
 
 // Not yet supported
 /*
@@ -76,6 +77,7 @@ void trace_isrExitToScheduler(void);
 void trace_timeZero(void);
 void trace_eventGroupWait(uint32_t taskId);
 void trace_eventGroupSync(uint32_t taskId);
+void trace_deadlineMiss(uint32_t taskId);
 
 /****************************************************************************************************************
  * FreeRTOS trace defines to map to the trace infrastructure.
@@ -141,6 +143,10 @@ void trace_eventGroupSync(uint32_t taskId);
 #define traceENTER_xEventGroupWaitBits( x ,y, z, u, i ) trace_eventGroupWait((uint32_t)xTaskGetCurrentTaskHandle())
 
 #define traceENTER_xEventGroupSync( x, y, z, u )        trace_eventGroupSync((uint32_t)xTaskGetCurrentTaskHandle())
+
+#define traceRETURN_xTaskDelayUntil( x )                if (x == pdFALSE) { \
+                                                          trace_deadlineMiss((uint32_t)xTaskGetCurrentTaskHandle());\
+                                                        }
 /*
 
 #define traceSTARTING_SCHEDULER( xIdleTaskHandles )

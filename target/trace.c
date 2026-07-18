@@ -718,3 +718,26 @@ void trace_eventGroupSync(uint32_t taskId) {
     restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 #endif /* TRACE_RTT */
 }
+
+/**
+ * @brief Record the event that the task missed its deadline.
+ *
+ */
+void trace_deadlineMiss(uint32_t taskId) {
+
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_DEADLINE_MISS);  			/* Encodes the event ID and the timestamp delta */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+
+    if (buffer != NULL) {
+        buffer[0] = identifyer;
+        buffer[1] = taskId;
+    }
+
+#ifdef TRACE_RTT
+    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
+    SEGGER_RTT_Write(getRttChannel(), buffer, 8);                           /* Add the data to the RTT buffer of this core. */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+#endif /* TRACE_RTT */
+}

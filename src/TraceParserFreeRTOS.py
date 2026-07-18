@@ -30,7 +30,8 @@ TRACE_ISR_EXIT_TO_SCHEDULER     = 12
 TRACE_DELAY                     = 13
 TRACE_TIME_ZERO                 = 14
 TRACE_EVT_GROUP_WAIT            = 15
-TRACE_EVT_GROUP_SYNC            =16
+TRACE_EVT_GROUP_SYNC            = 16
+TRACE_DEADLINE_MISS             = 17
 
 # Those events are not in the original trace and are created during parsing
 TRACE_IDLE_START                = 20
@@ -52,7 +53,8 @@ eventMap = {
     TRACE_DELAY : "TRACE_DELAY",
     TRACE_TIME_ZERO : "TRACE_TIME_ZERO",
     TRACE_EVT_GROUP_WAIT: "TRACE_EVT_GROUP_WAIT",
-    TRACE_EVT_GROUP_SYNC: "TRACE_EVT_GROUP_SYNC"
+    TRACE_EVT_GROUP_SYNC: "TRACE_EVT_GROUP_SYNC",
+    TRACE_DEADLINE_MISS: "TRACE_DEADLINE_MISS"
 }
 
 """
@@ -323,16 +325,18 @@ def parseTask(sortedEvents, task):
     startExecCore = None    # Task started to execute on this core.
     lastExecTask = None     # Keep track of the last task started on the core.
 
-    for evt in sortedEvents:
+    for i, evt in enumerate(sortedEvents):
         type = evt.get('type')
         taskId = evt.get('taskId')
         core = evt.get('core')
         ts = evt.get('ts')
 
+        next_evt = sortedEvents[i + 1] if i + 1 < len(sortedEvents) else None
+
         if type == TRACE_TASK_START_READY:
             if task.id == taskId:
                 if task.currentJob == None: #If the job was blocked it might get the ready event again.
-                    print(f"New Job released at {ts}")
+                    #print(f"New Job released at {ts}")
                     task.newJob(ts, None)
 
         if type == TRACE_TASK_START_EXEC:
@@ -341,21 +345,37 @@ def parseTask(sortedEvents, task):
                 lastExecTask = taskId
 
             if task.id == taskId:
-                print(f"Start execution at {ts} on core {core}")
-                task.startExec(ts, core, ExecutionType.EXECUTE)
-                startExecCore = core
-                lastExecTask = taskId
+                #print(f"Start execution at {ts} on core {core}")
+
+                if task.currentJob is not None:
+                    #if task.currentJob.activeInterval is not None:
+                    if next_evt.get('type') == TRACE_DEADLINE_MISS and next_evt.get('taskId') == task.id: 
+                        task.newJob(ts, None)
+
+                    task.startExec(ts, core, ExecutionType.EXECUTE)
+                    startExecCore = core
+                    lastExecTask = taskId
 
         if type == TRACE_TASK_STOP_EXEC:
             if task.id == taskId:
-                print(f"Stop execution at {ts}")
-                if task.currentJob.activeInterval is not None:
-                    task.stopExec(ts)
-                startExecCore = None
-                if finishJob == True:
-                    finishJob = False
-                    print(f"Finish job at {ts}")
-                    task.finishJob()
+                #print(f"Stop execution at {ts}")
+                if task.currentJob is not None:
+                    if task.currentJob.activeInterval is not None:
+                        task.stopExec(ts)
+                    startExecCore = None
+                    if finishJob == True:
+                        finishJob = False
+                        #print(f"Finish job at {ts}")
+                        task.finishJob()
+
+        # if type ==TRACE_DEADLINE_MISS:
+        #     if task.id == taskId:
+        #         if task.currentJob is not None:
+        #             if task.currentJob.activeInterval is not None:
+        #                 task.stopExec(ts)
+        #             task.finishJob()
+        #         task.newJob(ts, None)
+        #         task.startExec(ts, core, ExecutionType.EXECUTE)
 
         if type == TRACE_EVT_GROUP_SYNC or type == TRACE_EVT_GROUP_WAIT:
             if task.id == taskId:
@@ -364,25 +384,25 @@ def parseTask(sortedEvents, task):
         elif type == TRACE_ISR_ENTER:
             if startExecCore == core:
                 if lastExecTask == task.id:
-                    print(f"Stop execution due to ISR at {ts}")
+                    #print(f"Stop execution due to ISR at {ts}")
                     task.stopExec(ts)
         
         elif type == TRACE_ISR_EXIT:
             if startExecCore == core:
                 if lastExecTask == task.id:
-                    print(f"Stop execution due to ISR at {ts}")
+                    #print(f"Stop execution due to ISR at {ts}")
                     task.startExec(ts, core, ExecutionType.EXECUTE)
 
         elif type == TRACE_DELAY_UNTIL:
             if startExecCore == core:
                 if lastExecTask == task.id:
-                    print(f"Delay Until called at {ts}")
+                    #print(f"Delay Until called at {ts}")
                     finishJob = True
         
         elif type == TRACE_DELAY:
             if startExecCore == core:
                 if lastExecTask == task.id:
-                    print(f"Delay called at {ts}")
+                    #print(f"Delay called at {ts}")
                     finishJob = True
     
     # In case there are unfinished jobs, we handle them here.
@@ -627,6 +647,12 @@ class EventParser:
                 return None
             entryPrint("[t=" + str(self.time) + "us] TRACE_EVT_GROUP_SYNC -> taskId: " + str(taskId) + " Core: " + str(coreId)) 
             evt = {'type':TRACE_EVT_GROUP_SYNC, 'ts':self.time, 'core':coreId, 'taskId':taskId} 
+        elif eventId == TRACE_DEADLINE_MISS:
+            taskId = self.readInteger()
+            if taskId is None:
+                return None
+            entryPrint("[t=" + str(self.time) + "us] TRACE_DEADLINE_MISS -> taskId: " + str(taskId) + " Core: " + str(coreId)) 
+            evt = {'type':TRACE_DEADLINE_MISS, 'ts':self.time, 'core':coreId, 'taskId':taskId} 
         else:
             #print("ERROR Unknown Event!")
             evt = None
