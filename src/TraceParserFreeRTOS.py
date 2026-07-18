@@ -319,8 +319,9 @@ def parseTask(sortedEvents, task):
     Parses the execution of a single task.
     """
     
-    finishJob = False
-    startExecCore = None
+    finishJob = False       # Flag to indicate that the job is about to finish.
+    startExecCore = None    # Task started to execute on this core.
+    lastExecTask = None     # Keep track of the last task started on the core.
 
     for evt in sortedEvents:
         type = evt.get('type')
@@ -328,38 +329,61 @@ def parseTask(sortedEvents, task):
         core = evt.get('core')
         ts = evt.get('ts')
 
-        if task.id == taskId:
-            if type == TRACE_TASK_START_READY:
+        if type == TRACE_TASK_START_READY:
+            if task.id == taskId:
                 if task.currentJob == None: #If the job was blocked it might get the ready event again.
-                    #print(f"New Job released at {ts}")
+                    print(f"New Job released at {ts}")
                     task.newJob(ts, None)
-            elif type == TRACE_TASK_START_EXEC:
-                #print(f"Start execution at {ts} on core {core}")
+
+        if type == TRACE_TASK_START_EXEC:
+            #if task.currentJob is not None: # If there is an active job, and this event if from the same core, remember the task id
+            if core == startExecCore:
+                lastExecTask = taskId
+
+            if task.id == taskId:
+                print(f"Start execution at {ts} on core {core}")
                 task.startExec(ts, core, ExecutionType.EXECUTE)
                 startExecCore = core
-            elif type == TRACE_TASK_STOP_EXEC:
-                #print(f"Stop execution at {ts}")
+                lastExecTask = taskId
+
+        if type == TRACE_TASK_STOP_EXEC:
+            if task.id == taskId:
+                print(f"Stop execution at {ts}")
                 if task.currentJob.activeInterval is not None:
                     task.stopExec(ts)
                 startExecCore = None
                 if finishJob == True:
                     finishJob = False
-                    #print(f"Finish job at {ts}")
+                    print(f"Finish job at {ts}")
                     task.finishJob()
-            elif type == TRACE_EVT_GROUP_SYNC or type == TRACE_EVT_GROUP_WAIT:
+
+        if type == TRACE_EVT_GROUP_SYNC or type == TRACE_EVT_GROUP_WAIT:
+            if task.id == taskId:
                 finishJob = True
-        if type == TRACE_ISR_ENTER:
+
+        elif type == TRACE_ISR_ENTER:
             if startExecCore == core:
-                #print(f"Stop execution due to ISR at {ts}")
-                task.stopExec(ts)
+                if lastExecTask == task.id:
+                    print(f"Stop execution due to ISR at {ts}")
+                    task.stopExec(ts)
+        
+        elif type == TRACE_ISR_EXIT:
+            if startExecCore == core:
+                if lastExecTask == task.id:
+                    print(f"Stop execution due to ISR at {ts}")
+                    task.startExec(ts, core, ExecutionType.EXECUTE)
+
         elif type == TRACE_DELAY_UNTIL:
             if startExecCore == core:
-                #print(f"Delay Until called at {ts}")
-                finishJob = True
+                if lastExecTask == task.id:
+                    print(f"Delay Until called at {ts}")
+                    finishJob = True
+        
         elif type == TRACE_DELAY:
             if startExecCore == core:
-                #print(f"Delay called at {ts}")
-                finishJob = True
+                if lastExecTask == task.id:
+                    print(f"Delay called at {ts}")
+                    finishJob = True
     
     # In case there are unfinished jobs, we handle them here.
     if task.currentJob is not None:
