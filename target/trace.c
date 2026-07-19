@@ -536,12 +536,17 @@ void trace_stop(void) {
  * @brief Record the event that the tracing started.
  *
  */
-void trace_delayUntil(uint32_t* prev, uint32_t timeInc) {
+void trace_delayUntil(uint32_t* prev, uint32_t timeInc, uint32_t tickCount) {
 
     uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
     uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_DELAY_UNTIL);      		/* Encodes the event ID and the timestamp delta */
     restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+
+		uint32_t expiryTime = *prev + timeInc;															/* Compute the absolute expiry time of the delay. */
+		if (expiryTime > tickCount) {
+			expiryTime |= (0x01 << 31);																				/* We use bit 32 to indicate if the deadline was missed! (31 bits allow us to count for ~24 days, so no need to worry here about overflow etc.). */
+		}
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -705,29 +710,6 @@ void trace_eventGroupSync(uint32_t taskId) {
     uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
     uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_TASK_EVT_GROUP_SYNC);  /* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-        buffer[1] = taskId;
-    }
-
-#ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, 8);                           /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
-#endif /* TRACE_RTT */
-}
-
-/**
- * @brief Record the event that the task missed its deadline.
- *
- */
-void trace_deadlineMiss(uint32_t taskId) {
-
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_DEADLINE_MISS);  			/* Encodes the event ID and the timestamp delta */
     restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {

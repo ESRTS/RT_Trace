@@ -69,7 +69,7 @@ void trace_readyStop(uint32_t taskId);
 void trace_taskCreate(uint32_t taskId, uint32_t priority, const char* name);
 void trace_start(void);
 void trace_stop(void);
-void trace_delayUntil(uint32_t* prev, uint32_t timeInc);
+void trace_delayUntil(uint32_t* prev, uint32_t timeInc, uint32_t tickCount);
 void trace_delay(uint32_t delayTime);
 void trace_isrEnter(void);
 void trace_isrExit(void);
@@ -77,7 +77,6 @@ void trace_isrExitToScheduler(void);
 void trace_timeZero(void);
 void trace_eventGroupWait(uint32_t taskId);
 void trace_eventGroupSync(uint32_t taskId);
-void trace_deadlineMiss(uint32_t taskId);
 
 /****************************************************************************************************************
  * FreeRTOS trace defines to map to the trace infrastructure.
@@ -124,7 +123,7 @@ void trace_deadlineMiss(uint32_t taskId);
 
 #define traceMOVED_TASK_TO_READY_STATE( pxTCB )         trace_readyStart((uint32_t)pxTCB)
 
-#define traceENTER_xTaskDelayUntil( x, y )              trace_delayUntil(x, y)
+#define traceENTER_xTaskDelayUntil( x, y )              trace_delayUntil(x, y, xTickCount )
 
 #define traceENTER_vTaskDelay( x )                      trace_delay(x)
 
@@ -144,9 +143,6 @@ void trace_deadlineMiss(uint32_t taskId);
 
 #define traceENTER_xEventGroupSync( x, y, z, u )        trace_eventGroupSync((uint32_t)xTaskGetCurrentTaskHandle())
 
-#define traceRETURN_xTaskDelayUntil( x )                if (x == pdFALSE) { \
-                                                          trace_deadlineMiss((uint32_t)xTaskGetCurrentTaskHandle());\
-                                                        }
 /*
 
 #define traceSTARTING_SCHEDULER( xIdleTaskHandles )
