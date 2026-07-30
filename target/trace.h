@@ -43,6 +43,9 @@
 #define TRACE_TASK_EVT_GROUP_WAIT       (15u)
 #define TRACE_TASK_EVT_GROUP_SYNC       (16u)
 #define TRACE_DEADLINE_MISS             (17u)
+#define TRACE_MUTEX_CREATE              (18u)
+#define TRACE_MUTEX_TAKE                (19u)
+#define TRACE_MUTEX_GIVE                (20u)
 
 // Not yet supported
 /*
@@ -77,6 +80,10 @@ void trace_isrExitToScheduler(void);
 void trace_timeZero(void);
 void trace_eventGroupWait(uint32_t taskId);
 void trace_eventGroupSync(uint32_t taskId);
+void trace_mutexCreate(uint32_t mutexId);
+void trace_mutexTake(uint32_t mutexId);
+void trace_mutexGive(uint32_t mutexId);
+
 
 /****************************************************************************************************************
  * FreeRTOS trace defines to map to the trace infrastructure.
@@ -142,6 +149,12 @@ void trace_eventGroupSync(uint32_t taskId);
 #define traceENTER_xEventGroupWaitBits( x ,y, z, u, i ) trace_eventGroupWait((uint32_t)xTaskGetCurrentTaskHandle())
 
 #define traceENTER_xEventGroupSync( x, y, z, u )        trace_eventGroupSync((uint32_t)xTaskGetCurrentTaskHandle())
+
+#define traceRETURN_xQueueCreateMutex( x )              if ( x->ucQueueType == queueQUEUE_TYPE_MUTEX ) trace_mutexCreate((uint32_t)x)
+
+#define traceENTER_xQueueSemaphoreTake( x, y )          if ( x->ucQueueType == queueQUEUE_TYPE_MUTEX ) trace_mutexTake((uint32_t)x)
+
+#define traceENTER_xQueueGenericSend( x, y , z, u )     if ( x->ucQueueType == queueQUEUE_TYPE_MUTEX ) trace_mutexGive((uint32_t)x)
 
 /*
 

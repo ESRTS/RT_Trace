@@ -6,6 +6,7 @@ import os
 import HelperFunctions
 import configparser
 import sys
+import numpy as np
 
 """
 Set to true to print events read from the trace buffer.
@@ -31,6 +32,9 @@ TRACE_DELAY                     = 13
 TRACE_TIME_ZERO                 = 14
 TRACE_EVT_GROUP_WAIT            = 15
 TRACE_EVT_GROUP_SYNC            = 16
+TRACE_MUTEX_CREATE              = 18
+TRACE_MUTEX_TAKE                = 19
+TRACE_MUTEX_GIVE                = 20 
 
 # Those events are not in the original trace and are created during parsing
 TRACE_IDLE_START                = 20
@@ -53,6 +57,9 @@ eventMap = {
     TRACE_TIME_ZERO : "TRACE_TIME_ZERO",
     TRACE_EVT_GROUP_WAIT: "TRACE_EVT_GROUP_WAIT",
     TRACE_EVT_GROUP_SYNC: "TRACE_EVT_GROUP_SYNC",
+    TRACE_MUTEX_CREATE: "TRACE_MUTEX_CREATE",
+    TRACE_MUTEX_TAKE: "TRACE_MUTEX_TAKE",
+    TRACE_MUTEX_GIVE: "TRACE_MUTEX_GIVE"
 }
 
 """
@@ -189,6 +196,9 @@ def extractTraceInfo(events, eventFilePath, tickIds):
                         break
             break
 
+    if traceStart is None:
+        traceStart = getTickStart(events, tickIds[0])
+
     # Create tasks to represent the scheduler, tick ISR for each core.
     if len(tickIds) == 1:
         # Exclude the core in the name if there is only one core
@@ -213,6 +223,13 @@ def extractTraceInfo(events, eventFilePath, tickIds):
         if evt.get('type') is TRACE_TASK_START_READY:   # We set the trace time t=0 to the first task ready event (if no TRACE_TIME_ZERO event was found).
             if traceStart is None:
                 traceStart = evt.get('ts')  # By convention we set the start of the first task to t=0
+
+    # Parse all mutex create events to map each mutex ID to a letter (max. 26 mutexes).
+    mutex_id_to_letter: dict[int, str] = {}
+    for evt in events:
+        if evt.get('type') == TRACE_MUTEX_CREATE:
+            id = evt.get('mutexId')
+            map_mutex_id(mutex_id_to_letter, id)
 
     eventFile = open(eventFilePath, 'w')
     
@@ -243,7 +260,7 @@ def extractTraceInfo(events, eventFilePath, tickIds):
             evt['ts'] = evt['ts'] - traceStart
         eventFile.write('\tts: ' + "%06.3f" % (evt.get('ts')/1000) + "ms\t" + eventMap.get(evt.get('type')) + ":  " + str(evt) + "\n")
 
-    executionParser(sortedEvents, tasks, tickIds)
+    executionParser(sortedEvents, tasks, tickIds, mutex_id_to_letter)
    #->  smParser(traceStart, sortedEvents, tasks, len(tickIds))
 
     eventFile.close()
@@ -251,7 +268,30 @@ def extractTraceInfo(events, eventFilePath, tickIds):
 
     return tasks
 
-def executionParser(sortedEvents, tasks, tickIds):
+def map_mutex_id(mutex_map, mutex_id: int) -> str | None:
+    """
+    Function maps a mutex id to letters A to Z. If 26 IDs are already mapped, the function returns NULL.
+    """
+    # Validate as an unsigned 32-bit integer.
+    if not isinstance(mutex_id, int):
+        raise TypeError("mutex_id must be an integer")
+
+    # Return the existing mapping if this ID was seen before.
+    if mutex_id in mutex_map:
+        return mutex_map[mutex_id]
+
+    # All 26 letters are already assigned.
+    if len(mutex_map) >= 26:
+        return None
+
+    letter = chr(ord("A") + len(mutex_map))
+    mutex_map[mutex_id] = letter
+    return letter
+
+def executionParser(sortedEvents, tasks, tickIds, mutex_id_to_letter):
+
+    # This hardcodes that there are 2 cores, should be generalized!
+    core1Flag = False
 
     for task in tasks:
 
@@ -262,8 +302,24 @@ def executionParser(sortedEvents, tasks, tickIds):
         elif task.id in tickIds:
             parseIrq(sortedEvents, task)
         else:
-            parseTask(sortedEvents, task)
+            parseTask(sortedEvents, task, mutex_id_to_letter)
+            for job in task.jobs:
+                for execInterval in job.execIntervals:
+                    if execInterval.core == 1:
+                        core1Flag = True
 
+    if core1Flag == False:  # No user task executes on core 1
+        # Remove scheduler core 1 and tick core 1 from the data (since they don't affect the schedule on core 0 and there are no user tasks on core 1)
+        toRemove = []
+        for task in tasks:
+            if "idle1" in task.name.lower():
+                toRemove.append(task)
+            elif task.id == tickIds[1]:
+                toRemove.append(task)
+            elif task.id == schedulerId + 1:
+                toRemove.append(task)
+        tasks[:] = [x for x in tasks if x not in toRemove]
+        
 def parseScheduler(sortedEvents, schedulerTask):
 
     coreId = schedulerTask.id - 100   # For the scheduler task, the task id is equal to the core id
@@ -314,7 +370,7 @@ def parseIdleTask(sortedEvents, task):
         task.stopExec(ts)
         task.finishJob()
 
-def parseTask(sortedEvents, task):
+def parseTask(sortedEvents, task, mutex_id_to_letter):
     """
     Parses the execution of a single task.
     """
@@ -336,6 +392,8 @@ def parseTask(sortedEvents, task):
             if task.id == taskId:
                 if task.currentJob == None: #If the job was blocked it might get the ready event again.
                     #print(f"New Job released at {ts}")
+                    if ts < 0:
+                        ts = 0
                     task.newJob(ts, None)
 
         if type == TRACE_TASK_START_EXEC:
@@ -409,7 +467,18 @@ def parseTask(sortedEvents, task):
                 if lastExecTask == task.id:
                     #print(f"Delay called at {ts}")
                     finishJob = True
-    
+
+        elif type == TRACE_MUTEX_TAKE:
+            if startExecCore == core:
+                if lastExecTask == task.id:
+                    letterId = map_mutex_id(mutex_id_to_letter, evt.get('mutexId'))
+                    task.mutexTake(ts, evt.get('mutexId'), letterId)
+
+        elif type == TRACE_MUTEX_GIVE:
+            if startExecCore == core:
+                if lastExecTask == task.id:
+                    task.mutexGive(ts, evt.get('mutexId'))
+
     # In case there are unfinished jobs, we handle them here.
     if task.currentJob is not None:
         if task.currentJob.activeInterval is not None:
@@ -474,19 +543,21 @@ def parseTraceEvents(events, buffers):
         coreId = coreId + 1
 
     # Find timestamp last timestamp in any of the buffers
-    minTs = -1
-    for evts in bufferEvents:
-        if len(evts) > 0 :
-            if minTs == -1:
-                minTs = evts[-1].get('ts')
-            elif minTs > evts[-1].get('ts'):
-                minTs = evts[-1].get('ts')
+
+    # Commented out since core 0 has no events if there is no task and time slizing is off.
+    # minTs = -1
+    # for evts in bufferEvents:
+    #     if len(evts) > 0 :
+    #         if minTs == -1:
+    #             minTs = evts[-1].get('ts')
+    #         elif minTs > evts[-1].get('ts'):
+    #             minTs = evts[-1].get('ts')
 
     # From each buffer, add all events to 'events' that appear up to t=minTs
     for evts in bufferEvents:
         for evt in evts:
-            if evt.get('ts') <= minTs:
-                events.append(evt)
+#            if evt.get('ts') <= minTs:
+            events.append(evt)
 
 class EventParser:
     """
@@ -655,13 +726,71 @@ class EventParser:
             if taskId is None:
                 return None
             entryPrint("[t=" + str(self.time) + "us] TRACE_EVT_GROUP_SYNC -> taskId: " + str(taskId) + " Core: " + str(coreId)) 
-            evt = {'type':TRACE_EVT_GROUP_SYNC, 'ts':self.time, 'core':coreId, 'taskId':taskId} 
+            evt = {'type':TRACE_EVT_GROUP_SYNC, 'ts':self.time, 'core':coreId, 'taskId':taskId}
+        elif eventId == TRACE_MUTEX_CREATE:
+            mutexId = self.readInteger()
+            if mutexId is None:
+                return None
+            entryPrint("[t=" + str(self.time) + "us] TRACE_MUTEX_CREATE -> mutexId: " + str(mutexId) + " Core: " + str(coreId)) 
+            evt = {'type':TRACE_MUTEX_CREATE, 'ts':self.time, 'core':coreId, 'mutexId':mutexId}
+        elif eventId == TRACE_MUTEX_TAKE:
+            mutexId = self.readInteger()
+            if mutexId is None:
+                return None
+            entryPrint("[t=" + str(self.time) + "us] TRACE_MUTEX_TAKE -> mutexId: " + str(mutexId) + " Core: " + str(coreId)) 
+            evt = {'type':TRACE_MUTEX_TAKE, 'ts':self.time, 'core':coreId, 'mutexId':mutexId}
+        elif eventId == TRACE_MUTEX_GIVE:
+            mutexId = self.readInteger()
+            if mutexId is None:
+                return None
+            entryPrint("[t=" + str(self.time) + "us] TRACE_MUTEX_GIVE -> mutexId: " + str(mutexId) + " Core: " + str(coreId)) 
+            evt = {'type':TRACE_MUTEX_GIVE, 'ts':self.time, 'core':coreId, 'mutexId':mutexId}
         else:
             #print("ERROR Unknown Event!")
             evt = None
 
         return evt
-    
+
+def getTickStart(events, irqCore0):
+    startTime = 0   # Timestamp of the first tick
+    tolerance_us = 50
+
+    # Get an array of all tick times on core 0
+    tickTimes = []
+    for evt in events:
+        type = evt.get('type')
+        if type == TRACE_ISR_ENTER:
+            irqId = evt.get('irqId')
+            if irqId == irqCore0:
+                ts = evt.get('ts')
+                tickTimes.append(ts)
+
+    ticks = np.asarray(tickTimes, dtype=np.int64)
+
+    period_us = 1000 # We like to align ticks with a 1ms grid
+    phases = np.arange(period_us)
+    residues = ticks % period_us
+
+    # Signed circular distance from every residue to every possible phase (-500 to 499)
+    errors = ( (residues[:, None] - phases[None, :] + period_us // 2) % period_us - period_us // 2)
+    abs_errors = np.abs(errors)
+
+    # Maximise the number of aligned ticks
+    inlier_counts = np.sum(abs_errors <= tolerance_us, axis = 0)
+
+    # Minimize clipped error to reduce influence of startup outliers
+    clipper_loss = np.sum(np.minimum(abs_errors, tolerance_us), axis=0)
+
+    order = np.lexsort((clipper_loss, -inlier_counts))
+    phase_us = int(phases[order[0]])
+
+    # Any origin congruent to phase_us modulo 1000 gives the same alignment.
+    # Select the grid point immediately before or equal to the first tick.
+    # -1000 since we like t=0 which has no IRQ. 
+    t0_us = phase_us + period_us * ((ticks[0] - phase_us) // period_us) - 1000
+
+    return int(t0_us)
+
 def entryPrint(*args, **kwargs):
     global enable_entry_print
     if enable_entry_print:

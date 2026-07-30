@@ -32,3 +32,4 @@ sortedcontainers==2.4.0
 typing_extensions==4.12.2
 wcwidth==0.2.13
 zipp==3.20.1
+numpy==2.5.1

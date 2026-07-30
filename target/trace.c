@@ -723,3 +723,69 @@ void trace_eventGroupSync(uint32_t taskId) {
     restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 #endif /* TRACE_RTT */
 }
+
+/**
+ * @brief Record the mutex create event.
+ *
+ */
+void trace_mutexCreate(uint32_t mutexId) {
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_MUTEX_CREATE);             /* Encodes the event ID and the timestamp delta */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+
+    if (buffer != NULL) {
+        buffer[0] = identifyer;
+        buffer[1] = mutexId;
+    }
+
+#ifdef TRACE_RTT
+    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
+    SEGGER_RTT_Write(getRttChannel(), buffer, 8);                           /* Add the data to the RTT buffer of this core. */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+#endif /* TRACE_RTT */
+}
+
+/**
+ * @brief Record the mutex take event.
+ *
+ */
+void trace_mutexTake(uint32_t mutexId) {
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_MUTEX_TAKE);             /* Encodes the event ID and the timestamp delta */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+
+    if (buffer != NULL) {
+        buffer[0] = identifyer;
+        buffer[1] = mutexId;
+    }
+
+#ifdef TRACE_RTT
+    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
+    SEGGER_RTT_Write(getRttChannel(), buffer, 8);                           /* Add the data to the RTT buffer of this core. */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+#endif /* TRACE_RTT */
+}
+
+/**
+ * @brief Record the mutex give event.
+ *
+ */
+void trace_mutexGive(uint32_t mutexId) {
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_MUTEX_GIVE);             /* Encodes the event ID and the timestamp delta */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+
+    if (buffer != NULL) {
+        buffer[0] = identifyer;
+        buffer[1] = mutexId;
+    }
+
+#ifdef TRACE_RTT
+    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
+    SEGGER_RTT_Write(getRttChannel(), buffer, 8);                           /* Add the data to the RTT buffer of this core. */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+#endif /* TRACE_RTT */
+}

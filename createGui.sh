@@ -9,5 +9,6 @@ pyinstaller \
     --icon ./icon/icon.icns \
     --add-data "Resources/config.ini:." \
     --collect-all pyocd \
+    --collect-all numpy \
     --add-data "$CPM_PATH:cmsis_pack_manager" \
     --noconfirm 

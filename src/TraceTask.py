@@ -1,5 +1,15 @@
 from enum import Enum
 
+class MutexAccess():
+    def __init__(self, startTime, mutexId, letter):
+        self.start = startTime
+        self.stop = None
+        self.mutexId = mutexId
+        self.letter = letter
+
+    def finish(self, stopTime):
+        self.stop = stopTime
+
 class ExecutionType(Enum):
     """
     Enum to describe the different phases of the AER model.
@@ -35,6 +45,7 @@ class TraceJob():
         self.deadline = deadline            # Stores the deadline of the job
         self.activeInterval = None          # Stores the current execution interval (i.e. this interval is not complete)
         self.incomplete = False             # A flag to indicate if this job was stopped before completion (i.e. cut at the end of the trace)
+        self.mutexAccess = []               # List of all MutexAccess of the job
 
     def __str__(self) -> str:
         return self.task.name + "-" + str(self.id)
@@ -83,6 +94,27 @@ class TraceJob():
         self.activeInterval.stop(ts)
         self.execIntervals.append(self.activeInterval)
         self.activeInterval = None
+
+    def mutexTake(self, ts, mutexId, letterId):
+        """
+        Start a new critical section.
+        """
+
+        for access in self.mutexAccess:     # Make sure there is no ongoing access to this mutex
+            if access.mutexId == mutexId:
+                assert access.stop != None, "Trying to take mutex " + str(mutexId) + " while still holding the mutex."
+
+        newAccess = MutexAccess(ts, mutexId, letterId)
+        self.mutexAccess.append(newAccess)
+
+    def mutexGive(self, ts, mutexId):
+        """
+        Finish a critical section.
+        """
+
+        for access in self.mutexAccess:
+            if access.mutexId == mutexId:
+                access.stop = ts
 
 class TraceTask():
     """
@@ -185,6 +217,20 @@ class TraceTask():
             if maxRt == None or maxRt < rt:
                 maxRt = rt
         return maxRt
+    
+    def mutexTake(self, ts, mutexId, letterId):
+        """
+        Start a critical section.
+        """
+        assert self.currentJob != None
+        self.currentJob.mutexTake(ts, mutexId, letterId)
+
+    def mutexGive(self, ts, mutexId):
+        """
+        Finish a critical section.
+        """
+        assert self.currentJob != None
+        self.currentJob.mutexGive(ts, mutexId)
 
 def findTaskByName(tasks, name):
     for task in tasks:
