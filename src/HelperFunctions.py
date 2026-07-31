@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import platform
 from datetime import datetime
+import configparser
 
 def getCwd():
     """
@@ -62,6 +63,12 @@ def getTimeString():
     
     return formatted
 
+def getTargetName(gui):
+    '''
+    Get the name of the currently selected target.
+    '''
+    return gui.targets[gui.selectedTarget].get('name').replace(' ', '_')
+
 def getRecordedTraces(gui):
     """
     Gets the recorded trace folders of the current platform configuration. Sorted by the folder creation time, most recent first.
@@ -107,3 +114,67 @@ def makeFolder(pathstring: str):
     """ Wrapper to create a folder. """
     path = Path(pathstring)
     path.mkdir(parents=True, exist_ok=True)
+
+def get_subfolders(path):
+    return [p.name for p in Path(path).iterdir() if p.is_dir()]
+
+def getPossiblePrograms():
+    """ 
+    The function searches all projects found in the project folder. 
+    The assumption is that each folder is a project. 
+    """
+    config = configparser.ConfigParser()
+    config.read(getConfigFilePath())
+    programPath = config.get('general','project_path')
+
+    return get_subfolders(programPath)
+
+def validateProgramFolder(gui, selectedFolder) -> bool:
+
+    traceConfigFilePath = getTraceConfigPath(gui)
+    elfFilePath = getElfFilePath(gui)
+
+    file = Path(elfFilePath)
+
+    if not file.exists():
+        return False
+    else:
+        return True
+
+def getTraceConfigPath(gui):
+
+    config = configparser.ConfigParser()
+    config.read(getConfigFilePath())
+    programPath = config.get('general','project_path')
+    traceConfigFilePath = os.path.abspath(os.path.join(programPath, gui.selectedProgram, "traceConfig.h"))
+
+    return traceConfigFilePath
+
+def getElfFilePath(gui):
+
+    config = configparser.ConfigParser()
+    config.read(getConfigFilePath())
+    programPath = config.get('general','project_path')
+    elfFilePath = os.path.abspath(os.path.join(programPath, gui.selectedProgram, "build", gui.selectedProgram + ".elf"))
+
+    return elfFilePath
+
+def validatePicoRtt(gui):
+    traceConfigFilePath = getTraceConfigPath(gui)
+    elfFilePath = getElfFilePath(gui)
+
+    confFile = Path(traceConfigFilePath)
+    elfFile = Path(elfFilePath)
+    
+    if not elfFile.exists():
+        printState("ERROR ELF not found", info=elfFilePath)
+        return False
+    else:
+        printState("ELF", info=elfFilePath)
+
+        if not confFile.exists():
+            printState("ERROR trace config not found", info=traceConfigFilePath)
+            return False
+        else:
+            printState("Trace Config", info=traceConfigFilePath)
+            return True

@@ -12,7 +12,7 @@ All measurements are stored in a ```data``` folder. Each supported platform has 
 Use pyinstaller to generate the packaged application. To generate the application for Windows this must be executed on under Windows.
 Executables for Linux and OSX can be created on OSX directly.
 
-```$ pyinstaller src/RT-Trace.py --noconsole --icon ./icon/icon.icns --add-data "Resources/config.ini:." --noconfirm```
+```$ ./createGui.sh ```
 
 ## Supported Platforms
 
