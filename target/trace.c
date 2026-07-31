@@ -543,14 +543,14 @@ void trace_delayUntil(uint32_t* prev, uint32_t timeInc, uint32_t tickCount) {
     uint32_t identifyer = trace_encodeTime(TRACE_DELAY_UNTIL);      		/* Encodes the event ID and the timestamp delta */
     restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
-		uint32_t expiryTime = *prev + timeInc;															/* Compute the absolute expiry time of the delay. */
-		if (expiryTime > tickCount) {
-			expiryTime |= (0x01 << 31);																				/* We use bit 32 to indicate if the deadline was missed! (31 bits allow us to count for ~24 days, so no need to worry here about overflow etc.). */
-		}
+	uint32_t expiryTime = *prev + timeInc;															/* Compute the absolute expiry time of the delay. */
+	if (expiryTime < tickCount) {
+		expiryTime |= (0x01 << 31);																				/* We use bit 32 to indicate if the deadline was missed! (31 bits allow us to count for ~24 days, so no need to worry here about overflow etc.). */
+	}
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
-        buffer[1] = *prev + timeInc;
+        buffer[1] = expiryTime;
     }
 
 #ifdef TRACE_RTT

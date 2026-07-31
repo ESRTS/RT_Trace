@@ -130,7 +130,7 @@ void trace_mutexGive(uint32_t mutexId);
 
 #define traceMOVED_TASK_TO_READY_STATE( pxTCB )         trace_readyStart((uint32_t)pxTCB)
 
-#define traceENTER_xTaskDelayUntil( x, y )              trace_delayUntil(x, y, xTickCount )
+#define traceENTER_xTaskDelayUntil( x, y )              trace_delayUntil(x, y, xTickCount  )
 
 #define traceENTER_vTaskDelay( x )                      trace_delay(x)
 
