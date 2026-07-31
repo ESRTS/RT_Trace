@@ -302,7 +302,7 @@ def executionParser(sortedEvents, tasks, tickIds, mutex_id_to_letter):
         elif task.id in tickIds:
             parseIrq(sortedEvents, task)
         else:
-            parseTask(sortedEvents, task, mutex_id_to_letter)
+            parseTask(sortedEvents, task, mutex_id_to_letter, tickIds[0])
             for job in task.jobs:
                 for execInterval in job.execIntervals:
                     if execInterval.core == 1:
@@ -370,15 +370,18 @@ def parseIdleTask(sortedEvents, task):
         task.stopExec(ts)
         task.finishJob()
 
-def parseTask(sortedEvents, task, mutex_id_to_letter):
+def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
     """
     Parses the execution of a single task.
     """
     
     finishJob = False       # Flag to indicate that the job is about to finish.
-    deadlineMiss = False
+    deadlineMiss = False    # Flag to indicate that a deadline was missed.
     startExecCore = None    # Task started to execute on this core.
     lastExecTask = None     # Keep track of the last task started on the core.
+    tickTs = []             # We keep track if tick timestamps to be able to handle deadline misses.
+    missedDeadlineAt = None # Record the tick at which the release should have happened after a deadline miss.
+    tickTs.append(0)        # By default the first tick appears at t=0
 
     for i, evt in enumerate(sortedEvents):
         type = evt.get('type')
@@ -427,16 +430,8 @@ def parseTask(sortedEvents, task, mutex_id_to_letter):
 
                         if deadlineMiss == True:
                             deadlineMiss = False
-                            task.startExec(ts, core, ExecutionType.EXECUTE) # Directly start a new job if there was a deadline miss
-
-        # if type ==TRACE_DEADLINE_MISS:
-        #     if task.id == taskId:
-        #         if task.currentJob is not None:
-        #             if task.currentJob.activeInterval is not None:
-        #                 task.stopExec(ts)
-        #             task.finishJob()
-        #         task.newJob(ts, None)
-        #         task.startExec(ts, core, ExecutionType.EXECUTE)
+                            releaseTs = tickTs[missedDeadlineAt]    # Get the timestamp of the tick where the task should have been released.
+                            task.newJob(releaseTs, None)            # Release the job at the intended tick time.
 
         if type == TRACE_EVT_GROUP_SYNC or type == TRACE_EVT_GROUP_WAIT:
             if task.id == taskId:
@@ -447,7 +442,9 @@ def parseTask(sortedEvents, task, mutex_id_to_letter):
                 if lastExecTask == task.id:
                     #print(f"Stop execution due to ISR at {ts}")
                     task.stopExec(ts)
-        
+            irqId = evt.get('irqId')
+            if irqId == tickId:
+                tickTs.append(ts)
         elif type == TRACE_ISR_EXIT:
             if startExecCore == core:
                 if lastExecTask == task.id:
@@ -460,6 +457,7 @@ def parseTask(sortedEvents, task, mutex_id_to_letter):
                     #print(f"Delay Until called at {ts}")
                     finishJob = True
                     if evt.get('deadlineMiss') == True:
+                        missedDeadlineAt = evt.get('timeToWake')
                         deadlineMiss = True
         
         elif type == TRACE_DELAY:
@@ -478,7 +476,8 @@ def parseTask(sortedEvents, task, mutex_id_to_letter):
             if startExecCore == core:
                 if lastExecTask == task.id:
                     task.mutexGive(ts, evt.get('mutexId'))
-
+            
+            
     # In case there are unfinished jobs, we handle them here.
     if task.currentJob is not None:
         if task.currentJob.activeInterval is not None:
