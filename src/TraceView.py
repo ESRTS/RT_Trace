@@ -42,6 +42,7 @@ class TraceView(customtkinter.CTkCanvas):
         self.moveView = False                                   # Flag to indicate that the view is moved
         self.moveInitialX = 0                                   # Initial X-position if the view is moved
         self.coreColors = [(98, 152, 210), (51, 156, 156), (255, 209, 102), (204, 157, 251)]      # Colors to indicate that a task executes on a CPU, used if the trace contains more than one CPU
+        self.deadlineMissColor = '#f5697c'                    # Color to use for the job section after a deadline is missed
         self.cores = 1                                          # Number of cores in the trace (will be set automatically)
         self.gui = master                                       # GUI instance, needed to change the Y-dimension to fit the trace.
 
@@ -182,9 +183,20 @@ class TraceView(customtkinter.CTkCanvas):
 
         for index in range(task.leftIndex, task.rightIndex + 1):
             job = task.jobs[index]
-            self.paintJob(task, job, y)
 
-    def paintJob(self, task, job, y):
+            finishTime = job.getFinishTime()
+            nextRelease = None
+            if len(task.jobs) > index+1:
+                nextRelease = task.jobs[index+1].releaseTime
+            
+            deadlineMissAt = None
+            if nextRelease is not None:
+                if nextRelease < finishTime:
+                    deadlineMissAt = nextRelease
+
+            self.paintJob(task, job, y, deadlineMissAt)
+
+    def paintJob(self, task, job, y, deadlineMissAt):
         """
         Function prints the job to the canvas. 
         """
@@ -210,7 +222,7 @@ class TraceView(customtkinter.CTkCanvas):
                 self.canvasItems.append(self.create_rectangle(start_px, y, start_px + (finish_px - start_px), y + self.taskHeight_px, fill='#DDDDDD'))
 
             # Plot the execution
-            self.drawJobsSection(task, job, y, start_px, finish_px, self.tickToPixel(job.releaseTime), self.tickToPixel(job.getFinishTime()))
+            self.drawJobsSection(task, job, y, start_px, finish_px, self.tickToPixel(job.releaseTime), self.tickToPixel(job.getFinishTime()), deadlineMissAt)
 
         if self.leftBound_tks <= job.releaseTime and self.rightBound_tks >= job.releaseTime:
             # Draw the release arrow if this is not an ISR
@@ -228,7 +240,7 @@ class TraceView(customtkinter.CTkCanvas):
                 evt_px = self.tickToPixel(access.stop)
                 self.drawMutex(evt_px, y, access.letter, False)
 
-    def drawJobsSection(self, task, job, y, start_px, stop_px, sectionStart_px, sectionStop_px):
+    def drawJobsSection(self, task, job, y, start_px, stop_px, sectionStart_px, sectionStop_px, deadlineMissAt):
         """
         Function draws all execution intervals of the job that are in the visible part of the plot.
         """
@@ -258,7 +270,26 @@ class TraceView(customtkinter.CTkCanvas):
                 else:
                     color = '#%02X%02X%02X' % (self.coreColors[interval.core][0],self.coreColors[interval.core][1],self.coreColors[interval.core][2])
 
-                self.canvasItems.append(self.create_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = color))
+                if deadlineMissAt != None:
+                    pass
+                    # This task missed its deadline. 
+                    deadlineAt_px = self.tickToPixel(deadlineMissAt)
+
+                    if deadlineAt_px <= startInterval_px:
+                        # The whole interval is a miss interval
+                        self.canvasItems.append(self.create_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = self.deadlineMissColor))
+                    elif deadlineAt_px >= stopInterval_px:
+                        # The whole interval is valid
+                        self.canvasItems.append(self.create_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = color))
+                    else:
+                        # Part of the interval is valid and part is a miss interval
+                        # Interval: startInterval_px to deadlineAt_px
+                        self.canvasItems.append(self.create_rectangle(startInterval_px, y, deadlineAt_px, y + self.taskHeight_px, fill = color))
+                        # Interval: deadlineAt_px to startInterval_px
+                        self.canvasItems.append(self.create_rectangle(deadlineAt_px, y, stopInterval_px, y + self.taskHeight_px, fill = color))
+                else:
+                    # This job is not suject top a deadline miss. 
+                    self.canvasItems.append(self.create_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = color))
     
     def drawMutex(self, x, y, letter, accessType):
         """
