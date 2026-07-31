@@ -248,6 +248,8 @@ void trace_init() {
  *
  */
 void trace_init() {
+    
+    multicore_reset_core1();    /* This is needed since the core gets stuck otherwise if we halt it from pyOCD. */
 
 #ifndef TRACE_RTT
     /* Set the complete trace buffer to 0x00 */
@@ -259,8 +261,6 @@ void trace_init() {
     writeIndex_core0 = 0;
     writeIndex_core1 = 0;
 #else
-		multicore_reset_core1();
-
     /* With RTT, we only need to register the buffers. */
     /* NO_BLOCK_SKIP discards all data if there is not enough room in the buffer. */
     SEGGER_RTT_ConfigUpBuffer(1, "core0", rttBuffer_core0, sizeof(rttBuffer_core0), SEGGER_RTT_MODE_NO_BLOCK_SKIP);

@@ -113,7 +113,8 @@ def parser_thread(gui, numCores):
     
     # Get the tick id for each core from the config file.
     if gui is not None:
-        configName = gui.targets[gui.selectedTarget].get('name').replace(' ', '_')    # Get the configuration name
+        #configName = gui.targets[gui.selectedTarget].get('name').replace(' ', '_')    # Get the configuration name
+        configName = "general"
         config = configparser.ConfigParser()
         config.read(HelperFunctions.getConfigFilePath())
         tickIds = [int(x) for x in config.get(configName,'tickId').split(",")]

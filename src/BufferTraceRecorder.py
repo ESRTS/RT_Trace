@@ -12,22 +12,16 @@ import configparser
 from pyocd.core.helpers import ConnectHelper
 from pyocd.core.target import Target
 from pyocd.debug.elf.symbols import ELFSymbolProvider
-from pyocd.debug.rtt import RTTControlBlock
 from pyocd.flash.file_programmer import FileProgrammer
 
-#configName = "Pico2_FreeRTOS_RTT"
-
-def loadPico2RttTraceBuffers(gui):
-    
-    thread = Thread(target = rtt_thread, args = (gui,))
+def loadPico2BufferTraceRecorder(gui):
+    thread = Thread(target = recorder_thread, args = (gui,))
     thread.start()
 
-def rtt_thread(gui):
+def recorder_thread(gui):
     """
     Thread to flash the target and record the RTT buffers.
     """
-    #global configName
-
     configName = "general"
 
     cwd = HelperFunctions.getCwd()
@@ -50,7 +44,7 @@ def rtt_thread(gui):
         return 
     
     # Record the trace from the target platform
-    record_data(elf, probe, target, frequency, measure_seconds, filename1, filename2)
+    record_data(gui, elf, probe, target, frequency, measure_seconds, filename1, filename2)
 
     # Enable the buttons and update the GUI
     if gui is not None:
@@ -71,7 +65,6 @@ def wait_for_halt(core, timeout: float = 5.0) -> bool:
         time.sleep(0.01)
     return False
 
-
 def wait_for_pc(core, expected_addr: int, timeout: float = 5.0) -> bool:
     deadline = time.monotonic() + timeout
     expected = expected_addr & ~1
@@ -86,7 +79,24 @@ def wait_for_pc(core, expected_addr: int, timeout: float = 5.0) -> bool:
 
     return False
 
-def record_data(elf, probe, target, frequency, measure_seconds, filename1, filename2):
+def record_data(gui, elf, probe, target, frequency, measure_seconds, filename1, filename2):
+    
+    configName = HelperFunctions.getTargetName(gui)
+    config = configparser.ConfigParser()
+    config.read(HelperFunctions.getConfigFilePath())
+    
+    address_buffer0_str = config.get(configName,'buffer0', fallback = None)
+    address_buffer1_str = config.get(configName,'buffer1', fallback = None)
+    buffer_length_str = config.get(configName,'bufferSize', fallback = None)
+    
+    assert address_buffer0_str != None, "Could not read address_buffer0 from config file!"
+    assert address_buffer1_str != None, "Could not read address_buffer1 from config file!"
+    assert buffer_length_str != None, "Could not read buffer_length from config file!"
+
+    address_buffer0 = int(address_buffer0_str, 0)
+    address_buffer1 = int(address_buffer1_str, 0)
+    buffer_length = int(buffer_length_str, 0)
+
     session = ConnectHelper.session_with_chosen_probe(
         unique_id=probe,
         options={
@@ -114,7 +124,6 @@ def record_data(elf, probe, target, frequency, measure_seconds, filename1, filen
 
         main_addr = symbol_provider.get_symbol_value("main")
         hook_addr = symbol_provider.get_symbol_value("trace_init")
-        rtt_addr = symbol_provider.get_symbol_value("_SEGGER_RTT")
 
         if main_addr is None:
             print("Could not resolve symbol: main", file=sys.stderr)
@@ -122,13 +131,10 @@ def record_data(elf, probe, target, frequency, measure_seconds, filename1, filen
         if hook_addr is None:
             print("Could not resolve symbol: trace_init", file=sys.stderr)
             return 1
-        if rtt_addr is None:
-            print("Could not resolve symbol: _SEGGER_RTT", file=sys.stderr)
-            return 1
+        
         
         print(f"main() at 0x{main_addr:08X}")
         print(f"trace_init() at 0x{hook_addr:08X}")
-        print(f"_SEGGER_RTT at 0x{rtt_addr:08X}")
 
         print("Setting breakpoint for trace_init()")
         core.set_breakpoint(hook_addr)
@@ -144,54 +150,50 @@ def record_data(elf, probe, target, frequency, measure_seconds, filename1, filen
             print("Timed out before reaching trace_init()", file=sys.stderr)
             return 1
         print("Hit trace_init().")
-        
-        #while core.get_state() == Target.State.HALTED:
-        #    print("HALTED...")
-        #    pc = core.read_core_register("pc") & ~1
-        #    print(f"PC: 0x{pc:08X}")
-        #    time.sleep(0.5)
 
-
-        rtt = RTTControlBlock.from_target(target, address=rtt_addr)
-        rtt.start()
-
-        if len(rtt.up_channels) < 3:
-            print(f"Need at least 3 RTT up channels, found {len(rtt.up_channels)}", file=sys.stderr)
-            return 1
-        print("Read information for RTT channel 1 and 2.")
-        ch1 = rtt.up_channels[1]
-        ch2 = rtt.up_channels[2]
-
-        time.sleep(1)
         print("Remove breakpoint for trace_init().")
         core.remove_breakpoint(hook_addr)
         print(f"Resume and start Trace Record for {measure_seconds} seconds")
         core.resume()
 
-        deadline = time.monotonic() + measure_seconds
+        wait_with_incremental_bar(measure_seconds, 25)
 
-        with open(filename1, "wb") as f1, open(filename2, "wb") as f2:
-            try:
-                while time.monotonic() < deadline:
-                    data1 = ch1.read()
-                    if data1:
-                        #print(data1.decode("ascii", errors="replace"))
-                        f1.write(data1)
-                        f1.flush()
+        print("Finished trace recording, halting the target now.")
+        target.halt()
 
-                    data2 = ch2.read()
-                    if data2:
-                        #print(data2.decode("ascii", errors="replace"))
-                        f2.write(data2)
-                        f2.flush()
+        print(f"Reading buffer 0 at address 0x{address_buffer0}")
+        data_buffer0 = target.read_memory_block8(address_buffer0, buffer_length)
+        with open(filename1, "wb") as f:
+            f.write(bytes(data_buffer0))
 
-                    time.sleep(0.001)
-            finally:
-                print("Finished trace recording, halting the target now.")
-                target.halt()
-
+        print(f"Reading buffer 1 at address 0x{address_buffer1}")
+        data_buffer1 = target.read_memory_block8(address_buffer1, buffer_length)
+        with open(filename2, "wb") as f:
+            f.write(bytes(data_buffer1))
+    
         print(f"Wrote RTT channel 1 to {filename1}")
         print(f"Wrote RTT channel 2 to {filename2}")
+
+def wait_with_incremental_bar(seconds, width=30):
+    start = time.time()
+    last_filled = 0
+
+    print("[", end="", flush=True)
+
+    while True:
+        progress = min((time.time() - start) / seconds, 1.0)
+        filled = int(width * progress)
+
+        if filled > last_filled:
+            print("=" * (filled - last_filled), end="", flush=True)
+            last_filled = filled
+
+        if progress >= 1.0:
+            break
+
+        time.sleep(0.1)
+
+    print("] 100%")
 
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -205,9 +207,6 @@ def main() -> int:
     args = ap.parse_args()
 
     retval = record_data(args.elf, args.probe, args.target, args.frequency, args.seconds, args.ch1_file, args.ch2_file)
-
-    #print(open('rtt_test/rtt_ch1.bin','rb').read().decode('ascii','replace'))
-    #print(open('rtt_test/rtt_ch2.bin','rb').read().decode('ascii','replace'))
 
     return retval
 

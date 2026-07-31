@@ -63,6 +63,12 @@ def getTimeString():
     
     return formatted
 
+def getTargetName(gui):
+    '''
+    Get the name of the currently selected target.
+    '''
+    return gui.targets[gui.selectedTarget].get('name').replace(' ', '_')
+
 def getRecordedTraces(gui):
     """
     Gets the recorded trace folders of the current platform configuration. Sorted by the folder creation time, most recent first.
