@@ -127,6 +127,9 @@ def getPossiblePrograms():
     config.read(getConfigFilePath())
     programPath = config.get('general','project_path')
 
+    if not Path(programPath).exists():
+        return []
+    
     return get_subfolders(programPath)
 
 def validateProgramFolder(gui, selectedFolder) -> bool:

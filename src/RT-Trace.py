@@ -345,20 +345,8 @@ class TraceApp(customtkinter.CTk):
             HelperFunctions.makeFolder(outputPath)
             pdfFilename = os.path.abspath(os.path.join(outputPath, "Trace_" + now.strftime("%d_%m_%Y_%H_%M_%S") + ".pdf"))
 
-            psFilename = os.path.abspath(os.path.join(outputPath, "tmp.ps"))
+            self.traceView.exportView(pdfFilename)  # Create and save the PDF
 
-            self.traceView.postscript(file=psFilename, colormode="color")                 # Generate the postscript of the trace canvas
-
-            my_env = os.environ.copy()
-            my_env["PATH"] = f"{my_env['PATH']}:{self.ps2pdf_path}" # This is not final, a config file for the openocd path should be added
-            process = subprocess.Popen(["ps2pdf", "-dEPSCrop", psFilename, pdfFilename], env=my_env)  # Convert the postscript file to PDF (requires ps2pdf)
-            streamdata = process.communicate()[0]                                       # Get the return code of the process
-            rc = process.returncode
-            if rc == 0:
-                HelperFunctions.printState("Saved trace as ", info = pdfFilename)
-            else:
-                print("Cound not generate PDF file.", file=sys.stderr)
-            os.remove(psFilename)                                                         # Delete the temporary postscript file
         else:
             HelperFunctions.printState("No trace loaded!")
 

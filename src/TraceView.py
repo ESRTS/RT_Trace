@@ -1,5 +1,10 @@
 import customtkinter
 import math
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.lib.colors import HexColor
+
 
 class TraceView(customtkinter.CTkCanvas):
     """
@@ -45,6 +50,10 @@ class TraceView(customtkinter.CTkCanvas):
         self.deadlineMissColor = '#f5697c'                    # Color to use for the job section after a deadline is missed
         self.cores = 1                                          # Number of cores in the trace (will be set automatically)
         self.gui = master                                       # GUI instance, needed to change the Y-dimension to fit the trace.
+        self.exportCanvas = None                                # Instance of the canvas to export to PDF. This is only set for one call to draw()
+        self.pdf_scale = 1
+        self.pdf_height_pt = 0
+        self.pdf_padding_north = 3
 
         self.ctk_textbox_scrollbar = customtkinter.CTkScrollbar(self, command=self.yview)
         self.ctk_textbox_scrollbar.place(relx=1,rely=0,relheight=1,anchor='ne')
@@ -132,7 +141,8 @@ class TraceView(customtkinter.CTkCanvas):
 
         # Display a standard text if no task is set yet
         if self.tasks is None:
-            self.canvasItems.append(self.create_text(200, 100, anchor=customtkinter.N, text="No Trace Loaded...."))
+            #self.canvasItems.append(self.create_text(200, 100, anchor=customtkinter.N, text="No Trace Loaded...."))
+            self.draw_text(200, 100, anchor=customtkinter.N, text="No Trace Loaded....")
             traceHeight = 200
         else: 
             traceHeight = len(self.tasks) * self.taskTimelineHeight_px + self.borderY_px
@@ -141,7 +151,8 @@ class TraceView(customtkinter.CTkCanvas):
             self.clearTrace()
 
             # Add a white background to the trace
-            self.canvasItems.append(self.create_rectangle(self.borderX_px + self.legend_px, 0, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (len(self.tasks)) - 1), fill="#FFFFFF"))
+            #self.canvasItems.append(self.create_rectangle(self.borderX_px + self.legend_px, 0, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (len(self.tasks)) - 1), fill="#FFFFFF"))
+            self.draw_rectangle(self.borderX_px + self.legend_px, 0, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (len(self.tasks)) - 1), fill="#FFFFFF")
 
             # Compute the length of the visible view in ticks
             self.view_tks = self.rightBound_tks - self.leftBound_tks
@@ -154,12 +165,15 @@ class TraceView(customtkinter.CTkCanvas):
                 self.paintTask(task, taskPos)
 
             for task in self.tasks:
-                self.canvasItems.append(self.create_line(self.borderX_px + self.legend_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1))
+                #self.canvasItems.append(self.create_line(self.borderX_px + self.legend_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1))
+                self.draw_rectangle(self.borderX_px + self.legend_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1)
 
                 #left vertical boundary
-                self.canvasItems.append(self.create_line(self.plotXOffset(), 0, self.plotXOffset(), (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1))
-                
-                self.canvasItems.append(self.create_line(self.sizeX_px - self.borderX_px, 0, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1))
+                #self.canvasItems.append(self.create_line(self.plotXOffset(), 0, self.plotXOffset(), (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1))
+                self.draw_rectangle(self.plotXOffset(), 0, self.plotXOffset(), (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1)
+
+                #self.canvasItems.append(self.create_line(self.sizeX_px - self.borderX_px, 0, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1))
+                self.draw_line(self.sizeX_px - self.borderX_px, 0, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1)
 
             self.paintLegend()
         
@@ -173,7 +187,8 @@ class TraceView(customtkinter.CTkCanvas):
         """
 
         for task in self.tasks:
-            self.canvasItems.append(self.create_text(self.legend_px + (self.borderX_px / 2), (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - (self.taskTimelineHeight_px / 2), anchor=customtkinter.E,text=task.name))
+            #self.canvasItems.append(self.create_text(self.legend_px + (self.borderX_px / 2), (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - (self.taskTimelineHeight_px / 2), anchor=customtkinter.E,text=task.name))
+            self.draw_text(self.legend_px + (self.borderX_px / 2), (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - (self.taskTimelineHeight_px / 2), anchor=customtkinter.E,text=task.name)
 
     def paintTask(self, task, y):
         """
@@ -219,7 +234,8 @@ class TraceView(customtkinter.CTkCanvas):
 
             # Plot the ready marking
             if task.id > 100:   # the ISR and scheduler events have an ID < 100. For those we don't have jobs so we don't draw the grey background either.
-                self.canvasItems.append(self.create_rectangle(start_px, y, start_px + (finish_px - start_px), y + self.taskHeight_px, fill='#DDDDDD'))
+                #self.canvasItems.append(self.create_rectangle(start_px, y, start_px + (finish_px - start_px), y + self.taskHeight_px, fill='#DDDDDD'))
+                self.draw_rectangle(start_px, y, start_px + (finish_px - start_px), y + self.taskHeight_px, fill='#DDDDDD')
 
             # Plot the execution
             self.drawJobsSection(task, job, y, start_px, finish_px, self.tickToPixel(job.releaseTime), self.tickToPixel(job.getFinishTime()), deadlineMissAt)
@@ -229,7 +245,8 @@ class TraceView(customtkinter.CTkCanvas):
             if task.id > 200:
                 if task.name[:4] != 'IDLE': # Idle tasks don't have jobs.
                     rel_px = self.tickToPixel(job.releaseTime)
-                    self.canvasItems.append(self.create_line(rel_px, y - 3, rel_px, y - self.releaseArrowLength_px - 3, arrow=customtkinter.LAST, arrowshape=(self.releaseArrowH_px, self.releaseArrowH_px, self.releaseArrowD_px / 2), width=self.releaseArrowWidth_px))
+                    #self.canvasItems.append(self.create_line(rel_px, y - 3, rel_px, y - self.releaseArrowLength_px - 3, arrow=customtkinter.LAST, arrowshape=(self.releaseArrowH_px, self.releaseArrowH_px, self.releaseArrowD_px / 2), width=self.releaseArrowWidth_px))
+                    self.draw_arrow(rel_px, y - 3, rel_px, y - self.releaseArrowLength_px - 3)
 
         for access in job.mutexAccess:
             # Draw all mutex access events on the trace
@@ -277,39 +294,47 @@ class TraceView(customtkinter.CTkCanvas):
 
                     if deadlineAt_px <= startInterval_px:
                         # The whole interval is a miss interval
-                        self.canvasItems.append(self.create_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = self.deadlineMissColor))
+                        #self.canvasItems.append(self.create_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = self.deadlineMissColor))
+                        self.draw_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = self.deadlineMissColor)
                     elif deadlineAt_px >= stopInterval_px:
                         # The whole interval is valid
-                        self.canvasItems.append(self.create_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = color))
+                        #self.canvasItems.append(self.create_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = color))
+                        self.draw_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = color)
                     else:
                         # Part of the interval is valid and part is a miss interval
                         # Interval: startInterval_px to deadlineAt_px
-                        self.canvasItems.append(self.create_rectangle(startInterval_px, y, deadlineAt_px, y + self.taskHeight_px, fill = color))
+                        #self.canvasItems.append(self.create_rectangle(startInterval_px, y, deadlineAt_px, y + self.taskHeight_px, fill = color))
+                        self.draw_rectangle(startInterval_px, y, deadlineAt_px, y + self.taskHeight_px, fill = color)
                         # Interval: deadlineAt_px to startInterval_px
-                        self.canvasItems.append(self.create_rectangle(deadlineAt_px, y, stopInterval_px, y + self.taskHeight_px, fill = color))
+                        #self.canvasItems.append(self.create_rectangle(deadlineAt_px, y, stopInterval_px, y + self.taskHeight_px, fill = color))
+                        self.draw_rectangle(deadlineAt_px, y, stopInterval_px, y + self.taskHeight_px, fill = color)
                 else:
                     # This job is not suject top a deadline miss. 
-                    self.canvasItems.append(self.create_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = color))
+                    #self.canvasItems.append(self.create_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = color))
+                    self.draw_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = color)
     
     def drawMutex(self, x, y, letter, accessType):
         """
         Function draws the mutex access symbols on the trace. The letter ID is used to visualize access to different mutexes (max 26).
         The accessType indicates if the event is a mutex take (True) or a mutex give (False). 
         """
-        self.canvasItems.append(self.create_line(x, y, x, y - self.mutexAccessHeight + self.mutexAccessDiameter, width=2))
+        #self.canvasItems.append(self.create_line(x, y, x, y - self.mutexAccessHeight + self.mutexAccessDiameter, width=2))
+        self.draw_line(x, y, x, y - self.mutexAccessHeight + self.mutexAccessDiameter, width=2)
 
         radius = self.mutexAccessDiameter / 2
         center_y = y - self.mutexAccessHeight + self.mutexAccessDiameter - radius
         
         if accessType == True:
-            fillColor = "black"
-            textColor = "white"
+            fillColor = "#000000"
+            textColor = "#ffffff"
         else:
-            fillColor = "white"
-            textColor = "black"
+            fillColor = "#ffffff"
+            textColor = "#000000"
 
-        self.canvasItems.append(self.create_oval(x - radius, center_y - radius, x + radius, center_y + radius, fill=fillColor, outline="black", width=1))
-        self.canvasItems.append(self.create_text(x+1, center_y, text=letter, fill=textColor, font=("Arial", 6), anchor="center"))
+        #self.canvasItems.append(self.create_oval(x - radius, center_y - radius, x + radius, center_y + radius, fill=fillColor, outline="black", width=1))
+        self.draw_oval(x - radius, center_y - radius, x + radius, center_y + radius, fill=fillColor, outline="#000000", width=1)
+        #self.canvasItems.append(self.create_text(x+1, center_y, text=letter, fill=textColor, font=("Arial", 6), anchor="center"))
+        self.draw_text(x+1, center_y, text=letter, fill=textColor, font=("Arial", 6), anchor="center")
 
     def updateVisibleJobs(self, task):
         """
@@ -427,11 +452,14 @@ class TraceView(customtkinter.CTkCanvas):
             pos = self.tickToPixel(tick)
 
             # Draw the ticks
-            self.canvasItems.append(self.create_line(pos, 0, pos, self.taskTimelineHeight_px * (len(self.tasks)), fill="lightgrey"))
-            self.canvasItems.append(self.create_line(pos, self.taskTimelineHeight_px * (len(self.tasks)) - 1, pos, self.taskTimelineHeight_px * (len(self.tasks)) + 5))
+            #self.canvasItems.append(self.create_line(pos, 0, pos, self.taskTimelineHeight_px * (len(self.tasks)), fill="lightgrey"))
+            self.draw_line(pos, 0, pos, self.taskTimelineHeight_px * (len(self.tasks)), fill="#d3d3d3")
+            #self.canvasItems.append(self.create_line(pos, self.taskTimelineHeight_px * (len(self.tasks)) - 1, pos, self.taskTimelineHeight_px * (len(self.tasks)) + 5))
+            self.draw_line(pos, self.taskTimelineHeight_px * (len(self.tasks)) - 1, pos, self.taskTimelineHeight_px * (len(self.tasks)) + 5)
             
             # Draw timestring
-            self.canvasItems.append(self.create_text(pos, self.taskTimelineHeight_px * (len(self.tasks)) + 12, anchor=customtkinter.N, text=self.getTimeString(tick)))
+            #self.canvasItems.append(self.create_text(pos, self.taskTimelineHeight_px * (len(self.tasks)) + 12, anchor=customtkinter.N, text=self.getTimeString(tick)))
+            self.draw_text(pos, self.taskTimelineHeight_px * (len(self.tasks)) + 12, anchor=customtkinter.N, text=self.getTimeString(tick))
 
             tick = tick + (self.tickScale * subdivider) # Increment tick
             if tick >= self.rightBound_tks:
@@ -576,3 +604,204 @@ class TraceView(customtkinter.CTkCanvas):
         else:
             self.gui.windowSizeY = self.gui.maxScreenSizeY
         self.gui.geometry("{}x{}".format(self.gui.windowSizeX, self.gui.windowSizeY))
+
+    """
+    Drawing functions used on draw(). This way, the trace can be drawn on the canvas or on the 
+    PDF for exporting, without changing the drawing logic. 
+    """
+    def draw_line(self, x1, y1, x2, y2, width=1, fill='#000000'):
+        if self.exportCanvas is None:
+            self.canvasItems.append(self.create_line(x1, y1, x2, y2, width=width, fill=fill))
+        else:
+            
+            width_pt = width * self.pdf_scale
+            x1_pt = self.pdf_x(x1)
+            y1_pt = self.pdf_y(y1)
+            x2_pt = self.pdf_x(x2)
+            y2_pt = self.pdf_y(y2)
+            color_pdf = self.to_hex6(fill)
+
+            self.exportCanvas.setLineWidth(width_pt)
+            self.exportCanvas.setStrokeColor(HexColor(color_pdf))
+            self.exportCanvas.line(x1_pt, y1_pt, x2_pt, y2_pt)
+
+    def draw_rectangle(self, x1, y1, x2, y2, fill="", ):
+        if self.exportCanvas is None:
+            self.canvasItems.append(self.create_rectangle(x1, y1, x2, y2, fill=fill))
+        else:
+            if fill == "":
+                fillFlag = 0
+                fill="#ffffff"
+            else:
+                fillFlag = 1
+
+            line_width_pt = 1 * self.pdf_scale
+            x1_pt = self.pdf_x(x1)
+            y1_pt = self.pdf_y(y1)
+            x2_pt = self.pdf_x(x2)
+            y2_pt = self.pdf_y(y2)
+            width_pt = x2_pt - x1_pt
+            height_pt = y2_pt - y1_pt
+            color_pdf = self.to_hex6(fill)
+            self.exportCanvas.setLineWidth(line_width_pt)
+            self.exportCanvas.setFillColor(HexColor(color_pdf))
+            self.exportCanvas.setStrokeColor(HexColor("#000000"))
+            self.exportCanvas.rect(x1_pt, y1_pt, width_pt, height_pt, stroke=1, fill=fillFlag)
+
+    def draw_oval(self, x1, y1, x2, y2, fill="", outline="#000000", width=1):
+        if self.exportCanvas is None:
+            self.canvasItems.append(self.create_oval(x1, y1, x2, y2, fill=fill, outline=outline, width=width))
+        else:
+            line_width_pt = width * self.pdf_scale
+            x1_pt = self.pdf_x(x1)
+            y1_pt = self.pdf_y(y1)
+            x2_pt = self.pdf_x(x2)
+            y2_pt = self.pdf_y(y2)
+            self.exportCanvas.setLineWidth(line_width_pt)
+            self.exportCanvas.setStrokeColor(HexColor(self.to_hex6(outline)))   # outline
+            self.exportCanvas.setFillColor(HexColor(self.to_hex6(fill)))     # fill
+            self.exportCanvas.ellipse(x1_pt, y1_pt, x2_pt, y2_pt, stroke=1, fill=1)
+            pass
+
+    def draw_text(self, x, y, text, anchor=customtkinter.CENTER, fill="#000000", font=None ):
+        
+        if self.exportCanvas is None:
+            if font is None:
+                self.canvasItems.append(self.create_text(x, y, text=text, anchor=anchor, fill=fill))
+            else:
+                self.canvasItems.append(self.create_text(x, y, text=text, anchor=anchor, fill=fill, font=font))
+        else:
+
+            BUILTIN_FONTS = {
+                "Courier", "Courier-Bold", "Courier-BoldOblique", "Courier-Oblique",
+                "Helvetica", "Helvetica-Bold", "Helvetica-BoldOblique", "Helvetica-Oblique",
+                "Symbol", "Times-Bold", "Times-BoldItalic", "Times-Italic", "Times-Roman",
+                "ZapfDingbats",
+                }
+
+            font_name = "Times-Roman"
+            font_size_pt = 13 * self.pdf_scale
+            x_pt = self.pdf_x(x)
+            y_pt = self.pdf_y(y)
+            
+            self.exportCanvas.setFillColor(HexColor(self.to_hex6(fill)))
+
+            if font != None:
+                font_name, font_size = font
+                if font_name not in BUILTIN_FONTS:
+                    font_name = "Times-Roman"
+                font_size_pt = font_size * self.pdf_scale
+
+            self.exportCanvas.setFont(font_name, font_size_pt)
+            y_pt = y_pt - (font_size_pt / 3)
+
+            if anchor == customtkinter.CENTER:  
+                x_pt = x_pt - (1 * self.pdf_scale)           
+                self.exportCanvas.drawCentredString(x_pt, y_pt, text)
+            elif anchor == customtkinter.W:
+                self.exportCanvas.drawString(x_pt, y_pt, text)
+            elif anchor == customtkinter.E:
+                self.exportCanvas.drawRightString(x_pt, y_pt, text)
+            elif anchor == customtkinter.N:
+                y_pt = y_pt - (font_size_pt / 3)
+                x_pt = x_pt - (1 * self.pdf_scale)           
+                self.exportCanvas.drawCentredString(x_pt, y_pt, text)
+
+    def draw_arrow(self, x1, y1, x2, y2):
+        if self.exportCanvas is None:
+            self.canvasItems.append(self.create_line(x1, y1, x2, y2, arrow=customtkinter.LAST, arrowshape=(self.releaseArrowH_px, self.releaseArrowH_px, self.releaseArrowD_px / 2), width=self.releaseArrowWidth_px))
+        else:
+            line_width_pt = self.releaseArrowWidth_px * self.pdf_scale
+            x1_pt = self.pdf_x(x1)
+            y1_pt = self.pdf_y(y1)
+            x2_pt = self.pdf_x(x2)
+            y2_pt = self.pdf_y(y2)
+            h_pt = self.releaseArrowH_px * self.pdf_scale
+            d_pt = (self.releaseArrowD_px / 2) * self.pdf_scale
+            self.exportCanvas.setLineWidth(line_width_pt)
+            self.exportCanvas.setStrokeColor(HexColor("#000000")) 
+            self.exportCanvas.setFillColor(HexColor("#000000")) 
+
+            # Draw the tail of the arrow
+            self.exportCanvas.line(x1_pt, y1_pt, x2_pt, y2_pt - h_pt)
+
+            # Compute the coordinates for the points of the arrow head. 
+            px1_pt = x2_pt
+            py1_pt = y2_pt
+            px2_pt = px1_pt - d_pt
+            py2_pt = y2_pt - h_pt
+            px3_pt = px1_pt + d_pt
+            py3_pt = y2_pt - h_pt
+
+            # Draw the arrow head
+            self.exportCanvas.setLineWidth(1 * self.pdf_scale)
+            p = self.exportCanvas.beginPath()
+            p.moveTo(px1_pt, py1_pt)
+            p.lineTo(px2_pt, py2_pt)
+            p.lineTo(px3_pt, py3_pt)
+            p.close()
+            self.exportCanvas.drawPath(p, stroke=1, fill=1)
+
+    def to_hex6(self, value):
+        if isinstance(value, str):
+            s = value.strip()
+
+            if s.startswith("#"):
+                s = s[1:]
+
+                if len(s) == 3:   # #abc -> #aabbcc
+                    s = "".join(ch * 2 for ch in s)
+
+                if len(s) == 6 and all(ch in "0123456789abcdefABCDEF" for ch in s):
+                    return "#" + s.lower()
+
+            raise ValueError(f"Not a hex color string: {value!r}")
+
+        if isinstance(value, (tuple, list)) and len(value) == 3:
+            r, g, b = value
+            if all(isinstance(c, int) and 0 <= c <= 255 for c in (r, g, b)):
+                return f"#{r:02x}{g:02x}{b:02x}"
+            raise ValueError(f"RGB values must be integers in 0..255: {value!r}")
+
+        raise TypeError(f"Unsupported color value: {value!r}")
+
+    def pdf_x(self, x):
+        """
+        Helper to convert px of the GUI to point dimensions of the PDF.
+        """
+        return x * self.pdf_scale
+
+    def pdf_y(self, y):
+        """
+        Helper to convert px of the GUI to point dimensions of the PDF.
+        Note that the PDF has (0, 0) at the bottom left, and the GUI at the top left corner.
+        """
+        return (self.pdf_height_pt - (y * self.pdf_scale)) - self.pdf_padding_north
+    
+    def exportView(self, filepath):
+        """
+        Function to export the current trace view to PDF. 
+        We set exportCanvas to the PDF canvas which cuases the draw functions to draw on the PDF canvas instead of the GUI canvas.
+        Once exported, we set exportCanvas back to None.
+        """
+
+        # Get the dimensions of the canvas in px
+        width_px = int(self.winfo_width())
+        height_px = int(self.winfo_height())
+        
+        # Compute the scaling factor, the PDF uses 72 points per inch.
+        ieee_textwidth = 7.16   # Textwidth of the IEEE template in inch 
+        self.pdf_scale = (ieee_textwidth * 72) / width_px
+
+        # Convert the canvas dimensions to points
+        page_width_pt = width_px * self.pdf_scale
+        self.pdf_height_pt = height_px * self.pdf_scale
+
+        # Create the PDF.
+        c = canvas.Canvas(filepath, pagesize=(page_width_pt, self.pdf_height_pt))
+        self.exportCanvas = c
+        self.draw()
+        self.exportCanvas = None
+        c.save()
+        
+        
