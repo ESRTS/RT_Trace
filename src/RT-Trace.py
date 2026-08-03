@@ -1,6 +1,7 @@
 import customtkinter
 import tkinter as tk
 import sys
+import platform
 from TraceView import TraceView
 from BufferTraceRecorder import loadPico2BufferTraceRecorder
 from RttTraceRecorder import loadPico2RttTraceBuffers
@@ -29,19 +30,26 @@ class TraceApp(customtkinter.CTk):
         'recordTraceFunc' is a target specific function that loads the trace buffer
         """
         self.targets = [
-            {'name': 'Pico2 FreeRTOS RTT', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Experimental! Uses RTT to record the trace data. Specify elf-file in the ini-file.', 'recordTraceFunc' : loadPico2RttTraceBuffers, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': HelperFunctions.validatePicoRtt},
-            {'name': 'Pico2 FreeRTOS SRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet need to be on the path.', 'recordTraceFunc' : loadPico2BufferTraceRecorder, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': None},
-            {'name': 'Pico2 FreeRTOS PSRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet need to be on the path.', 'recordTraceFunc' : loadPico2BufferTraceRecorder, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': None},
+            {'name': 'Pico2 FreeRTOS RTT', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2RttTraceBuffers, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': HelperFunctions.validatePicoRtt},
+            {'name': 'Pico2 FreeRTOS SRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2BufferTraceRecorder, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': None},
+            {'name': 'Pico2 FreeRTOS PSRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2BufferTraceRecorder, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': None},
             #{'name': 'STM FreeRTOS', 'numCores': 1, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : loadSTM32L476TraceBuffers},
             #{'name': 'RPI QNX', 'numCores': 4, 'implemented': False, 'requirement_str' : 'To load the trace buffer, telnet needs to be on the path.', 'recordTraceFunc' : None},
             {'name': 'RPI Linux', 'numCores': 4, 'implemented': True, 'requirement_str' : 'Experimental...', 'recordTraceFunc' : loadLinuxraceBuffers, 'loadTraceFunc': linuxParseTraceFiles, 'pathValidationFunc': None}
         ]
 
-        ''' Get the path for ps2pdf. '''
-        config = configparser.ConfigParser()
-        config.read(HelperFunctions.getConfigFilePath())
-        fallback_path = os.path.join("/", "usr", "local", "bin")
-        self.ps2pdf_path = config.get('general','ps2pdf_path', fallback = fallback_path)
+        ''' Set default values for the GUI '''
+        system = platform.system()
+        if system == "Windows":
+            default_corner_radius = 6
+            ui_font = customtkinter.CTkFont(family="Segoe UI", size=13)
+        elif system == "Darwin":
+            default_corner_radius = 6
+            ui_font = customtkinter.CTkFont(family="SF Pro Text", size=13)  # if available on your mac
+        else:  # Linux
+            # As the rendering of round corners looks very poor on Linux we set the corner radius to 2. 
+            default_corner_radius = 2
+            ui_font = customtkinter.CTkFont(family="DejaVu Sans", size=13)
 
         ''' Set the default size of the GUI window and give it a name. '''
         self.windowSizeY = 600
@@ -72,7 +80,7 @@ class TraceApp(customtkinter.CTk):
                 self.selectedTarget = self.targets.index(target)     # Select the first target in the list
             self.selectValues.append(target.get('name'))        # Create a list with all target names for the option menu
 
-        self.opt_selectSource = customtkinter.CTkOptionMenu(self.sidebar_frame, values=self.selectValues, command=self.selectTraceSource)
+        self.opt_selectSource = customtkinter.CTkOptionMenu(self.sidebar_frame, values=self.selectValues, command=self.selectTraceSource, corner_radius=default_corner_radius)
         self.opt_selectSource.grid(row=1, column=0, padx=20, pady=(0, 5), sticky="ew")
         
         ''' Label for the trace recorder section. '''
@@ -80,12 +88,12 @@ class TraceApp(customtkinter.CTk):
         self.lbl_recording.grid(row=2, column=0, padx=(0, 0), pady=(10, 0))
 
         ''' Button to start recording a new trace from a target. '''
-        self.btn_recordTrace = customtkinter.CTkButton(self.sidebar_frame, text="Record Trace", command=self.button_record_function)
+        self.btn_recordTrace = customtkinter.CTkButton(self.sidebar_frame, text="Record Trace", command=self.button_record_function, corner_radius=default_corner_radius)
         self.btn_recordTrace.grid(row=3, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Entry to specify the trace name. '''
         recordTraceName = tk.StringVar(value="Record")#self.targets[self.selectedTarget].get('name').replace(' ', '_'))
-        self.txt_traceName = customtkinter.CTkEntry(self.sidebar_frame, textvariable=recordTraceName)
+        self.txt_traceName = customtkinter.CTkEntry(self.sidebar_frame, textvariable=recordTraceName, corner_radius=default_corner_radius)
         self.txt_traceName.grid(row=4, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Label for the target program section. '''
@@ -95,7 +103,7 @@ class TraceApp(customtkinter.CTk):
         ''' Option to select the target program. '''
         self.possiblePrograms = ["Select a program..."] + HelperFunctions.getPossiblePrograms()
         self.selectedProgram = self.possiblePrograms[0]
-        self.opt_selectProg = customtkinter.CTkOptionMenu(self.sidebar_frame, values=self.possiblePrograms, command=self.selectProgramSource)
+        self.opt_selectProg = customtkinter.CTkOptionMenu(self.sidebar_frame, values=self.possiblePrograms, command=self.selectProgramSource, corner_radius=default_corner_radius)
         self.opt_selectProg.grid(row=6, column=0, padx=20, pady=(0, 5), sticky="ew")
         self.btn_recordTrace.configure(state="disabled")    # Enable the record button only after a valid program is selected
 
@@ -111,15 +119,15 @@ class TraceApp(customtkinter.CTk):
         else:
             self.selectTrace.append('None')
 
-        self.opt_selectTrace = customtkinter.CTkOptionMenu(self.sidebar_frame, values=self.selectTrace, command=self.selectRecordedTrace)
+        self.opt_selectTrace = customtkinter.CTkOptionMenu(self.sidebar_frame, values=self.selectTrace, command=self.selectRecordedTrace, corner_radius=default_corner_radius)
         self.opt_selectTrace.grid(row=8, column=0, padx=20, pady=(0, 5), sticky="ew")
 
         ''' Button to load an existing trace. '''
-        self.btn_loadTrace = customtkinter.CTkButton(self.sidebar_frame, text="Load Trace", command=self.load_function)
+        self.btn_loadTrace = customtkinter.CTkButton(self.sidebar_frame, text="Load Trace", command=self.load_function, corner_radius=default_corner_radius)
         self.btn_loadTrace.grid(row=9, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Button to save the current trace. '''
-        self.btn_saveTrace = customtkinter.CTkButton(self.sidebar_frame, text="Save PDF", command=self.save_image_function)
+        self.btn_saveTrace = customtkinter.CTkButton(self.sidebar_frame, text="Save PDF", command=self.save_image_function, corner_radius=default_corner_radius)
         self.btn_saveTrace.grid(row=10, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Textbox to display stdout. '''

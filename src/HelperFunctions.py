@@ -12,7 +12,8 @@ def getCwd():
     if platform.system() == "Darwin":
         return os.path.sep.join(sys.argv[0].split(os.path.sep)[:-1])
     else:
-        return os.getcwd()
+        #return os.getcwd()
+        return Path(__file__).resolve().parent
     
 def getConfigFilePath():
     """
