@@ -21,7 +21,22 @@ def getConfigFilePath():
     """
     cwd = getCwd()
 
-    return os.path.abspath(os.path.join(os.path.dirname( cwd ), 'Resources', 'config.ini'))
+    ''' Set default values for the GUI '''
+    system = platform.system()
+    if system == "Windows":
+        return os.path.abspath(os.path.join(os.path.dirname( cwd ), 'Resources', 'config.ini'))
+    elif system == "Darwin":
+        return os.path.abspath(os.path.join(os.path.dirname( cwd ), 'Resources', 'config.ini'))
+    else:  # Linux
+        devPath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'Resources', 'config.ini'))
+        if Path(devPath).exists():
+            return devPath
+        
+        packagePath = os.path.abspath(os.path.join(os.path.dirname( cwd ), '_internal', 'config.ini'))
+        if Path(packagePath).exists():
+            return packagePath
+
+        assert False, "Could not find config.ini at " + devPath + " or at " + packagePath
 
 def printState(state: str, info=""):
     

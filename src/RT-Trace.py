@@ -48,7 +48,8 @@ class TraceApp(customtkinter.CTk):
             ui_font = customtkinter.CTkFont(family="SF Pro Text", size=13)  # if available on your mac
         else:  # Linux
             # As the rendering of round corners looks very poor on Linux we set the corner radius to 2. 
-            default_corner_radius = 2
+            default_corner_radius = 6
+            customtkinter.DrawEngine.preferred_drawing_method="polygon_shapes"
             ui_font = customtkinter.CTkFont(family="DejaVu Sans", size=13)
 
         ''' Set the default size of the GUI window and give it a name. '''
