@@ -16,7 +16,7 @@ lark==1.2.2
 libusb-package==1.0.26.1
 macholib==1.16.3
 natsort==8.4.0
-numpy==2.5.1
+numpy==2.2.6
 packaging==24.1
 pillow==12.3.0
 prettytable==3.11.0
