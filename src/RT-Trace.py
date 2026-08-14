@@ -63,12 +63,12 @@ class TraceApp(customtkinter.CTk):
 
         self.grid_columnconfigure(0, weight=0)
         self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure((0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10), weight=1)
+        self.grid_rowconfigure((0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11), weight=1)
 
         ''' Create a frame for each main GUI area. '''
         self.sidebar_frame = customtkinter.CTkFrame(self, width=140, corner_radius=10)
-        self.sidebar_frame.grid(row=0, column=0, rowspan=10, sticky="nsew", padx=5, pady=5)
-        self.sidebar_frame.grid_rowconfigure(10, weight=1)
+        self.sidebar_frame.grid(row=0, column=0, rowspan=11, sticky="nsew", padx=5, pady=5)
+        self.sidebar_frame.grid_rowconfigure(11, weight=1)
 
         ''' Label for the platform selection. '''
         self.lbl_selectPlatform = customtkinter.CTkLabel(self.sidebar_frame, text="Platform Selection:", font=customtkinter.CTkFont(size=15, weight="bold"))
@@ -128,13 +128,13 @@ class TraceApp(customtkinter.CTk):
         self.btn_loadTrace.grid(row=9, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Button to save the current trace. '''
-        self.btn_saveTrace = customtkinter.CTkButton(self.sidebar_frame, text="Save PDF", command=self.save_image_function, corner_radius=default_corner_radius)
+        self.btn_saveTrace = customtkinter.CTkButton(self.sidebar_frame, text="Export View to PDF", command=self.save_image_function, corner_radius=default_corner_radius)
         self.btn_saveTrace.grid(row=10, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Textbox to display stdout. '''
         font = customtkinter.CTkFont(family="DejaVu Sans Mono", size=14)
         self.textbox = customtkinter.CTkTextbox(self, corner_radius=10, font=font)
-        self.textbox.grid(row=8, column=1, rowspan=2, columnspan=1, sticky="nswe", padx=5, pady=5)
+        self.textbox.grid(row=9, column=1, rowspan=2, columnspan=1, sticky="nswe", padx=5, pady=5)
         
         ''' Redirect stdout and stderr to the textbox. '''
         self.textbox.tag_config('stderr', foreground="red")

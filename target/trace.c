@@ -299,10 +299,10 @@ uint32_t trace_encodeTime(uint16_t event) {
 #ifdef TRACE_PICO2
 	uint64_t ts = timer_time_us_64(timer0_hw);          					/* 1us timestamp, can be accessed from both cores */
 #endif
-	uint16_t delta = ((ts - *lastTs) & 0xffff);
+	uint32_t delta = ((ts - *lastTs) & 0xffffff);
 	*lastTs = ts;
 
-	return (event << 16) | delta;
+	return (event << 24) | delta;
 }
 
 /**

@@ -140,7 +140,7 @@ def parser_thread(gui, numCores):
         core = core + 1
 
     eventFilePath = os.path.abspath(os.path.join(HelperFunctions.getViewingFolderName(gui), 'events.txt'))
-    tasks = parser(allBuffers, eventFilePath, tickIds)    # Parse the content of the trace buffers
+    tasks = parser(allBuffers, eventFilePath, tickIds, numCores)    # Parse the content of the trace buffers
 
     # If this was called from the GUI, enable the buttons and update the GUI
     if gui is not None:
@@ -149,7 +149,7 @@ def parser_thread(gui, numCores):
         gui.traceView.draw()
         gui.update()
 
-def parser(buffers, eventFilePath, tickIds):
+def parser(buffers, eventFilePath, tickIds, numCores):
     """
     Function parses a variable number of trace buffers.
     Trace events are then converted to tasks, jobs and execution segments.
@@ -161,7 +161,7 @@ def parser(buffers, eventFilePath, tickIds):
     parseTraceEvents(events, buffers)       # Parse the raw events from the trace files of each core
 
     allTasks = []
-    allTasks = extractTraceInfo(events, eventFilePath, tickIds)     # Parse all trace tasks from the event trace (afterwards we have trace tasks, jobs and execution segments). 
+    allTasks = extractTraceInfo(events, eventFilePath, tickIds, numCores)     # Parse all trace tasks from the event trace (afterwards we have trace tasks, jobs and execution segments). 
     tasks = []
     
     for task in allTasks:                   # Some tasks might be created in the trace but never execute. We exclue those here. 
@@ -175,7 +175,7 @@ def parser(buffers, eventFilePath, tickIds):
 
     return tasks
 
-def extractTraceInfo(events, eventFilePath, tickIds):
+def extractTraceInfo(events, eventFilePath, tickIds, numCores):
     """ 
     Extract trace information from the raw trace events. So we have information on task-level.
     """
@@ -201,16 +201,19 @@ def extractTraceInfo(events, eventFilePath, tickIds):
         traceStart = getTickStart(events, tickIds[0])
 
     # Create tasks to represent the scheduler, tick ISR for each core.
-    if len(tickIds) == 1:
+    if numCores == 1:
         # Exclude the core in the name if there is only one core
         tasks.append(TraceTask(tickIds[0], "Tick", None, getTaskColor(tickIds[0])))
         tasks.append(TraceTask(schedulerId, "Scheduler", None, getTaskColor(schedulerId)))
     else:
         coreId = 0
-        for id in tickIds:
-            tasks.append(TraceTask(id, "Tick Core " + str(coreId), None, getTaskColor(id)))
+        for id in range(0,numCores):
+            tasks.append(TraceTask(tickIds[id], "Tick Core " + str(coreId), None, getTaskColor(id)))
             tasks.append(TraceTask(schedulerId + coreId, "Scheduler Core " + str(coreId), None, getTaskColor(schedulerId + coreId)))
             coreId = coreId + 1
+
+    for irq in range(0,len(tickIds) - numCores):
+        tasks.append(TraceTask(tickIds[numCores + irq], "IRQ " + str(tickIds[irq + numCores]), None, getTaskColor(id)))
 
     # All other tasks are parsed from the trace events. 
     for evt in events:
@@ -349,6 +352,7 @@ def parseScheduler(sortedEvents, schedulerTask):
 def parseIdleTask(sortedEvents, task):
 
     coreId = int(task.name[len("IDLE"):])
+    lastExecTask = None
 
     for evt in sortedEvents:
         type = evt.get('type')
@@ -359,13 +363,33 @@ def parseIdleTask(sortedEvents, task):
             #print(f"IDLE started at t={ts}")
             task.newJob(ts, None)
             task.startExec(ts, core, ExecutionType.EXECUTE)
-        
+
         if task.currentJob is not None:
-            if type == TRACE_ISR_ENTER or type == TRACE_TASK_START_EXEC:
+            if type == TRACE_TASK_START_EXEC:
+                if core == coreId:
+                    #print(f"IDLE finished at t={ts}")
+                    task.stopExec(ts)   
+                    task.finishJob()
+                    lastExecTask = None
+
+        if task.currentJob is not None:
+            if type == TRACE_ISR_ENTER:
                 if core == coreId:
                     #print(f"IDLE finished at t={ts}")
                     task.stopExec(ts)
                     task.finishJob()
+                    lastExecTask = task
+
+        if type == TRACE_ISR_EXIT:
+             if core == coreId:
+                 if lastExecTask == task:
+                     task.newJob(ts, None)
+                     task.startExec(ts, core, ExecutionType.EXECUTE)
+                 lastExecTask = None
+
+        if type == TRACE_TASK_START_EXEC:
+            if core == coreId:
+                lastExecTask = None
 
     if task.currentJob is not None:
         task.stopExec(ts)
@@ -610,14 +634,14 @@ class EventParser:
         """
         Function reads the next event of the trace buffer.
         """
-        b = self.readBytes(2)
+        b = self.readBytes(3)
         if b is None:
             return None
         
         #print("Time       ", "".join([f"\\x{byte:02x}" for byte in b]))
         deltaTime = int.from_bytes(b, byteorder='little', signed=False)
         
-        b = b = self.readBytes(2)
+        b = b = self.readBytes(1)
         if b is None:
             return None
         
