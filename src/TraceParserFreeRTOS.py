@@ -35,10 +35,11 @@ TRACE_EVT_GROUP_SYNC            = 16
 TRACE_MUTEX_CREATE              = 18
 TRACE_MUTEX_TAKE                = 19
 TRACE_MUTEX_GIVE                = 20 
+TRACE_JLDJOB_FINISHED           = 21
 
 # Those events are not in the original trace and are created during parsing
-TRACE_IDLE_START                = 20
-TRACE_IDLE_STOP                 = 21
+#TRACE_IDLE_START                = 23
+#TRACE_IDLE_STOP                 = 24
 
 eventMap = {
     TRACE_IDLE : "TRACE_IDLE",
@@ -59,7 +60,8 @@ eventMap = {
     TRACE_EVT_GROUP_SYNC: "TRACE_EVT_GROUP_SYNC",
     TRACE_MUTEX_CREATE: "TRACE_MUTEX_CREATE",
     TRACE_MUTEX_TAKE: "TRACE_MUTEX_TAKE",
-    TRACE_MUTEX_GIVE: "TRACE_MUTEX_GIVE"
+    TRACE_MUTEX_GIVE: "TRACE_MUTEX_GIVE",
+    TRACE_JLDJOB_FINISHED: "TRACE_JLDJOB_FINISHED"
 }
 
 """
@@ -183,19 +185,32 @@ def extractTraceInfo(events, eventFilePath, tickIds, numCores):
 
     traceStart = None
 
-    # Check if there is a TRACE_TIME_ZERO. If so, set trace start (i.e. t=0) to the first tick before the event.
+    '''
+    There are several ways how the reference time can be set for the trace. 
+    TRACE_START -> Sets t=0 to the timestamp of the event.
+    TRACE_TIME_ZERO -> Sets t=0 to the timestamp of the first tick before this event. 
+    else -> Timegrid is positioned to match the ticks best. 
+    '''
+
+    # Check if there is a TRACE_START event. If so, set the t=0 to this timestamp. 
     for evt in events:
-        if evt.get('type') == TRACE_TIME_ZERO:
-            core = evt.get('core')
-            
-            index = events.index(evt)
-            tmpList = events[0:index]
-            for tve in reversed(tmpList):
-                if tve.get('type') == TRACE_ISR_ENTER:
-                    if tve.get('irqId') == 15:
-                        traceStart = tve.get('ts')
-                        break
-            break
+        if evt.get('type') == TRACE_START:
+            traceStart = evt.get('ts')
+
+    # Check if there is a TRACE_TIME_ZERO. If so, set trace start (i.e. t=0) to the first tick before the event.
+    if traceStart is None:
+        for evt in events:
+            if evt.get('type') == TRACE_TIME_ZERO:
+                core = evt.get('core')
+                
+                index = events.index(evt)
+                tmpList = events[0:index]
+                for tve in reversed(tmpList):
+                    if tve.get('type') == TRACE_ISR_ENTER:
+                        if tve.get('irqId') == 15:
+                            traceStart = tve.get('ts')
+                            break
+                break
 
     if traceStart is None:
         traceStart = getTickStart(events, tickIds[0])
@@ -400,13 +415,14 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
     Parses the execution of a single task.
     """
     
-    finishJob = False       # Flag to indicate that the job is about to finish.
-    deadlineMiss = False    # Flag to indicate that a deadline was missed.
-    startExecCore = None    # Task started to execute on this core.
-    lastExecTask = None     # Keep track of the last task started on the core.
-    tickTs = []             # We keep track if tick timestamps to be able to handle deadline misses.
-    missedDeadlineAt = None # Record the tick at which the release should have happened after a deadline miss.
-    tickTs.append(0)        # By default the first tick appears at t=0
+    finishJob = False           # Flag to indicate that the job is about to finish.
+    deadlineMiss = False        # Flag to indicate that a deadline was missed.
+    startExecCore = None        # Task started to execute on this core.
+    lastExecTask = None         # Keep track of the last task started on the core.
+    jldJobNextRelDelta = None   # Used for JLD jobs only, indicates that the next job is released automatically relative to the previous release.
+    tickTs = []                 # We keep track if tick timestamps to be able to handle deadline misses.
+    missedDeadlineAt = None     # Record the tick at which the release should have happened after a deadline miss.
+    tickTs.append(0)            # By default the first tick appears at t=0
 
     for i, evt in enumerate(sortedEvents):
         type = evt.get('type')
@@ -458,6 +474,14 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
                             releaseTs = tickTs[missedDeadlineAt]    # Get the timestamp of the tick where the task should have been released.
                             task.newJob(releaseTs, None)            # Release the job at the intended tick time.
 
+                        if jldJobNextRelDelta != None:
+                            """
+                            This is only called for the custom release mechanism used in the JLD implementation, since this is not tick-based and tasks might not become ready at their periodic release times. 
+                            """
+                            lastJob = task.jobs[-1] # Get the last job
+                            task.newJob(lastJob.releaseTime + jldJobNextRelDelta, None) 
+                            jldJobNextRelDelta = None
+
         if type == TRACE_EVT_GROUP_SYNC or type == TRACE_EVT_GROUP_WAIT:
             if task.id == taskId:
                 finishJob = True
@@ -501,7 +525,13 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
             if startExecCore == core:
                 if lastExecTask == task.id:
                     task.mutexGive(ts, evt.get('mutexId'))
-            
+
+        elif type == TRACE_JLDJOB_FINISHED:
+            if startExecCore == core:
+                if lastExecTask == task.id:
+                    #print(f"Delay Until called at {ts}")
+                    finishJob = True
+                    jldJobNextRelDelta = evt.get('period_us')
             
     # In case there are unfinished jobs, we handle them here.
     if task.currentJob is not None:
@@ -769,6 +799,12 @@ class EventParser:
                 return None
             entryPrint("[t=" + str(self.time) + "us] TRACE_MUTEX_GIVE -> mutexId: " + str(mutexId) + " Core: " + str(coreId)) 
             evt = {'type':TRACE_MUTEX_GIVE, 'ts':self.time, 'core':coreId, 'mutexId':mutexId}
+        elif eventId == TRACE_JLDJOB_FINISHED:
+            period_us = self.readInteger()
+            if period_us is None:
+                return None
+            entryPrint("[t=" + str(self.time) + "us] TRACE_JLDJOB_FINISHED.           -> period_us: " + str(period_us) + " us Core: " + str(coreId)) 
+            evt = {'type':TRACE_JLDJOB_FINISHED, 'ts':self.time, 'core':coreId, 'period_us':period_us} 
         else:
             #print("ERROR Unknown Event!")
             evt = None

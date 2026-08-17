@@ -789,3 +789,25 @@ void trace_mutexGive(uint32_t mutexId) {
     restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 #endif /* TRACE_RTT */
 }
+
+/**
+ * @brief Record the end of a job in the JLD execution framework
+ *
+ */
+void trace_jldJobFinished(uint32_t period_us) {
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_JLDJOB_FINISHED);          /* Encodes the event ID and the timestamp delta */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+
+    if (buffer != NULL) {
+        buffer[0] = identifyer;
+        buffer[1] = period_us;
+    }
+
+#ifdef TRACE_RTT
+    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
+    SEGGER_RTT_Write(getRttChannel(), buffer, 8);                           /* Add the data to the RTT buffer of this core. */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+#endif /* TRACE_RTT */
+}

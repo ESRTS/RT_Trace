@@ -46,6 +46,7 @@
 #define TRACE_MUTEX_CREATE              (18u)
 #define TRACE_MUTEX_TAKE                (19u)
 #define TRACE_MUTEX_GIVE                (20u)
+#define TRACE_JLDJOB_FINISHED           (21u)
 
 // Not yet supported
 /*
@@ -83,7 +84,7 @@ void trace_eventGroupSync(uint32_t taskId);
 void trace_mutexCreate(uint32_t mutexId);
 void trace_mutexTake(uint32_t mutexId);
 void trace_mutexGive(uint32_t mutexId);
-
+void trace_jldJobFinished(uint32_t period_us);
 
 /****************************************************************************************************************
  * FreeRTOS trace defines to map to the trace infrastructure.
@@ -155,6 +156,8 @@ void trace_mutexGive(uint32_t mutexId);
 #define traceENTER_xQueueSemaphoreTake( x, y )          if ( x->ucQueueType == queueQUEUE_TYPE_MUTEX ) trace_mutexTake((uint32_t)x)
 
 #define traceENTER_xQueueGenericSend( x, y , z, u )     if ( x->ucQueueType == queueQUEUE_TYPE_MUTEX ) trace_mutexGive((uint32_t)x)
+
+#define trace_JLD_JOB_FINISHED( x )                     trace_jldJobFinished( x )
 
 /*
 
