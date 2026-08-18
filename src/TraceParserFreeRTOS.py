@@ -7,6 +7,7 @@ import HelperFunctions
 import configparser
 import sys
 import numpy as np
+import DataExport
 
 """
 Set to true to print events read from the trace buffer.
@@ -146,6 +147,7 @@ def parser_thread(gui, numCores):
 
     # If this was called from the GUI, enable the buttons and update the GUI
     if gui is not None:
+        DataExport.exportData(gui, tasks)
         gui.btn_loadTrace.configure(state="normal")
         gui.traceView.setTasks(tasks)
         gui.traceView.draw()
@@ -169,11 +171,6 @@ def parser(buffers, eventFilePath, tickIds, numCores):
     for task in allTasks:                   # Some tasks might be created in the trace but never execute. We exclue those here. 
         if len(task.jobs) != 0:
             tasks.append(task)
-
-    HelperFunctions.printState("Found trace data for tasks:")
-    for task in tasks:                      # Print a list with parsed tasks and the number of jobs they have in the trace.
-        print("   " + str(task))
-        #task.printAll()
 
     return tasks
 

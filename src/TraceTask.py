@@ -116,6 +116,11 @@ class TraceJob():
             if access.mutexId == mutexId:
                 access.stop = ts
 
+    def getExecutionTime(self):
+        execTime = 0
+        for interval in self.execIntervals:
+            execTime = execTime + (interval.stop - interval.start)
+        return execTime
 class TraceTask():
     """
     The class implements a task used to store trace information.
@@ -207,16 +212,43 @@ class TraceTask():
         self.jobs.append(self.currentJob)
         self.currentJob = None
 
+    def getMaxExecutionTime(self):
+        """
+        Returns the maximum (observed) execution time of this task. """
+        maxExec = 0
+
+        for job in self.jobs:
+            tmpExec = job.getExecutionTime()
+            if maxExec < tmpExec:
+                maxExec = tmpExec
+        return maxExec
+    
     def getMaxResponseTime(self):
         """
         Returns the maximum (observed) response time of all jobs of this task
         """
         maxRt = None
         for j in self.jobs:
-            rt = (j.getFinishTime() - j.releaseTime)
-            if maxRt == None or maxRt < rt:
-                maxRt = rt
+            if j.getFinishTime() != None:
+                rt = (j.getFinishTime() - j.releaseTime)
+                if maxRt == None or maxRt < rt:
+                    maxRt = rt
         return maxRt
+    
+    def getUtilization(self, intervalEnd):
+        """
+        Helper to compute the utilization in the interval [0, intervalEnd].
+        """
+        accumulatedTime = 0
+
+        for job in self.jobs:
+            for interval in job.execIntervals:
+                if interval.start > 0:
+                    accumulatedTime = accumulatedTime + (interval.stop - interval.start) 
+                elif interval.stop > 0:
+                    accumulatedTime = accumulatedTime + (interval.stop) 
+
+        return accumulatedTime / intervalEnd
     
     def mutexTake(self, ts, mutexId, letterId):
         """

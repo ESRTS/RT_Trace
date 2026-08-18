@@ -16,7 +16,6 @@ from datetime import datetime
 import HelperFunctions
 import configparser
 import queue
-
 class TraceApp(customtkinter.CTk):
     """
     Main class of the RT-Trace app. 
@@ -130,7 +129,7 @@ class TraceApp(customtkinter.CTk):
         ''' Button to save the current trace. '''
         self.btn_saveTrace = customtkinter.CTkButton(self.sidebar_frame, text="Export View to PDF", command=self.save_image_function, corner_radius=default_corner_radius)
         self.btn_saveTrace.grid(row=10, column=0, padx=20, pady=5, sticky="ew")
-
+        
         ''' Textbox to display stdout. '''
         font = customtkinter.CTkFont(family="DejaVu Sans Mono", size=14)
         self.textbox = customtkinter.CTkTextbox(self, corner_radius=10, font=font)
