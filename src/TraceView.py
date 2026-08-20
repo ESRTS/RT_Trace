@@ -143,13 +143,13 @@ class TraceView(customtkinter.CTkCanvas):
         if self.tasks is None:
             #self.canvasItems.append(self.create_text(200, 100, anchor=customtkinter.N, text="No Trace Loaded...."))
             self.draw_text(200, 100, anchor=customtkinter.N, text="No Trace Loaded....")
-            traceHeight = 200
+            self.traceHeight = 200
         else: 
-            traceHeight = len(self.tasks) * self.taskTimelineHeight_px + self.borderY_px
+            self.traceHeight = len(self.tasks) * self.taskTimelineHeight_px + self.borderY_px
             
             # In case the view was updated, make sure to delete all canvas items first
             self.clearTrace()
-
+            
             # Add a white background to the trace
             #self.canvasItems.append(self.create_rectangle(self.borderX_px + self.legend_px, 0, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (len(self.tasks)) - 1), fill="#FFFFFF"))
             self.draw_rectangle(self.borderX_px + self.legend_px, 0, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (len(self.tasks)) - 1), fill="#FFFFFF")
@@ -177,9 +177,9 @@ class TraceView(customtkinter.CTkCanvas):
 
             self.paintLegend()
         
-        self.configure(scrollregion = (0,0,100,traceHeight))
+        self.configure(scrollregion = (0,0,100,self.traceHeight))
 
-        self.updateWindowHeight(traceHeight)
+        self.updateWindowHeight(self.traceHeight)
 
     def paintLegend(self):
         """
@@ -610,9 +610,8 @@ class TraceView(customtkinter.CTkCanvas):
     PDF for exporting, without changing the drawing logic. 
     """
     def draw_line(self, x1, y1, x2, y2, width=1, fill='#000000'):
-        if self.exportCanvas is None:
-            self.canvasItems.append(self.create_line(x1, y1, x2, y2, width=width, fill=fill))
-        else:
+        self.canvasItems.append(self.create_line(x1, y1, x2, y2, width=width, fill=fill))
+        if self.exportCanvas is not None:
             
             width_pt = width * self.pdf_scale
             x1_pt = self.pdf_x(x1)
@@ -626,9 +625,8 @@ class TraceView(customtkinter.CTkCanvas):
             self.exportCanvas.line(x1_pt, y1_pt, x2_pt, y2_pt)
 
     def draw_rectangle(self, x1, y1, x2, y2, fill="", ):
-        if self.exportCanvas is None:
-            self.canvasItems.append(self.create_rectangle(x1, y1, x2, y2, fill=fill))
-        else:
+        self.canvasItems.append(self.create_rectangle(x1, y1, x2, y2, fill=fill))
+        if self.exportCanvas is not None:
             if fill == "":
                 fillFlag = 0
                 fill="#ffffff"
@@ -649,9 +647,8 @@ class TraceView(customtkinter.CTkCanvas):
             self.exportCanvas.rect(x1_pt, y1_pt, width_pt, height_pt, stroke=1, fill=fillFlag)
 
     def draw_oval(self, x1, y1, x2, y2, fill="", outline="#000000", width=1):
-        if self.exportCanvas is None:
-            self.canvasItems.append(self.create_oval(x1, y1, x2, y2, fill=fill, outline=outline, width=width))
-        else:
+        self.canvasItems.append(self.create_oval(x1, y1, x2, y2, fill=fill, outline=outline, width=width))
+        if self.exportCanvas is not None:
             line_width_pt = width * self.pdf_scale
             x1_pt = self.pdf_x(x1)
             y1_pt = self.pdf_y(y1)
@@ -664,13 +661,13 @@ class TraceView(customtkinter.CTkCanvas):
             pass
 
     def draw_text(self, x, y, text, anchor=customtkinter.CENTER, fill="#000000", font=None ):
-        
-        if self.exportCanvas is None:
-            if font is None:
-                self.canvasItems.append(self.create_text(x, y, text=text, anchor=anchor, fill=fill))
-            else:
-                self.canvasItems.append(self.create_text(x, y, text=text, anchor=anchor, fill=fill, font=font))
+
+        if font is None:
+            self.canvasItems.append(self.create_text(x, y, text=text, anchor=anchor, fill=fill))
         else:
+            self.canvasItems.append(self.create_text(x, y, text=text, anchor=anchor, fill=fill, font=font))
+
+        if self.exportCanvas is not None:
 
             BUILTIN_FONTS = {
                 "Courier", "Courier-Bold", "Courier-BoldOblique", "Courier-Oblique",
@@ -708,9 +705,9 @@ class TraceView(customtkinter.CTkCanvas):
                 self.exportCanvas.drawCentredString(x_pt, y_pt, text)
 
     def draw_arrow(self, x1, y1, x2, y2):
-        if self.exportCanvas is None:
-            self.canvasItems.append(self.create_line(x1, y1, x2, y2, arrow=customtkinter.LAST, arrowshape=(self.releaseArrowH_px, self.releaseArrowH_px, self.releaseArrowD_px / 2), width=self.releaseArrowWidth_px))
-        else:
+
+        self.canvasItems.append(self.create_line(x1, y1, x2, y2, arrow=customtkinter.LAST, arrowshape=(self.releaseArrowH_px, self.releaseArrowH_px, self.releaseArrowD_px / 2), width=self.releaseArrowWidth_px))
+        if self.exportCanvas is not None:
             line_width_pt = self.releaseArrowWidth_px * self.pdf_scale
             x1_pt = self.pdf_x(x1)
             y1_pt = self.pdf_y(y1)
@@ -786,8 +783,8 @@ class TraceView(customtkinter.CTkCanvas):
         """
 
         # Get the dimensions of the canvas in px
-        width_px = int(self.winfo_width())
-        height_px = int(self.winfo_height())
+        width_px = int(self.sizeX_px)
+        height_px = int(self.traceHeight) + 5
         
         # Compute the scaling factor, the PDF uses 72 points per inch.
         ieee_textwidth = 7.16   # Textwidth of the IEEE template in inch 
