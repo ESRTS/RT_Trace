@@ -46,7 +46,7 @@ class TraceView(customtkinter.CTkCanvas):
         self.zoomMin = 0                                        # Minimum zoom level, this is set to the last trace event.
         self.moveView = False                                   # Flag to indicate that the view is moved
         self.moveInitialX = 0                                   # Initial X-position if the view is moved
-        self.coreColors = [(98, 152, 210), (51, 156, 156), (255, 209, 102), (204, 157, 251)]      # Colors to indicate that a task executes on a CPU, used if the trace contains more than one CPU
+        self.coreColors = [(98, 152, 210), (51, 156, 156), (255, 209, 102), (204, 157, 251), (0, 109, 119), (226, 149, 120)]      # Colors to indicate that a task executes on a CPU, used if the trace contains more than one CPU
         self.deadlineMissColor = '#f5697c'                    # Color to use for the job section after a deadline is missed
         self.cores = 1                                          # Number of cores in the trace (will be set automatically)
         self.gui = master                                       # GUI instance, needed to change the Y-dimension to fit the trace.
@@ -54,11 +54,12 @@ class TraceView(customtkinter.CTkCanvas):
         self.pdf_scale = 1
         self.pdf_height_pt = 0
         self.pdf_padding_north = 3
+        self.traceHeight = 330
 
         self.ctk_textbox_scrollbar = customtkinter.CTkScrollbar(self, command=self.yview)
         self.ctk_textbox_scrollbar.place(relx=1,rely=0,relheight=1,anchor='ne')
         self.configure(yscrollcommand=self.ctk_textbox_scrollbar.set)
-
+        self.ctk_textbox_scrollbar.configure(height=330)
         self.tasks = None
 
         self.canvasItems = []           # Used to store all canvas items that are updated with a new view, so we can delete those easily
@@ -139,11 +140,13 @@ class TraceView(customtkinter.CTkCanvas):
 
         self.sizeX_px  = int(self.winfo_width())
 
+        oldHeight = self.traceHeight
+
         # Display a standard text if no task is set yet
         if self.tasks is None:
             #self.canvasItems.append(self.create_text(200, 100, anchor=customtkinter.N, text="No Trace Loaded...."))
+            #self.draw_rectangle(0, 0, self.sizeX_px-20, self.traceHeight)
             self.draw_text(200, 100, anchor=customtkinter.N, text="No Trace Loaded....")
-            self.traceHeight = 200
         else: 
             self.traceHeight = len(self.tasks) * self.taskTimelineHeight_px + self.borderY_px
             
@@ -179,7 +182,7 @@ class TraceView(customtkinter.CTkCanvas):
         
         self.configure(scrollregion = (0,0,100,self.traceHeight))
 
-        self.updateWindowHeight(self.traceHeight)
+        self.updateWindowHeight(oldHeight, self.traceHeight)
 
     def paintLegend(self):
         """
@@ -596,13 +599,21 @@ class TraceView(customtkinter.CTkCanvas):
             id = id - 1
         return None
     
-    def updateWindowHeight(self, traceHeight):
+    def updateWindowHeight(self, oldTraceHeight, traceHeight):
 
-        newHeight = traceHeight + 310
+        delta = traceHeight - oldTraceHeight
+        
+         #traceHeight + 290
+        oldHeight = self.gui.windowSizeY
+        newHeight = oldHeight + delta
+
         if newHeight <= self.gui.maxScreenSizeY:
             self.gui.windowSizeY = newHeight
         else:
             self.gui.windowSizeY = self.gui.maxScreenSizeY
+
+        #print(f"Height delta: {delta} Old height: {oldHeight} New height: {newHeight} Actual new height: {self.gui.windowSizeY}")
+
         self.gui.geometry("{}x{}".format(self.gui.windowSizeX, self.gui.windowSizeY))
 
     """

@@ -75,7 +75,7 @@ To assign different colors to tasks we use an index into the taskColors array an
 every time a color is assigned to a task. The index wraps around if it reaches the end.
 """
 taskColorIndex = 0
-taskColors = [(100, 237, 157), (100, 143, 237), (212, 237, 76), (237, 123, 100), (141, 100, 237)]
+taskColors = [(100, 237, 157), (100, 143, 237), (212, 237, 76), (237, 123, 100), (141, 100, 237), (226, 149, 120), (0, 109, 119)]
 
 def getTaskColor(taskId):
     """

@@ -144,7 +144,7 @@ class TraceApp(customtkinter.CTk):
 
         ''' Execution Trace Widget. '''
         self.traceView = TraceView(self)
-        self.traceView.grid(row=0, column=1, rowspan=7, columnspan=1, sticky="nswe", padx=5, pady=5)
+        self.traceView.grid(row=0, column=1, rowspan=8, columnspan=1, sticky="nswe", padx=5, pady=5)
 
         ''' Print Events Switch '''
        #self.printEvents_var = customtkinter.BooleanVar(value=False)
