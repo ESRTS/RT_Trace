@@ -215,17 +215,19 @@ def extractTraceInfo(events, eventFilePath, tickIds, numCores):
     # Create tasks to represent the scheduler, tick ISR for each core.
     if numCores == 1:
         # Exclude the core in the name if there is only one core
-        tasks.append(TraceTask(tickIds[0], "Tick", None, getTaskColor(tickIds[0])))
+        #tasks.append(TraceTask(tickIds[0], "Tick", None, getTaskColor(tickIds[0])))
         tasks.append(TraceTask(schedulerId, "Scheduler", None, getTaskColor(schedulerId)))
     else:
         coreId = 0
         for id in range(0,numCores):
-            tasks.append(TraceTask(tickIds[id], "Tick Core " + str(coreId), None, getTaskColor(id)))
+            #tasks.append(TraceTask(tickIds[id], "Tick Core " + str(coreId), None, getTaskColor(id)))
             tasks.append(TraceTask(schedulerId + coreId, "Scheduler Core " + str(coreId), None, getTaskColor(schedulerId + coreId)))
             coreId = coreId + 1
 
-    for irq in range(0,len(tickIds) - numCores):
-        tasks.append(TraceTask(tickIds[numCores + irq], "IRQ " + str(tickIds[irq + numCores]), None, getTaskColor(id)))
+    for irq in range(0,len(tickIds)):
+        for i in range(0,numCores):
+            id = irq + (len(tickIds)*i)# tickIds[irq] + (len(tickIds)*i)
+            tasks.append(TraceTask(id, "IRQ_" + str(tickIds[irq]) + "_C" + str(i), None, getTaskColor(id)))
 
     # All other tasks are parsed from the trace events. 
     for evt in events:
@@ -276,7 +278,7 @@ def extractTraceInfo(events, eventFilePath, tickIds, numCores):
             evt['ts'] = evt['ts'] - traceStart
         eventFile.write('\tts: ' + "%06.3f" % (evt.get('ts')/1000) + "ms\t" + eventMap.get(evt.get('type')) + ":  " + str(evt) + "\n")
 
-    executionParser(sortedEvents, tasks, tickIds, mutex_id_to_letter)
+    executionParser(sortedEvents, tasks, tickIds, mutex_id_to_letter, numCores)
    #->  smParser(traceStart, sortedEvents, tasks, len(tickIds))
 
     eventFile.close()
@@ -304,7 +306,7 @@ def map_mutex_id(mutex_map, mutex_id: int) -> str | None:
     mutex_map[mutex_id] = letter
     return letter
 
-def executionParser(sortedEvents, tasks, tickIds, mutex_id_to_letter):
+def executionParser(sortedEvents, tasks, tickIds, mutex_id_to_letter, numCores):
 
     # This hardcodes that there are 2 cores, should be generalized!
     core1Flag = False
@@ -315,7 +317,7 @@ def executionParser(sortedEvents, tasks, tickIds, mutex_id_to_letter):
             parseIdleTask(sortedEvents, task)
         elif 100 <= task.id <= len(tickIds) + 100:    # scheduler IDs
             parseScheduler(sortedEvents, task)
-        elif task.id in tickIds:
+        elif task.id <= len(tickIds) * numCores: #in tickIds:
             parseIrq(sortedEvents, task)
         else:
             parseTask(sortedEvents, task, mutex_id_to_letter, tickIds[0])
@@ -544,7 +546,11 @@ def parseIrq(sortedEvents, irqTask):
     """
 
     enterCore = None
-    
+
+    # For each IRQ, we have one task on each core. We need to get the core and the IRQ number from the task name. 
+    irqTaskCore = int(irqTask.name.rsplit("_C", 1)[1])
+    irq_number = int(irqTask.name.split("_")[1])
+
     for evt in sortedEvents:
         type = evt.get('type')
 
@@ -553,7 +559,7 @@ def parseIrq(sortedEvents, irqTask):
             ts = evt.get('ts')
             irqId = evt.get('irqId')
 
-            if irqId == irqTask.id:
+            if irqId == irq_number and core == irqTaskCore:
 
                 if type == TRACE_ISR_ENTER:
                     irqTask.newJob(ts, None)
