@@ -30,8 +30,7 @@ def recorder_thread(gui):
     filename1 = os.path.abspath(os.path.join(folderName, 'raw_buffer0.txt'))
     filename2 = os.path.abspath(os.path.join(folderName, 'raw_buffer1.txt'))
     
-    config = configparser.ConfigParser()
-    config.read(HelperFunctions.getConfigFilePath())
+    config = HelperFunctions.readConfig()
     elf = HelperFunctions.getElfFilePath(gui)#config.get(configName,'elf', fallback = None)
     probe = config.get(configName,'probe', fallback = None)
     target = config.get(configName,'target', fallback = 'rp2350')
@@ -74,8 +73,7 @@ def wait_for_pc(core, expected_addr: int, timeout: float = 5.0) -> bool:
 def record_data(gui, elf, probe, target, frequency, measure_seconds, filename1, filename2):
     
     configName = HelperFunctions.getTargetName(gui)
-    config = configparser.ConfigParser()
-    config.read(HelperFunctions.getConfigFilePath())
+    config = HelperFunctions.readConfig()
     
     address_buffer0_str = config.get(configName,'buffer0', fallback = None)
     address_buffer1_str = config.get(configName,'buffer1', fallback = None)

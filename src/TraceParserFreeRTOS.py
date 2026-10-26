@@ -117,8 +117,7 @@ def parser_thread(gui, numCores):
     if gui is not None:
         #configName = gui.targets[gui.selectedTarget].get('name').replace(' ', '_')    # Get the configuration name
         configName = "general"
-        config = configparser.ConfigParser()
-        config.read(HelperFunctions.getConfigFilePath())
+        config = HelperFunctions.readConfig()
         tickIds = [int(x) for x in config.get(configName,'tickId').split(",")]
     else:
         tickIds = [15, 42]
@@ -138,7 +137,8 @@ def parser_thread(gui, numCores):
         allBuffers.append(traceBuffer)
         
         HelperFunctions.printState("Loaded trace buffer: ", info=str(buffer))
-        HelperFunctions.hexdump(traceBuffer, base_addr=int(config.get(configName, "buffer"+str(core), fallback="0x00000000"),16))
+        if config.getboolean(configName, 'print_hexdump', fallback=True):
+            HelperFunctions.hexdump(traceBuffer, base_addr=int(config.get(configName, "buffer"+str(core), fallback="0x00000000"),16))
         core = core + 1
 
     eventFilePath = os.path.abspath(os.path.join(gui.viewingFolder, 'events.txt'))

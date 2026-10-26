@@ -36,8 +36,7 @@ def rtt_thread(gui):
     filename1 = os.path.abspath(os.path.join(folderName, 'raw_buffer0.txt'))
     filename2 = os.path.abspath(os.path.join(folderName, 'raw_buffer1.txt'))
     
-    config = configparser.ConfigParser()
-    config.read(HelperFunctions.getConfigFilePath())
+    config = HelperFunctions.readConfig()
     elf = HelperFunctions.getElfFilePath(gui)#config.get(configName,'elf', fallback = None)
     probe = config.get(configName,'probe', fallback = None)
     target = config.get(configName,'target', fallback = 'rp2350')

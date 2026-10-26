@@ -40,6 +40,22 @@ def getConfigFilePath():
 
         assert False, "Could not find config.ini at " + devPath + " or at " + packagePath
 
+def getLocalConfigFilePath():
+    """
+    Get the path to the optional local configuration file. It sits next to config.ini, is not
+    tracked by git and overrides any value of config.ini, so machine specific settings
+    (project folder, SSH host, ...) do not have to be committed.
+    """
+    return os.path.join(os.path.dirname(getConfigFilePath()), 'config.local.ini')
+
+def readConfig():
+    """
+    Read config.ini and, if it exists, config.local.ini on top of it.
+    """
+    config = configparser.ConfigParser()
+    config.read([getConfigFilePath(), getLocalConfigFilePath()])
+    return config
+
 def startWorker(gui, worker, onFinished):
     """
     Run worker(gui) in a background thread so the GUI stays responsive.
@@ -153,14 +169,22 @@ def makeFolder(pathstring: str):
 def get_subfolders(path):
     return [p.name for p in Path(path).iterdir() if p.is_dir()]
 
+def getProjectPath():
+    """
+    Get the folder that contains the programs that can be traced (project_path in the config).
+    A relative path is resolved against the RT_Trace folder, not against the current working
+    directory, so it does not matter from where RT-Trace is started.
+    """
+    projectPath = readConfig().get('general','project_path')
+    rtTraceFolder = os.path.dirname(os.path.dirname(getConfigFilePath()))   # <RT_Trace>/Resources/config.ini
+    return os.path.abspath(os.path.join(rtTraceFolder, os.path.expanduser(projectPath)))
+
 def getPossiblePrograms():
     """ 
     The function searches all projects found in the project folder. 
     The assumption is that each folder is a project. 
     """
-    config = configparser.ConfigParser()
-    config.read(getConfigFilePath())
-    programPath = config.get('general','project_path')
+    programPath = getProjectPath()
 
     if not Path(programPath).exists():
         return []
@@ -181,18 +205,14 @@ def validateProgramFolder(gui, selectedFolder) -> bool:
 
 def getTraceConfigPath(gui):
 
-    config = configparser.ConfigParser()
-    config.read(getConfigFilePath())
-    programPath = config.get('general','project_path')
+    programPath = getProjectPath()
     traceConfigFilePath = os.path.abspath(os.path.join(programPath, gui.selectedProgram, "traceConfig.h"))
 
     return traceConfigFilePath
 
 def getElfFilePath(gui):
 
-    config = configparser.ConfigParser()
-    config.read(getConfigFilePath())
-    programPath = config.get('general','project_path')
+    programPath = getProjectPath()
     elfFilePath = os.path.abspath(os.path.join(programPath, gui.selectedProgram, "build", gui.selectedProgram + ".elf"))
 
     return elfFilePath

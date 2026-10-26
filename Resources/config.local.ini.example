@@ -1,0 +1,16 @@
+# Copy this file to config.local.ini (same folder) to override values of config.ini
+# on your machine. config.local.ini is ignored by git, so personal paths, user names
+# and IP addresses never end up in the repository.
+# Only add the keys you want to change, everything else is taken from config.ini.
+
+[general]
+# Absolute path, or relative to the RT_Trace folder
+#project_path = /path/to/your/projects
+
+[RPI_Linux]
+# user@targetAddress of the Raspberry Pi running the traced application
+#target = pi@192.168.1.10
+# Full path to the application to be traced on the target
+#target_path = /home/pi/bpfTrace/MultiThreadExample/build/multiThreadExample
+# Base path where the recorder files are located on the target
+#recorderBase_path = /home/pi/bpfTrace/

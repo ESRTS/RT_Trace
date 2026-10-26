@@ -95,8 +95,7 @@ def parser_thread(gui, numCores):
     As dedicated thread to not block the GUI while parsing.
     """
     configName = gui.targets[gui.selectedTarget].get('name').replace(' ', '_')    # Get the configuration name
-    config = configparser.ConfigParser()
-    config.read(HelperFunctions.getConfigFilePath())
+    config = HelperFunctions.readConfig()
 
     use_user_events = config.getboolean(configName, 'user_events', fallback=False)
 

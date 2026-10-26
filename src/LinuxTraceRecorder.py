@@ -11,8 +11,7 @@ def loadLinuxraceBuffers(gui):
 def recorderThread(gui):
     configName = "RPI_Linux"
     # Read the configuration from the ini-file
-    config = configparser.ConfigParser()
-    config.read(HelperFunctions.getConfigFilePath())
+    config = HelperFunctions.readConfig()
     remoteHost = config.get(configName,'target', fallback = None)
     targetApplicationPath = config.get(configName,'target_path', fallback = None)
     remoteBasePath = config.get(configName,'recorderBase_path', fallback = None)
@@ -21,24 +20,24 @@ def recorderThread(gui):
     
     configError = False
 
-    if remoteHost is None:
-        print("[ERROR] 'target' for configuration 'RPI_Linux' not set in config.ini!")
+    if not remoteHost:
+        print("[ERROR] 'target' for configuration 'RPI_Linux' not set in config.ini or config.local.ini!")
         configError = True
 
-    if targetApplicationPath is None:
-        print("[ERROR] 'target_path' for configuration 'RPI_Linux' not set in config.ini!")
+    if not targetApplicationPath:
+        print("[ERROR] 'target_path' for configuration 'RPI_Linux' not set in config.ini or config.local.ini!")
         configError = True
 
-    if remoteBasePath is None:
-        print("[ERROR] 'recorderBase_path' for configuration 'RPI_Linux' not set in config.ini!")
+    if not remoteBasePath:
+        print("[ERROR] 'recorderBase_path' for configuration 'RPI_Linux' not set in config.ini or config.local.ini!")
         configError = True
 
-    if scriptName is None:
-        print("[ERROR] 'recorder_filename' for configuration 'RPI_Linux' not set in config.ini!")
+    if not scriptName:
+        print("[ERROR] 'recorder_filename' for configuration 'RPI_Linux' not set in config.ini or config.local.ini!")
         configError = True
 
-    if traceName is None:
-        print("[ERROR] 'trace_filename' for configuration 'RPI_Linux' not set in config.ini!")
+    if not traceName:
+        print("[ERROR] 'trace_filename' for configuration 'RPI_Linux' not set in config.ini or config.local.ini!")
         configError = True
 
     if configError is False:
