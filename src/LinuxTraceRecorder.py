@@ -6,8 +6,7 @@ import configparser
 import os
 
 def loadLinuxraceBuffers(gui):
-    thread = Thread(target = recorderThread, args = (gui,))
-    thread.start()
+    HelperFunctions.startWorker(gui, recorderThread, gui.recordingFinished)
 
 def recorderThread(gui):
     configName = "RPI_Linux"
@@ -77,7 +76,7 @@ def recorderThread(gui):
 
             if proc.returncode == 0:
 
-                targetPath = HelperFunctions.getRecordingFolderName(gui)
+                targetPath = gui.recordingFolder
                 #cwd = HelperFunctions.getCwd()
                 #targetPath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_')))
 
@@ -99,11 +98,3 @@ def recorderThread(gui):
         else:
             print(str(remoteScript) + " does not exists on " + remoteHost)
             print("Make sure https://github.com/matthiasthomasbecker/bpfTrace exists on the target platform!")
-
-
-    # Enable the buttons and update the GUI
-    if gui is not None:
-        gui.btn_recordTrace.configure(state="normal")
-        # Update trace view option menu
-        gui.updateTraceViewOptions()
-        gui.update()

@@ -105,8 +105,7 @@ def parseTraceFiles(gui, numCores):
     #enable_event_print = gui.printEvents_var.get()
 
     taskColorIndex = 0      # Reset the task color index, so we always start with the same task color assignments.
-    thread = Thread(target = parser_thread, args = (gui, numCores))
-    thread.start()
+    HelperFunctions.startWorker(gui, lambda g: parser_thread(g, numCores), gui.loadingFinished)
 
 def parser_thread(gui, numCores):
     """
@@ -125,7 +124,7 @@ def parser_thread(gui, numCores):
         tickIds = [15, 42]
 
     for c in range(0,numCores):
-        filename = os.path.abspath(os.path.join(HelperFunctions.getViewingFolderName(gui), 'raw_buffer' + str(c)))
+        filename = os.path.abspath(os.path.join(gui.viewingFolder, 'raw_buffer' + str(c)))
 
         bufferPaths.append(Path(filename + ".txt"))
         if not bufferPaths[-1].is_file():
@@ -142,16 +141,14 @@ def parser_thread(gui, numCores):
         HelperFunctions.hexdump(traceBuffer, base_addr=int(config.get(configName, "buffer"+str(core), fallback="0x00000000"),16))
         core = core + 1
 
-    eventFilePath = os.path.abspath(os.path.join(HelperFunctions.getViewingFolderName(gui), 'events.txt'))
+    eventFilePath = os.path.abspath(os.path.join(gui.viewingFolder, 'events.txt'))
     tasks = parser(allBuffers, eventFilePath, tickIds, numCores)    # Parse the content of the trace buffers
 
     # If this was called from the GUI, enable the buttons and update the GUI
     if gui is not None:
         DataExport.exportData(gui, tasks)
-        gui.btn_loadTrace.configure(state="normal")
-        gui.traceView.setTasks(tasks)
-        gui.traceView.draw()
-        gui.update()
+
+    return tasks
 
 def parser(buffers, eventFilePath, tickIds, numCores):
     """

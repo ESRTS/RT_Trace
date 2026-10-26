@@ -51,6 +51,10 @@ class TraceApp(customtkinter.CTk):
             customtkinter.DrawEngine.preferred_drawing_method="polygon_shapes"
             ui_font = customtkinter.CTkFont(family="DejaVu Sans", size=13)
 
+        ''' Queue of functions that background threads want to run in the GUI thread. '''
+        self.uiQueue = queue.Queue()
+        self.after(50, self.processUiQueue)
+
         ''' Set the default size of the GUI window and give it a name. '''
         self.windowSizeY = 600
         self.windowSizeX = self.winfo_screenwidth()
@@ -178,6 +182,37 @@ class TraceApp(customtkinter.CTk):
         else:
             self.disableTraceView()
 
+    def runInMainThread(self, func):
+        """
+        Queue func to be executed in the GUI thread. Background threads must use this
+        instead of touching widgets directly, as Tk is not thread-safe.
+        """
+        self.uiQueue.put(func)
+
+    def processUiQueue(self):
+        """
+        Executes the functions queued by background threads.
+        """
+        while not self.uiQueue.empty():
+            self.uiQueue.get_nowait()()
+        self.after(50, self.processUiQueue)
+
+    def recordingFinished(self, result=None):
+        """
+        Called in the GUI thread once a trace recording is done.
+        """
+        self.btn_recordTrace.configure(state="normal")
+        self.updateTraceViewOptions()
+
+    def loadingFinished(self, tasks):
+        """
+        Called in the GUI thread once a trace is parsed.
+        """
+        self.btn_loadTrace.configure(state="normal")
+        if tasks is not None:
+            self.traceView.setTasks(tasks)
+            self.traceView.draw()
+
     def printEventsSwitch_event(self):
         pass
 
@@ -244,6 +279,7 @@ class TraceApp(customtkinter.CTk):
         self.btn_recordTrace.configure(state="disabled")
         self.update()
         HelperFunctions.printHeader("recording trace")
+        self.recordingFolder = HelperFunctions.getRecordingFolderName(self)   # Read the GUI state here, the recorder runs in a background thread
         self.targets[self.selectedTarget].get('recordTraceFunc')(self)   # Call the target specific function to record the trace buffers
 
     def load_function(self):
@@ -254,6 +290,7 @@ class TraceApp(customtkinter.CTk):
         self.btn_loadTrace.configure(state="disabled")
         self.update()
         HelperFunctions.printHeader("Loading trace from files")
+        self.viewingFolder = HelperFunctions.getViewingFolderName(self)       # Read the GUI state here, the parser runs in a background thread
         self.targets[self.selectedTarget].get('loadTraceFunc')(self, self.targets[self.selectedTarget].get('numCores'))   # Call the target specific function to load the trace buffers
 
     def selectProgramSource(self, selectedFolder: str):
@@ -367,7 +404,7 @@ class TextRedirector(object):
         self.tag = tag
 
         self.queue = queue.Queue()
-        self._scheduled = False
+        self.widget.after(30, self._flush)   # Started from the GUI thread, write() may be called from any thread
 
     def write(self, string):
         #self.widget.configure(state="normal")
@@ -377,22 +414,21 @@ class TextRedirector(object):
 
         if string:
             self.queue.put(string)
-            if not self._scheduled:
-                self._scheduled = True
-                self.widget.after(30, self._flush)
 
     def flush(self):    # Needed to have the interface of a file-like object
         pass   
     
     def _flush(self):
-        self.widget.configure(state="normal")
+        if not self.queue.empty():
+            self.widget.configure(state="normal")
 
-        while not self.queue.empty():
-            self.widget.insert("end", self.queue.get_nowait(), (self.tag,))
+            while not self.queue.empty():
+                self.widget.insert("end", self.queue.get_nowait(), (self.tag,))
 
-        self.widget.configure(state="disabled")
-        self.widget.see("end")
-        self._scheduled = False
+            self.widget.configure(state="disabled")
+            self.widget.see("end")
+
+        self.widget.after(30, self._flush)
 
 def main():
     """

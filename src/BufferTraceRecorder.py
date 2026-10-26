@@ -15,8 +15,7 @@ from pyocd.debug.elf.symbols import ELFSymbolProvider
 from pyocd.flash.file_programmer import FileProgrammer
 
 def loadPico2BufferTraceRecorder(gui):
-    thread = Thread(target = recorder_thread, args = (gui,))
-    thread.start()
+    HelperFunctions.startWorker(gui, recorder_thread, gui.recordingFinished)
 
 def recorder_thread(gui):
     """
@@ -26,7 +25,7 @@ def recorder_thread(gui):
 
     cwd = HelperFunctions.getCwd()
 
-    folderName = HelperFunctions.getRecordingFolderName(gui)
+    folderName = gui.recordingFolder
     HelperFunctions.makeFolder(folderName)
     filename1 = os.path.abspath(os.path.join(folderName, 'raw_buffer0.txt'))
     filename2 = os.path.abspath(os.path.join(folderName, 'raw_buffer1.txt'))
@@ -45,13 +44,6 @@ def recorder_thread(gui):
     
     # Record the trace from the target platform
     record_data(gui, elf, probe, target, frequency, measure_seconds, filename1, filename2)
-
-    # Enable the buttons and update the GUI
-    if gui is not None:
-        gui.btn_recordTrace.configure(state="normal")
-        # Update trace view option menu
-        gui.updateTraceViewOptions()
-        gui.update()
 
 def parse_int(value: str) -> int:
     return int(value, 0)

@@ -67,7 +67,7 @@ def exportData(gui, tasks):
     """
     First export data for each task and job in task specific files. If the file already exists, this is skipped.
     """
-    destFolder = HelperFunctions.getViewingFolderName(gui)
+    destFolder = gui.viewingFolder
 
     for task in tasks:
         taskDataFile = os.path.join(destFolder, f"{task.name.replace(' ', '_')}.csv")

@@ -4,6 +4,7 @@ from pathlib import Path
 import platform
 from datetime import datetime
 import configparser
+from threading import Thread
 
 def getCwd():
     """
@@ -37,6 +38,22 @@ def getConfigFilePath():
             return packagePath
 
         assert False, "Could not find config.ini at " + devPath + " or at " + packagePath
+
+def startWorker(gui, worker, onFinished):
+    """
+    Run worker(gui) in a background thread so the GUI stays responsive.
+    Tk is not thread-safe, so the worker must not touch any widget. Instead, onFinished(result)
+    is executed in the GUI thread once the worker is done, also if the worker raised an exception.
+    """
+    def run():
+        result = None
+        try:
+            result = worker(gui)
+        finally:
+            if gui is not None:
+                gui.runInMainThread(lambda: onFinished(result))
+
+    Thread(target = run, daemon = True).start()
 
 def printState(state: str, info=""):
     
