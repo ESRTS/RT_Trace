@@ -86,7 +86,7 @@ def exportData(gui, tasks):
 
     lastActivity = getLastActivity(tasks)
 
-    print(f"\n   Task Name:{' ' * (maxName - len("Task Name"))}| Response Time | WCET        | Utilization")
+    print(f"\n   Task Name:{' ' * (maxName - len('Task Name'))}| Response Time | WCET        | Utilization")
     print(f"{'='*(3+maxName+46)}")
     for task in tasks:
         rt = task.getMaxResponseTime()

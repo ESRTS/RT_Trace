@@ -1,11 +1,11 @@
 import customtkinter
 import tkinter as tk
+import tkinter.font
 import sys
 import platform
 from TraceView import TraceView
 from BufferTraceRecorder import loadPico2BufferTraceRecorder
 from RttTraceRecorder import loadPico2RttTraceBuffers
-from L476Trace import loadSTM32L476TraceBuffers
 from LinuxTraceRecorder import loadLinuxraceBuffers
 from TraceParserFreeRTOS import parseTraceFiles
 from TraceParserLinux import parseTraceFiles as linuxParseTraceFiles
@@ -57,7 +57,7 @@ class TraceApp(customtkinter.CTk):
 
         ''' Set the default size of the GUI window and give it a name. '''
         self.windowSizeY = 600
-        self.windowSizeX = self.winfo_screenwidth()
+        self.windowSizeX = min(self.winfo_screenwidth(), 1920)   # On Linux/X11 the screen width covers all monitors
         self.maxScreenSizeY = self.winfo_screenheight()
 
         self.geometry("{}x{}".format(self.windowSizeX, self.windowSizeY))
@@ -135,7 +135,8 @@ class TraceApp(customtkinter.CTk):
         self.btn_saveTrace.grid(row=10, column=0, padx=20, pady=5, sticky="ew")
         
         ''' Textbox to display stdout. '''
-        font = customtkinter.CTkFont(family="DejaVu Sans Mono", size=14)
+        monospaceFamily = tkinter.font.nametofont("TkFixedFont").actual("family")   # The platform's default monospace font
+        font = customtkinter.CTkFont(family=monospaceFamily, size=14)
         self.textbox = customtkinter.CTkTextbox(self, corner_radius=10, font=font)
         self.textbox.grid(row=9, column=1, rowspan=2, columnspan=1, sticky="nswe", padx=5, pady=5)
         
@@ -230,9 +231,9 @@ class TraceApp(customtkinter.CTk):
         """
         Key-handler function. Used to control the trace view.
         """
-        if event.keycode == 2113992448: # Up arrow
+        if event.keysym == "Up":
             self.traceView.zoom(1)
-        elif event.keycode == 2097215233: # Down arrow
+        elif event.keysym == "Down":
             self.traceView.zoom(-1)
 
     def disableAllButtons(self):

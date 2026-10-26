@@ -13,7 +13,7 @@ importlib_resources==6.4.4
 intelhex==2.3.0
 intervaltree==3.1.0
 lark==1.2.2
-libusb-package==1.0.26.1
+libusb-package==1.0.30.0
 macholib==1.16.3
 natsort==8.4.0
 numpy==2.2.6

@@ -8,10 +8,11 @@ from threading import Thread
 
 def getCwd():
     """
-    Get the current working directory, this is different on OSX in the app version.  
+    Get the folder of the RT-Trace sources. Config, data and output folders are located relative to it.
+    In the packaged macOS app this is the folder of the executable (RT-Trace.app/Contents/MacOS).
     """
-    if platform.system() == "Darwin":
-        return os.path.sep.join(sys.argv[0].split(os.path.sep)[:-1])
+    if platform.system() == "Darwin" and getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
     else:
         #return os.getcwd()
         return Path(__file__).resolve().parent
@@ -65,9 +66,10 @@ def printHeader(header:str):
 
     assert len(header) <= width - 4, "Header string too long for the configured width of the text in printHeader()" + header
 
-    inner = "┃ " + header.upper().ljust(width - 4) + " ┃" 
-    top = "\r\n┏" + "━" * (width - 2) + "┓"
-    bottom = "┗" + "━" * (width - 2) + "┛"
+    # Plain ASCII, box drawing characters are not available in the fonts Tk uses on every platform.
+    inner = "| " + header.upper().ljust(width - 4) + " |"
+    top = "\r\n+" + "-" * (width - 2) + "+"
+    bottom = "+" + "-" * (width - 2) + "+"
 
     print( "\n".join([top, inner, bottom]) )  
 
@@ -92,7 +94,7 @@ def getTimeString():
     Returns a time string. 
     """
     now = datetime.now()
-    formatted = now.strftime("%Y-%m-%d_%H:%M:%S")
+    formatted = now.strftime("%Y-%m-%d_%H-%M-%S")
     
     return formatted
 
