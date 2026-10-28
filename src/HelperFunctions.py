@@ -221,22 +221,42 @@ def getElfFilePath(gui):
 
     return elfFilePath
 
-def validatePicoRtt(gui):
+def getTraceMode(traceConfigFilePath):
+    """
+    Returns the trace mode a project was built for ("RTT", "PSRAM" or "SRAM"), read from its traceConfig.h.
+    """
+    defines = set()
+    with open(traceConfigFilePath) as f:
+        for line in f:
+            parts = line.split()
+            if len(parts) >= 2 and parts[0] == "#define":
+                defines.add(parts[1])
+
+    if "TRACE_RTT" in defines:
+        return "RTT"
+    if "PICO_USE_PSRAM" in defines:
+        return "PSRAM"
+    return "SRAM"
+
+def validatePicoTrace(gui, traceMode):
+    """
+    Checks that the selected program is built and that its traceConfig.h matches the trace mode of the platform.
+    """
     traceConfigFilePath = getTraceConfigPath(gui)
     elfFilePath = getElfFilePath(gui)
 
-    confFile = Path(traceConfigFilePath)
-    elfFile = Path(elfFilePath)
-    
-    if not elfFile.exists():
+    if not Path(elfFilePath).exists():
         printState("ERROR ELF not found", info=elfFilePath)
         return False
-    else:
-        printState("ELF", info=elfFilePath)
+    printState("ELF", info=elfFilePath)
 
-        if not confFile.exists():
-            printState("ERROR trace config not found", info=traceConfigFilePath)
-            return False
-        else:
-            printState("Trace Config", info=traceConfigFilePath)
-            return True
+    if not Path(traceConfigFilePath).exists():
+        printState("ERROR trace config not found", info=traceConfigFilePath)
+        return False
+    printState("Trace Config", info=traceConfigFilePath)
+
+    projectMode = getTraceMode(traceConfigFilePath)
+    if projectMode != traceMode:
+        printState("ERROR wrong platform", info=gui.selectedProgram + " is built for " + projectMode + " tracing, select Pico2 FreeRTOS " + projectMode)
+        return False
+    return True

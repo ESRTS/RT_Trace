@@ -29,9 +29,9 @@ class TraceApp(customtkinter.CTk):
         'recordTraceFunc' is a target specific function that loads the trace buffer
         """
         self.targets = [
-            {'name': 'Pico2 FreeRTOS RTT', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2RttTraceBuffers, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': HelperFunctions.validatePicoRtt},
-            {'name': 'Pico2 FreeRTOS SRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2BufferTraceRecorder, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': None},
-            {'name': 'Pico2 FreeRTOS PSRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2BufferTraceRecorder, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': None},
+            {'name': 'Pico2 FreeRTOS RTT', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2RttTraceBuffers, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': lambda gui: HelperFunctions.validatePicoTrace(gui, "RTT")},
+            {'name': 'Pico2 FreeRTOS SRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2BufferTraceRecorder, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': lambda gui: HelperFunctions.validatePicoTrace(gui, "SRAM")},
+            {'name': 'Pico2 FreeRTOS PSRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2BufferTraceRecorder, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': lambda gui: HelperFunctions.validatePicoTrace(gui, "PSRAM")},
             #{'name': 'STM FreeRTOS', 'numCores': 1, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : loadSTM32L476TraceBuffers},
             #{'name': 'RPI QNX', 'numCores': 4, 'implemented': False, 'requirement_str' : 'To load the trace buffer, telnet needs to be on the path.', 'recordTraceFunc' : None},
             {'name': 'RPI Linux', 'numCores': 4, 'implemented': True, 'requirement_str' : 'Experimental...', 'recordTraceFunc' : loadLinuxraceBuffers, 'loadTraceFunc': linuxParseTraceFiles, 'pathValidationFunc': None}
@@ -329,6 +329,13 @@ class TraceApp(customtkinter.CTk):
 
         self.btn_recordTrace.configure(state="disabled")
         self.update()
+
+        # Check again here, the platform may have changed since the program was selected
+        validate = self.targets[self.selectedTarget].get('pathValidationFunc')
+        if validate is not None and validate(self) is not True:
+            self.btn_recordTrace.configure(state="enabled")
+            return
+
         HelperFunctions.printHeader("recording trace")
         self.recordingFolder = HelperFunctions.getRecordingFolderName(self)   # Read the GUI state here, the recorder runs in a background thread
         self.targets[self.selectedTarget].get('recordTraceFunc')(self)   # Call the target specific function to record the trace buffers
@@ -358,6 +365,8 @@ class TraceApp(customtkinter.CTk):
         if self.targets[self.selectedTarget].get('pathValidationFunc') is not None:
             if self.targets[self.selectedTarget].get('pathValidationFunc')(self) is True:
                 self.btn_recordTrace.configure(state="enable")
+            else:
+                self.btn_recordTrace.configure(state="disabled")
         else:
             self.btn_recordTrace.configure(state="enable")
 
