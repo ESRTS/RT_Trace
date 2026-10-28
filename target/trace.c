@@ -326,7 +326,9 @@ uint32_t* trace_getEventBuffer(uint16_t length) {
 	    if (*index + length <= TRACE_BUFFER_SIZE) { 						/* Check if the buffer has sufficient space for the message */
 	        retval = &buffer[*index];               						/* Return the pointer to the buffer location the event should be written to. */
 	        *index += length;                       						/* Reserve space, i.e. increment the index. */
-	        buffer[*index] = 0xaabbccdd;
+	        if (*index < TRACE_BUFFER_SIZE) {
+	            buffer[*index] = 0xaabbccdd;                    				/* End marker, unless the buffer is full (it would overwrite the next buffer). */
+	        }
 	    } else {
 	    *enabled = false;                       							/* If this event can't be added to the buffer, tracing is disabled for this core. */
 	    }
