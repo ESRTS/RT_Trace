@@ -195,8 +195,8 @@ def main() -> int:
     ap.add_argument("--frequency", type=parse_int, default=4_000_000)
     ap.add_argument("--seconds", type=float, default=10.0)
     ap.add_argument("--config", default="Pico2_FreeRTOS_SRAM", choices=["Pico2_FreeRTOS_SRAM", "Pico2_FreeRTOS_PSRAM"], help="config.ini section with the trace buffer addresses")
-    ap.add_argument("--buffer0-file", default="raw_buffer0.txt", help="Output file for the trace buffer of core 0")
-    ap.add_argument("--buffer1-file", default="raw_buffer1.txt", help="Output file for the trace buffer of core 1")
+    ap.add_argument("--buffer0-file", "--ch1-file", default="raw_buffer0.txt", help="Output file for the trace buffer of core 0 (--ch1-file is the old name)")
+    ap.add_argument("--buffer1-file", "--ch2-file", default="raw_buffer1.txt", help="Output file for the trace buffer of core 1 (--ch2-file is the old name)")
     args = ap.parse_args()
 
     retval = record_data(args.config, args.elf, args.probe, args.target, args.frequency, args.seconds, args.buffer0_file, args.buffer1_file)

@@ -172,12 +172,16 @@ def get_subfolders(path):
 def getProjectPath():
     """
     Get the folder that contains the programs that can be traced (project_path in the config).
-    A relative path is resolved against the RT_Trace folder, not against the current working
-    directory, so it does not matter from where RT-Trace is started.
+    A relative path is resolved against the RT_Trace folder, so it does not matter from where RT-Trace
+    is started. Earlier versions resolved it against the current working directory, which is still
+    used if the path only exists there.
     """
-    projectPath = readConfig().get('general','project_path')
+    projectPath = os.path.expanduser(readConfig().get('general','project_path'))
     rtTraceFolder = os.path.dirname(os.path.dirname(getConfigFilePath()))   # <RT_Trace>/Resources/config.ini
-    return os.path.abspath(os.path.join(rtTraceFolder, os.path.expanduser(projectPath)))
+    resolved = os.path.abspath(os.path.join(rtTraceFolder, projectPath))
+    if not os.path.isdir(resolved) and os.path.isdir(os.path.abspath(projectPath)):
+        return os.path.abspath(projectPath)
+    return resolved
 
 def getPossiblePrograms():
     """ 
