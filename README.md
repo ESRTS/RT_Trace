@@ -3,13 +3,14 @@
 A tool to visualize scheduling traces. Several trace sources can be configured. If the trace source is a real target platform the trace can be loaded from the traget directly (if supported).
 
 ## Supported Features
-* <b>Recording</b> the trace buffers from the target device (one for each core). This requires ```openocd``` and ```telnet``` to be on the path.
+* <b>Recording</b> the trace buffers from the target device (one for each core). RT-Trace flashes the program and reads the buffers through pyOCD, no other tools are needed.
 All measurements are stored in a ```data``` folder. Each supported platform has its own sub-folder with separate folders for each measurement (as some platforms generate several files for one measurement). The name of each measurement can be set in the GUI, a date/time string will be appended to be able to distinguish different measurements. 
 * <b>Loading</b> the trace. This parses the trace buffers to an internal, per task, data model. The trace is the visuallized in the GUI. A drop-down menu is used to select the measurement to be analyzed out of all measurements available for the selected target platform.
-* <b>Save</b> the trace as PDF. The current view of the trace is exported to a PDF. This requires ```ps2pdf``` to be in the path.
+* <b>Navigating</b> the trace. Ctrl+mouse wheel or the Up/Down keys zoom, the mouse wheel or dragging moves the view in time, and Shift+mouse wheel scrolls the tasks if they don't fit into the window.
+* <b>Save</b> the trace as PDF. The current view of the trace is exported to a PDF.
 
 ## Generate Application
-Use pyinstaller to generate the packaged application. To generate the application for Windows this must be executed on under Windows.
+Use pyinstaller to generate the packaged application. Install the build requirements first with `pip install -r requirements-build.txt`. To generate the application for Windows this must be executed on under Windows.
 Executables for Linux and OSX can be created on OSX directly.
 
 ```$ ./createGui.sh ```
@@ -20,9 +21,13 @@ Executables for Linux and OSX can be created on OSX directly.
 
 In our trace implementation on the Pico2, each core loggs trace events to its own trace buffer. The source for the timestamp on each core is the same, which allows for an easy combination of events from both trace buffers. 
 
-Two versions are supported, in the default configuration, the trace buffer of each core is stored in a dedicated SRAM bank. 
+Three versions are supported. In the default configuration, the trace buffer of each core is stored in a dedicated SRAM bank. 
 
 If an external PSRAM is available, the trace buffer can be stored there as well, which allows for longer traces to be recoreded (at the expense of larger impact of tracing on the system).
+
+The third version streams the trace events over SEGGER RTT while the target runs, so the trace length is not limited by a buffer.
+
+RT-Trace reads `PICO_USE_PSRAM` and `TRACE_RTT` from the program's `traceConfig.h` and only records if the selected platform (SRAM, PSRAM or RTT) matches.
 
 ### Nucleo-L476RG with FreeRTOS
 
@@ -104,6 +109,12 @@ The file ```traceConfig.h``` should have the following content and is adjusted b
 //#define PICO_USE_PSRAM
 
 /**
+ * Enable to use Segger RTT channels for the trace data instead of the 
+ * local buffers. 
+ */
+//#define TRACE_RTT
+
+/**
  * Enable this to trace IRQ enter/exit
  */
 #define TRACE_ENABLE_IRQ_TRACE
@@ -118,30 +129,34 @@ The file ```traceConfig.h``` should have the following content and is adjusted b
 
 ## RT-Trace Configuration File
 
-RT-Trace includes a configuration file needed to set paths to local programs needed, as well as configure trace buffer sizes etc. 
-The file is found here: `ES-Lab-Kit/Tools/RT_Trace/Resources/config.ini`.
+RT-Trace reads its settings from `Resources/config.ini`. If `Resources/config.local.ini` exists, its values override the ones in `config.ini`. It is not tracked by git, so machine-specific settings belong there. Copy `config.local.ini.example` to start, and only add the keys you want to change.
 
-Each target has a dedicated section in the configuration file. For example, the RP2350 target we use in the lab is configured as follows. 
-You need to update `openocd_path` to point to openocd on your platform. By default, it is also in the `.pico_sdk` folder (if not installed manually outside).
-All other values remain unchanged.
+The `[general]` section holds the settings for all targets:
+
 ```
-[Pico2_FreeRTOS]
-# Path where the application can find openocd
-openocd_path = /Users/mabecker/.pico-sdk/openocd/0.12.0+dev
+[general]
+# Path to the project folder. Absolute, or relative to the RT_Trace folder.
+project_path = ../../Software/Projects
+# Size of the user interface. auto follows the desktop scaling, or set a factor such as 1.5
+ui_scale = auto
+# SWD frequency
+frequency = 4_000_000
+# Duration of the trace collection in seconds. The target is halted afterwards
+measure_seconds = 2
+# ISR ID and name of the FreeRTOS tick ISR on each core
+tickId = 15,16,42,45,41
+irqName = SysTick,Tick,Bell,Timer,FIFO
+# Print a hexdump of each raw trace buffer and every event when loading a trace
+print_hexdump = True
+print_events = True
+```
+
+Each target has a dedicated section in the configuration file. For example, the RP2350 target with the trace buffers in SRAM is configured as follows. The addresses and the size must match `TRACE_BUFFER_SIZE` in `target/trace.h`.
+```
+[Pico2_FreeRTOS_SRAM]
 # Address of the trace buffers on the target
 buffer0 = 0x2008001c
 buffer1 = 0x2008100c
 # Length of the trace buffers (each), in byte
 bufferSize = 2000
-# ISR ID for the scheduling tick on each core
-tickId = 15,42
-```
-
-To export a PDF of an execution trace, the config file also includes an entry to set the path to the tool `ps2pdf` on your system.
-This is optional and only needed if you plan to export a trace image as PDF.
-
-```
-[general]
-# Path where the application can find ps2pdf utility
-ps2pdf_path = /usr/local/bin
 ```

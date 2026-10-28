@@ -15,8 +15,7 @@ from pyocd.debug.elf.symbols import ELFSymbolProvider
 from pyocd.flash.file_programmer import FileProgrammer
 
 def loadPico2BufferTraceRecorder(gui):
-    thread = Thread(target = recorder_thread, args = (gui,))
-    thread.start()
+    HelperFunctions.startWorker(gui, recorder_thread, gui.recordingFinished)
 
 def recorder_thread(gui):
     """
@@ -26,13 +25,12 @@ def recorder_thread(gui):
 
     cwd = HelperFunctions.getCwd()
 
-    folderName = HelperFunctions.getRecordingFolderName(gui)
+    folderName = gui.recordingFolder
     HelperFunctions.makeFolder(folderName)
     filename1 = os.path.abspath(os.path.join(folderName, 'raw_buffer0.txt'))
     filename2 = os.path.abspath(os.path.join(folderName, 'raw_buffer1.txt'))
     
-    config = configparser.ConfigParser()
-    config.read(HelperFunctions.getConfigFilePath())
+    config = HelperFunctions.readConfig()
     elf = HelperFunctions.getElfFilePath(gui)#config.get(configName,'elf', fallback = None)
     probe = config.get(configName,'probe', fallback = None)
     target = config.get(configName,'target', fallback = 'rp2350')
@@ -44,14 +42,7 @@ def recorder_thread(gui):
         return 
     
     # Record the trace from the target platform
-    record_data(gui, elf, probe, target, frequency, measure_seconds, filename1, filename2)
-
-    # Enable the buttons and update the GUI
-    if gui is not None:
-        gui.btn_recordTrace.configure(state="normal")
-        # Update trace view option menu
-        gui.updateTraceViewOptions()
-        gui.update()
+    record_data(HelperFunctions.getTargetName(gui), elf, probe, target, frequency, measure_seconds, filename1, filename2)
 
 def parse_int(value: str) -> int:
     return int(value, 0)
@@ -79,11 +70,12 @@ def wait_for_pc(core, expected_addr: int, timeout: float = 5.0) -> bool:
 
     return False
 
-def record_data(gui, elf, probe, target, frequency, measure_seconds, filename1, filename2):
-    
-    configName = HelperFunctions.getTargetName(gui)
-    config = configparser.ConfigParser()
-    config.read(HelperFunctions.getConfigFilePath())
+def record_data(configName, elf, probe, target, frequency, measure_seconds, filename1, filename2):
+    """
+    Flash elf, run it for measure_seconds and save both trace buffers.
+    configName is the config.ini section with the buffer addresses and size (e.g. Pico2_FreeRTOS_SRAM).
+    """
+    config = HelperFunctions.readConfig()
     
     address_buffer0_str = config.get(configName,'buffer0', fallback = None)
     address_buffer1_str = config.get(configName,'buffer1', fallback = None)
@@ -115,7 +107,7 @@ def record_data(gui, elf, probe, target, frequency, measure_seconds, filename1, 
         target = session.board.target
         core = target.cores[0]
 
-        print(f"Programming {elf} ...")
+        print(f"Programming {os.path.basename(elf)} ...")
         FileProgrammer(session).program(elf)
         print("Programming complete.")
 
@@ -161,18 +153,18 @@ def record_data(gui, elf, probe, target, frequency, measure_seconds, filename1, 
         print("Finished trace recording, halting the target now.")
         target.halt()
 
-        print(f"Reading buffer 0 at address 0x{address_buffer0}")
+        print(f"Reading buffer 0 at address 0x{address_buffer0:08X}")
         data_buffer0 = target.read_memory_block8(address_buffer0, buffer_length)
         with open(filename1, "wb") as f:
             f.write(bytes(data_buffer0))
 
-        print(f"Reading buffer 1 at address 0x{address_buffer1}")
+        print(f"Reading buffer 1 at address 0x{address_buffer1:08X}")
         data_buffer1 = target.read_memory_block8(address_buffer1, buffer_length)
         with open(filename2, "wb") as f:
             f.write(bytes(data_buffer1))
     
-        print(f"Wrote RTT channel 1 to {filename1}")
-        print(f"Wrote RTT channel 2 to {filename2}")
+        print(f"Wrote trace buffer 0 to {filename1}")
+        print(f"Wrote trace buffer 1 to {filename2}")
 
 def wait_with_incremental_bar(seconds, width=30):
     start = time.time()
@@ -202,11 +194,12 @@ def main() -> int:
     ap.add_argument("--target", default="rp2350", help="Target name")
     ap.add_argument("--frequency", type=parse_int, default=4_000_000)
     ap.add_argument("--seconds", type=float, default=10.0)
-    ap.add_argument("--ch1-file", default="rtt_test/rtt_ch1.bin", help="Output file for RTT channel 1")
-    ap.add_argument("--ch2-file", default="rtt_test/rtt_ch2.bin", help="Output file for RTT channel 2")
+    ap.add_argument("--config", default="Pico2_FreeRTOS_SRAM", choices=["Pico2_FreeRTOS_SRAM", "Pico2_FreeRTOS_PSRAM"], help="config.ini section with the trace buffer addresses")
+    ap.add_argument("--buffer0-file", "--ch1-file", default="raw_buffer0.txt", help="Output file for the trace buffer of core 0 (--ch1-file is the old name)")
+    ap.add_argument("--buffer1-file", "--ch2-file", default="raw_buffer1.txt", help="Output file for the trace buffer of core 1 (--ch2-file is the old name)")
     args = ap.parse_args()
 
-    retval = record_data(args.elf, args.probe, args.target, args.frequency, args.seconds, args.ch1_file, args.ch2_file)
+    retval = record_data(args.config, args.elf, args.probe, args.target, args.frequency, args.seconds, args.buffer0_file, args.buffer1_file)
 
     return retval
 

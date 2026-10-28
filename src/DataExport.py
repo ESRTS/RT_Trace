@@ -30,23 +30,11 @@ def getLastActivity(tasks):
     return maxActivity
 
 
-def getTimestring(ts, before, after):
+def msString(time_us):
     """
-    Helper to create a timestring based on the magnitude of the timestamp.
+    Formats a time in us as ms, or "-" if there is none (no job of the task finished in the trace).
     """
-    unit = ""
-    value = 0.0
-    if ts > 1000000:    # Value in seconds
-        unit = "s "
-        value = ts / 1000000
-    elif ts > 1000:     # Value in ms
-        unit = "ms"
-        value = ts / 1000
-    else:               # Value in nss
-        unit = "us" 
-        value = ts
-
-    return f"{value:0{before + 1 + after}.{after}f}{unit}"
+    return "-" if time_us is None else f"{time_us / 1000:.3f}"
 
 def createDataFile(taskDataFile, task):
     """
@@ -67,7 +55,7 @@ def exportData(gui, tasks):
     """
     First export data for each task and job in task specific files. If the file already exists, this is skipped.
     """
-    destFolder = HelperFunctions.getViewingFolderName(gui)
+    destFolder = gui.viewingFolder
 
     for task in tasks:
         taskDataFile = os.path.join(destFolder, f"{task.name.replace(' ', '_')}.csv")
@@ -77,21 +65,21 @@ def exportData(gui, tasks):
     """
     Second, some observed parameters are printed in the GUI textbox.
     """
-    maxName = 0
+    maxName = len('Task')
     for task in tasks:
         if len(task.name) > maxName:
             maxName = len(task.name)
 
-    HelperFunctions.printState("Found trace data for tasks:")
+    HelperFunctions.printState("Tasks", info="(times in ms, the maximum over all jobs)")
 
     lastActivity = getLastActivity(tasks)
 
-    print(f"\n   Task Name:{' ' * (maxName - len("Task Name"))}| Response Time | WCET        | Utilization")
-    print(f"{'='*(3+maxName+46)}")
+    print(f"\n  {'Task':<{maxName}}  {'Response':>10}  {'Execution':>10}  {'Utilization':>11}")
+    print("  " + "-" * (maxName + 37))
     for task in tasks:
-        rt = task.getMaxResponseTime()
-        wcet = task.getMaxExecutionTime()
+        rt = msString(task.getMaxResponseTime())
+        wcet = msString(task.getMaxExecutionTime())
         util = task.getUtilization(lastActivity) * 100
-        print(f"   {task.name}{' ' * (maxName - len(task.name))} |   {getTimestring(rt, 4, 4)} | {getTimestring(wcet, 4, 4)} | {util: {7}.{3}f}%")
+        print(f"  {task.name:<{maxName}}  {rt:>10}  {wcet:>10}  {util:>10.2f}%")
 
 

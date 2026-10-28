@@ -87,8 +87,7 @@ def parseTraceFiles(gui, numCores):
     #enable_event_print = gui.printEvents_var.get()
 
     taskColorIndex = 0      # Reset the task color index, so we always start with the same task color assignments.
-    thread = Thread(target = parser_thread, args = (gui, numCores))
-    thread.start()
+    HelperFunctions.startWorker(gui, lambda g: parser_thread(g, numCores), gui.loadingFinished)
 
 def parser_thread(gui, numCores):
     """
@@ -96,24 +95,18 @@ def parser_thread(gui, numCores):
     As dedicated thread to not block the GUI while parsing.
     """
     configName = gui.targets[gui.selectedTarget].get('name').replace(' ', '_')    # Get the configuration name
-    config = configparser.ConfigParser()
-    config.read(HelperFunctions.getConfigFilePath())
+    config = HelperFunctions.readConfig()
 
     use_user_events = config.getboolean(configName, 'user_events', fallback=False)
 
     HelperFunctions.printState("Use User-Events: ", info=str(use_user_events))
 
-    filename = os.path.abspath(os.path.join(HelperFunctions.getViewingFolderName(gui), 'trace.txt'))
-    eventFilePath = os.path.abspath(os.path.join(HelperFunctions.getViewingFolderName(gui), 'events.txt'))
+    filename = os.path.abspath(os.path.join(gui.viewingFolder, 'trace.txt'))
+    eventFilePath = os.path.abspath(os.path.join(gui.viewingFolder, 'events.txt'))
 
     tasks = parser(filename, eventFilePath, use_user_events)    # Parse the content of the trace buffers
 
-    # If this was called from the GUI, enable the buttons and update the GUI
-    if gui is not None:
-        gui.btn_loadTrace.configure(state="normal")
-        gui.traceView.setTasks(tasks)
-        gui.traceView.draw()
-        gui.update()
+    return tasks
 
 def parser(buffers, eventFilePath, use_user_events):
     """

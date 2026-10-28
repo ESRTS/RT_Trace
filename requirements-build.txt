@@ -1,0 +1,7 @@
+# Packages needed to build the standalone application with createGui.sh,
+# on top of the runtime requirements.
+-r requirements.txt
+altgraph==0.17.4
+macholib==1.16.3
+pyinstaller==6.11.1
+pyinstaller-hooks-contrib==2024.10

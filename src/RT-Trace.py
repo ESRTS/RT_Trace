@@ -1,11 +1,11 @@
 import customtkinter
 import tkinter as tk
+import tkinter.font
 import sys
 import platform
 from TraceView import TraceView
 from BufferTraceRecorder import loadPico2BufferTraceRecorder
 from RttTraceRecorder import loadPico2RttTraceBuffers
-from L476Trace import loadSTM32L476TraceBuffers
 from LinuxTraceRecorder import loadLinuxraceBuffers
 from TraceParserFreeRTOS import parseTraceFiles
 from TraceParserLinux import parseTraceFiles as linuxParseTraceFiles
@@ -16,12 +16,16 @@ from datetime import datetime
 import HelperFunctions
 import configparser
 import queue
+import signal
 class TraceApp(customtkinter.CTk):
     """
     Main class of the RT-Trace app. 
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.uiScale = HelperFunctions.getUiScale()
+        customtkinter.set_widget_scaling(self.uiScale)
+        HelperFunctions.scaleTkFonts(self, self.uiScale)
 
         """
         Here all available targets are configures. If the flag 'implemented' is False, they are not supported yet.
@@ -29,9 +33,9 @@ class TraceApp(customtkinter.CTk):
         'recordTraceFunc' is a target specific function that loads the trace buffer
         """
         self.targets = [
-            {'name': 'Pico2 FreeRTOS RTT', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2RttTraceBuffers, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': HelperFunctions.validatePicoRtt},
-            {'name': 'Pico2 FreeRTOS SRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2BufferTraceRecorder, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': None},
-            {'name': 'Pico2 FreeRTOS PSRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2BufferTraceRecorder, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': None},
+            {'name': 'Pico2 FreeRTOS RTT', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2RttTraceBuffers, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': lambda gui, quiet=False: HelperFunctions.validatePicoTrace(gui, "RTT", quiet)},
+            {'name': 'Pico2 FreeRTOS SRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2BufferTraceRecorder, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': lambda gui, quiet=False: HelperFunctions.validatePicoTrace(gui, "SRAM", quiet)},
+            {'name': 'Pico2 FreeRTOS PSRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2BufferTraceRecorder, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': lambda gui, quiet=False: HelperFunctions.validatePicoTrace(gui, "PSRAM", quiet)},
             #{'name': 'STM FreeRTOS', 'numCores': 1, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : loadSTM32L476TraceBuffers},
             #{'name': 'RPI QNX', 'numCores': 4, 'implemented': False, 'requirement_str' : 'To load the trace buffer, telnet needs to be on the path.', 'recordTraceFunc' : None},
             {'name': 'RPI Linux', 'numCores': 4, 'implemented': True, 'requirement_str' : 'Experimental...', 'recordTraceFunc' : loadLinuxraceBuffers, 'loadTraceFunc': linuxParseTraceFiles, 'pathValidationFunc': None}
@@ -51,10 +55,13 @@ class TraceApp(customtkinter.CTk):
             customtkinter.DrawEngine.preferred_drawing_method="polygon_shapes"
             ui_font = customtkinter.CTkFont(family="DejaVu Sans", size=13)
 
+        ''' Queue of functions that background threads want to run in the GUI thread. '''
+        self.uiQueue = queue.Queue()
+        self.after(50, self.processUiQueue)
+
         ''' Set the default size of the GUI window and give it a name. '''
-        self.windowSizeY = 600
-        self.windowSizeX = self.winfo_screenwidth()
-        self.maxScreenSizeY = self.winfo_screenheight()
+        self.windowSizeY = min(int(self.winfo_screenheight() * 0.8), 1000)     # The trace view fits its rows into this height
+        self.windowSizeX = min(self.winfo_screenwidth(), 1920)   # On Linux/X11 the screen width covers all monitors
 
         self.geometry("{}x{}".format(self.windowSizeX, self.windowSizeY))
         self.minsize(800, 400)
@@ -70,7 +77,7 @@ class TraceApp(customtkinter.CTk):
         self.sidebar_frame.grid_rowconfigure(11, weight=1)
 
         ''' Label for the platform selection. '''
-        self.lbl_selectPlatform = customtkinter.CTkLabel(self.sidebar_frame, text="Platform Selection:", font=customtkinter.CTkFont(size=15, weight="bold"))
+        self.lbl_selectPlatform = customtkinter.CTkLabel(self.sidebar_frame, text="Platform", font=customtkinter.CTkFont(size=15, weight="bold"))
         self.lbl_selectPlatform.grid(row=0, column=0, padx=(0, 0), pady=(10, 0))
 
         ''' Option to select the trace source. '''
@@ -85,26 +92,26 @@ class TraceApp(customtkinter.CTk):
         
         ''' Label for the trace recorder section. '''
         self.lbl_recording = customtkinter.CTkLabel(self.sidebar_frame, text="Record Trace", font=customtkinter.CTkFont(size=15, weight="bold"), anchor="w")
-        self.lbl_recording.grid(row=2, column=0, padx=(0, 0), pady=(10, 0))
+        self.lbl_recording.grid(row=4, column=0, padx=(0, 0), pady=(10, 0))
 
         ''' Button to start recording a new trace from a target. '''
         self.btn_recordTrace = customtkinter.CTkButton(self.sidebar_frame, text="Record Trace", command=self.button_record_function, corner_radius=default_corner_radius)
-        self.btn_recordTrace.grid(row=3, column=0, padx=20, pady=5, sticky="ew")
+        self.btn_recordTrace.grid(row=6, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Entry to specify the trace name. '''
         recordTraceName = tk.StringVar(value="Record")#self.targets[self.selectedTarget].get('name').replace(' ', '_'))
-        self.txt_traceName = customtkinter.CTkEntry(self.sidebar_frame, textvariable=recordTraceName, corner_radius=default_corner_radius)
-        self.txt_traceName.grid(row=4, column=0, padx=20, pady=5, sticky="ew")
+        self.txt_traceName = customtkinter.CTkEntry(self.sidebar_frame, textvariable=recordTraceName, placeholder_text="Recording name", corner_radius=default_corner_radius)
+        self.txt_traceName.grid(row=5, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Label for the target program section. '''
-        self.lbl_progSelect = customtkinter.CTkLabel(self.sidebar_frame, text="Select Program", font=customtkinter.CTkFont(size=12, weight="bold"), anchor="w")
-        self.lbl_progSelect.grid(row=5, column=0, padx=(0, 0), pady=(5, 0))
+        self.lbl_progSelect = customtkinter.CTkLabel(self.sidebar_frame, text="Program", font=customtkinter.CTkFont(size=15, weight="bold"), anchor="w")
+        self.lbl_progSelect.grid(row=2, column=0, padx=(0, 0), pady=(10, 0))
 
         ''' Option to select the target program. '''
         self.possiblePrograms = ["Select a program..."] + HelperFunctions.getPossiblePrograms()
         self.selectedProgram = self.possiblePrograms[0]
         self.opt_selectProg = customtkinter.CTkOptionMenu(self.sidebar_frame, values=self.possiblePrograms, command=self.selectProgramSource, corner_radius=default_corner_radius)
-        self.opt_selectProg.grid(row=6, column=0, padx=20, pady=(0, 5), sticky="ew")
+        self.opt_selectProg.grid(row=3, column=0, padx=20, pady=(0, 5), sticky="ew")
         self.btn_recordTrace.configure(state="disabled")    # Enable the record button only after a valid program is selected
 
         ''' Label for the trace visualization section. '''
@@ -131,16 +138,39 @@ class TraceApp(customtkinter.CTk):
         self.btn_saveTrace.grid(row=10, column=0, padx=20, pady=5, sticky="ew")
         
         ''' Textbox to display stdout. '''
-        font = customtkinter.CTkFont(family="DejaVu Sans Mono", size=14)
+        monospaceFamily = tkinter.font.nametofont("TkFixedFont").actual("family")   # The platform's default monospace font
+        outputFontSize = 14
+        font = customtkinter.CTkFont(family=monospaceFamily, size=outputFontSize)
         self.textbox = customtkinter.CTkTextbox(self, corner_radius=10, font=font)
         self.textbox.grid(row=9, column=1, rowspan=2, columnspan=1, sticky="nswe", padx=5, pady=5)
         
         ''' Redirect stdout and stderr to the textbox. '''
         self.textbox.tag_config('stderr', foreground="red")
         self.textbox.tag_config('stdout', foreground="black")
+        boldFont = tkinter.font.Font(family=monospaceFamily, size=-round(outputFontSize * self.uiScale), weight="bold")   # Same pixel size as the scaled output font
+        self.outputBoldFont = boldFont                  # Keep a reference, Tk drops fonts that are garbage collected
+        self.textbox._textbox.tag_config('header', foreground="#1f538d", font=boldFont)   # CTkTextbox forbids the font option, set it on the Tk widget
+        self.textbox._textbox.tag_config('state', foreground="#1f538d", font=boldFont)
+        self.textbox._textbox.tag_config('error', foreground="red", font=boldFont)
+        self.textbox._textbox.configure(spacing1=2, spacing3=2)    # A little space between lines
 
         sys.stdout = TextRedirector(self.textbox, "stdout")
         sys.stderr = TextRedirector(self.textbox, "stderr")
+
+        ''' Make the output copyable. The textbox is read-only, and read-only text widgets do not take the
+        keyboard focus on a click, so Ctrl+C / Cmd+C did nothing. Focus it on click and add a right-click menu. '''
+        self.textbox.bind("<Button-1>", lambda event: self.textbox.focus_set())
+        self.outputMenu = tk.Menu(self, tearoff=0)
+        self.outputMenu.add_command(label="Copy", command=self.copySelectedOutput)
+        self.outputMenu.add_command(label="Copy All", command=self.copyAllOutput)
+        self.outputMenu.add_separator()
+        self.outputMenu.add_command(label="Clear", command=self.clearOutput)
+        if self.tk.call("tk", "windowingsystem") == "aqua":    # macOS: the right mouse button is Button-2, also allow Control-click
+            rightClickEvents = ["<Button-2>", "<Control-Button-1>"]
+        else:
+            rightClickEvents = ["<Button-3>"]
+        for event in rightClickEvents:
+            self.textbox.bind(event, self.showOutputMenu)
 
         ''' Execution Trace Widget. '''
         self.traceView = TraceView(self)
@@ -165,18 +195,92 @@ class TraceApp(customtkinter.CTk):
         self.traceView.bind("<B1-Motion>", self.traceView.mouseDragHandler)
         self.traceView.bind("<ButtonPress>", self.traceView.buttonPressed)
         self.traceView.bind("<ButtonRelease>", self.traceView.buttonReleased)
+        for event in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.traceView.bind(event, self.traceView.mouseWheelHandler)
 
         ''' Bind the function to handle window resize events. '''
         self.traceView.bind("<Configure>", self.resize_window_function)
 
         ''' Print the requirement string for the initially selected target. '''
         print(self.targets[self.selectedTarget].get('requirement_str'))
+        self.refreshProgramList()
 
         # If there is no existing trace to load, disable the buttons
         if len(existingTraces) > 0:
             self.enableTraceView()
         else:
             self.disableTraceView()
+
+    def runInMainThread(self, func):
+        """
+        Queue func to be executed in the GUI thread. Background threads must use this
+        instead of touching widgets directly, as Tk is not thread-safe.
+        """
+        self.uiQueue.put(func)
+
+    def processUiQueue(self):
+        """
+        Executes the functions queued by background threads.
+        """
+        while not self.uiQueue.empty():
+            self.uiQueue.get_nowait()()
+        self.after(50, self.processUiQueue)
+
+    def recordingFinished(self, result=None):
+        """
+        Called in the GUI thread once a trace recording is done. Loads the new recording if there is one.
+        """
+        self.btn_recordTrace.configure(state="normal", text="Record Trace")
+        self.updateTraceViewOptions()
+
+        newRecording = os.path.basename(self.recordingFolder)
+        if newRecording in self.selectTrace and any(Path(self.recordingFolder).iterdir()):
+            self.opt_selectTrace.set(newRecording)
+            self.load_function()
+
+    def loadingFinished(self, tasks):
+        """
+        Called in the GUI thread once a trace is parsed.
+        """
+        self.btn_loadTrace.configure(state="normal", text="Load Trace")
+        if tasks is not None:
+            self.traceView.setTasks(tasks)
+            self.traceView.draw()
+
+    def showOutputMenu(self, event):
+        """
+        Opens the copy menu of the output textbox at the mouse position.
+        """
+        try:
+            self.outputMenu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.outputMenu.grab_release()
+
+    def copySelectedOutput(self):
+        """
+        Copies the selected text of the output textbox to the clipboard.
+        """
+        try:
+            text = self.textbox.get("sel.first", "sel.last")
+        except tk.TclError:     # Nothing selected
+            return
+        self.clipboard_clear()
+        self.clipboard_append(text)
+
+    def copyAllOutput(self):
+        """
+        Copies the whole content of the output textbox to the clipboard.
+        """
+        self.clipboard_clear()
+        self.clipboard_append(self.textbox.get("1.0", "end-1c"))
+
+    def clearOutput(self):
+        """
+        Removes all text from the output textbox.
+        """
+        self.textbox.configure(state="normal")
+        self.textbox.delete("1.0", "end")
+        self.textbox.configure(state="disabled")
 
     def printEventsSwitch_event(self):
         pass
@@ -195,9 +299,9 @@ class TraceApp(customtkinter.CTk):
         """
         Key-handler function. Used to control the trace view.
         """
-        if event.keycode == 2113992448: # Up arrow
+        if event.keysym == "Up":
             self.traceView.zoom(1)
-        elif event.keycode == 2097215233: # Down arrow
+        elif event.keysym == "Down":
             self.traceView.zoom(-1)
 
     def disableAllButtons(self):
@@ -243,7 +347,16 @@ class TraceApp(customtkinter.CTk):
 
         self.btn_recordTrace.configure(state="disabled")
         self.update()
+
+        # Check again here, the platform may have changed since the program was selected
+        validate = self.targets[self.selectedTarget].get('pathValidationFunc')
+        if validate is not None and validate(self, quiet=True) is not True:
+            self.btn_recordTrace.configure(state="enabled")
+            return
+
+        self.btn_recordTrace.configure(text="Recording...")
         HelperFunctions.printHeader("recording trace")
+        self.recordingFolder = HelperFunctions.getRecordingFolderName(self)   # Read the GUI state here, the recorder runs in a background thread
         self.targets[self.selectedTarget].get('recordTraceFunc')(self)   # Call the target specific function to record the trace buffers
 
     def load_function(self):
@@ -251,13 +364,37 @@ class TraceApp(customtkinter.CTk):
         Callback that is called if the button "Load Trace" is clicked.
         """
         
-        self.btn_loadTrace.configure(state="disabled")
+        self.btn_loadTrace.configure(state="disabled", text="Loading...")
         self.update()
         HelperFunctions.printHeader("Loading trace from files")
+        self.viewingFolder = HelperFunctions.getViewingFolderName(self)       # Read the GUI state here, the parser runs in a background thread
         self.targets[self.selectedTarget].get('loadTraceFunc')(self, self.targets[self.selectedTarget].get('numCores'))   # Call the target specific function to load the trace buffers
+
+    def refreshProgramList(self):
+        """
+        Reloads the projects for the program selection and prints a hint if there are none.
+        """
+        programs = HelperFunctions.getPossiblePrograms()
+        if len(programs) == 0:
+            self.opt_selectProg.configure(values=["No projects found"])
+            self.opt_selectProg.set("No projects found")
+            self.btn_recordTrace.configure(state="disabled")
+            HelperFunctions.printState("No projects found", info="in " + str(HelperFunctions.getProjectPath()))
+            print("Create one with 'newembproj.py <name> -trace RTT' (or SRAM, PSRAM) and build it, then select the platform again.")
+            print("To use projects from another folder, set project_path in Resources/config.local.ini.")
+        elif self.selectedProgram in programs:
+            self.opt_selectProg.configure(values=programs)
+            self.opt_selectProg.set(self.selectedProgram)
+        else:
+            self.opt_selectProg.configure(values=["Select a program..."] + programs)
+            self.opt_selectProg.set("Select a program...")
 
     def selectProgramSource(self, selectedFolder: str):
         
+        # Ignore the placeholder entries
+        if selectedFolder not in HelperFunctions.getPossiblePrograms():
+            return
+
         # Remove the initial selection from the menu
         if "Select a program..." in self.opt_selectProg.cget("values"):
             self.opt_selectProg.configure(values=HelperFunctions.getPossiblePrograms())
@@ -265,12 +402,13 @@ class TraceApp(customtkinter.CTk):
         # Remember which program is selected
         self.selectedProgram = selectedFolder
 
-        HelperFunctions.printState("Select Program", info=selectedFolder)
-        
-        if self.targets[self.selectedTarget].get('pathValidationFunc') is not None:
+        if self.targets[self.selectedTarget].get('pathValidationFunc') is not None:     # Prints the program and its trace mode
             if self.targets[self.selectedTarget].get('pathValidationFunc')(self) is True:
                 self.btn_recordTrace.configure(state="enable")
+            else:
+                self.btn_recordTrace.configure(state="disabled")
         else:
+            HelperFunctions.printState("Program", info=selectedFolder)
             self.btn_recordTrace.configure(state="enable")
 
         # Validate if the selected program is ok
@@ -288,7 +426,7 @@ class TraceApp(customtkinter.CTk):
         Callback that is called if a new target is selected from the option menu.
         """
         for target in self.targets:
-            if target.get('name') is traceSource:
+            if target.get('name') == traceSource:
                 self.selectedTarget = self.targets.index(target)
 
         # Reset the textbox if a different target is selected
@@ -304,6 +442,7 @@ class TraceApp(customtkinter.CTk):
         if self.targets[self.selectedTarget].get('implemented') is True:    # Make sure only to load from supported targets
             print(self.targets[self.selectedTarget].get('requirement_str'))
             self.enableAllButtons()
+            self.refreshProgramList()   # Picks up projects created since the start
         else:
             HelperFunctions.printState("Target not yet supported", info = self.targets[self.selectedTarget].get('name'))
             self.disableAllButtons()
@@ -367,7 +506,7 @@ class TextRedirector(object):
         self.tag = tag
 
         self.queue = queue.Queue()
-        self._scheduled = False
+        self.widget.after(30, self._flush)   # Started from the GUI thread, write() may be called from any thread
 
     def write(self, string):
         #self.widget.configure(state="normal")
@@ -377,22 +516,35 @@ class TextRedirector(object):
 
         if string:
             self.queue.put(string)
-            if not self._scheduled:
-                self._scheduled = True
-                self.widget.after(30, self._flush)
+
+    def styleFor(self, text):
+        """
+        Returns the text tag for a chunk of output: errors in red, state lines and headers highlighted.
+        """
+        line = text.lstrip()
+        if self.tag == "stderr" or line.startswith("=> ERROR"):
+            return "error"
+        if line.startswith("=>"):
+            return "state"
+        if line.startswith("=== ") and line.rstrip().endswith(" ==="):
+            return "header"
+        return self.tag
 
     def flush(self):    # Needed to have the interface of a file-like object
         pass   
     
     def _flush(self):
-        self.widget.configure(state="normal")
+        if not self.queue.empty():
+            self.widget.configure(state="normal")
 
-        while not self.queue.empty():
-            self.widget.insert("end", self.queue.get_nowait(), (self.tag,))
+            while not self.queue.empty():
+                text = self.queue.get_nowait()
+                self.widget.insert("end", text, (self.styleFor(text),))
 
-        self.widget.configure(state="disabled")
-        self.widget.see("end")
-        self._scheduled = False
+            self.widget.configure(state="disabled")
+            self.widget.see("end")
+
+        self.widget.after(30, self._flush)
 
 def main():
     """
@@ -402,7 +554,27 @@ def main():
     customtkinter.set_default_color_theme("blue")   # Themes: blue (default), dark-blue, green
 
     app = TraceApp()                                # Create the app instance
-    app.mainloop()                                  # Start the main loop of the GUI
+
+    def stop(signum, frame):
+        """
+        Closes the GUI on Ctrl+C (SIGINT) or SIGTERM from the terminal. Python runs this between
+        Tk events, which happen at least every 50 ms because of processUiQueue().
+        """
+        print("\nStopping RT-Trace...", file=sys.__stdout__, flush=True)
+        app.quit()
+
+    signal.signal(signal.SIGINT, stop)
+    signal.signal(signal.SIGTERM, stop)
+
+    try:
+        app.mainloop()                              # Start the main loop of the GUI
+    except KeyboardInterrupt:                       # Ctrl+C before the handler above was installed
+        pass
+    finally:
+        try:
+            app.destroy()
+        except tk.TclError:                         # Window already closed
+            pass
 
 if __name__ == "__main__":
 

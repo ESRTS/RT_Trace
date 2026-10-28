@@ -116,8 +116,7 @@ def readTraceBuffers():
     global errorMsg
     
     # Read the configuration from the ini-file
-    config = configparser.ConfigParser()
-    config.read(HelperFunctions.getConfigFilePath())
+    config = HelperFunctions.readConfig()
     size = config.get('STM_FreeRTOS','bufferSize', fallback = '4000')
     print("Size is: " + str(size))
     buffer0 = config.get('STM_FreeRTOS','buffer0', fallback = '0x10000000') 

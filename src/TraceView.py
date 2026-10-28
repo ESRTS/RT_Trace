@@ -23,8 +23,10 @@ class TraceView(customtkinter.CTkCanvas):
         self.borderY_px = 30                                    # Border that is added on top and bottom
         self.legend_px = 90                                     # Size that is reserved for the legend (left of the trace)
         self.scaleFactor = 1                                    # Factor to scale the complete view (not used)
-        self.taskTimelineHeight_px = 45                         # Describes the height of one task's timeline
+        self.taskTimelineHeight_px = 45                         # Describes the height of one task's timeline (fitted to the view in fitRows())
         self.taskHeight_px = 25                                 # Describes the height of one task
+        self.maxTimelineHeight_px = 45                          # Largest timeline height when the rows are fitted to the view
+        self.minTimelineHeight_px = 30                          # Smallest timeline height, below this the view scrolls
         self.releaseArrowWidth_px = 2                           # Stroke width of release arrow
         self.releaseArrowLength_px = 10                         # Length of the release arrow
         self.releaseArrowD_px = 4                               # D parameter of release arrow
@@ -98,6 +100,7 @@ class TraceView(customtkinter.CTkCanvas):
             # we add one ms to the right bound to not finish the trace with the last event
             self.rightBound_tks = self.rightBound_tks + 1000 
             self.zoomMin = self.rightBound_tks
+            self.leftBound_tks = 0      # Start at the beginning of a newly loaded trace
 
             if self.rightBound_tks > 100000:
                 self.rightBound_tks = 100000
@@ -140,14 +143,14 @@ class TraceView(customtkinter.CTkCanvas):
 
         self.sizeX_px  = int(self.winfo_width())
 
-        oldHeight = self.traceHeight
-
         # Display a standard text if no task is set yet
         if self.tasks is None:
             #self.canvasItems.append(self.create_text(200, 100, anchor=customtkinter.N, text="No Trace Loaded...."))
             #self.draw_rectangle(0, 0, self.sizeX_px-20, self.traceHeight)
-            self.draw_text(200, 100, anchor=customtkinter.N, text="No Trace Loaded....")
+            self.traceHeight = 0
+            self.draw_text(200, 100, anchor=customtkinter.NW, text="No trace loaded.\n\nChoose a platform and a program, then press Record Trace.\nOr pick an earlier recording under View Trace and press Load Trace.")
         else: 
+            self.fitRows()
             self.traceHeight = len(self.tasks) * self.taskTimelineHeight_px + self.borderY_px
             
             # In case the view was updated, make sure to delete all canvas items first
@@ -182,7 +185,25 @@ class TraceView(customtkinter.CTkCanvas):
         
         self.configure(scrollregion = (0,0,100,self.traceHeight))
 
-        self.updateWindowHeight(oldHeight, self.traceHeight)
+        # Show the scrollbar only if the rows don't fit into the view
+        if self.traceHeight > self.winfo_height():
+            if not self.ctk_textbox_scrollbar.winfo_ismapped():
+                self.ctk_textbox_scrollbar.place(relx=1,rely=0,relheight=1,anchor='ne')
+        else:
+            self.ctk_textbox_scrollbar.place_forget()
+            self.yview_moveto(0)
+
+    def fitRows(self):
+        """
+        Sets the height of the task timelines so that all tasks fit into the visible height of the view.
+        If they don't fit at the smallest height, the view can be scrolled.
+        """
+        scale = getattr(self.gui, "uiScale", 1)     # Larger rows when the UI is scaled, the task names use a larger font
+        available_px = self.winfo_height() - self.borderY_px
+        rowHeight = available_px // len(self.tasks)
+        rowHeight = max(round(self.minTimelineHeight_px * scale), min(round(self.maxTimelineHeight_px * scale), rowHeight))
+        self.taskTimelineHeight_px = rowHeight
+        self.taskHeight_px = round(rowHeight * 25 / 45)     # Keep the proportions of the original 45 px rows
 
     def paintLegend(self):
         """
@@ -412,42 +433,28 @@ class TraceView(customtkinter.CTkCanvas):
         """
         Draws the tick lines based on the current view.
         """
-        minSizeTick = self.view_tks / self.maxTicks
+        plotWidth = self.sizeX_px - self.borderX_px - self.borderX_px - self.legend_px
+        labelWidth_px = 80 * getattr(self.gui, "uiScale", 1)    # Room for one time label, so labels don't overlap in narrow windows
+        maxTicks = max(1, min(self.maxTicks, plotWidth // labelWidth_px))
+        minSizeTick = self.view_tks / maxTicks
 
-        b = minSizeTick / 1
-        subdivisor = 1
+        # Tick distance of 1, 2 or 5 times a power of ten (in us), at least minSizeTick
+        step = 1
+        while step < minSizeTick:
+            for factor in (2, 2.5, 2):      # 1 -> 2 -> 5 -> 10
+                step = step * factor
+                if step >= minSizeTick:
+                    break
+        step = round(step)
 
-        if b < 1:
+        if step < 1000:     # Unit of the time labels
             self.tickScale = 1
-            subdivider = 1
-        elif b < 10:
-            self.tickScale = 1
-            subdivider = 10
-        elif b < 100:
-            self.tickScale = 1
-            subdivider = 100
-        elif b < 1000:
+        elif step < 1000000:
             self.tickScale = 1000
-            subdivider = 1
-        elif b < 10000:
-            self.tickScale = 1000
-            subdivider = 10
-        elif b < 100000:
-            self.tickScale = 1000
-            subdivider = 100
-        elif b < 1000000:
+        else:
             self.tickScale = 1000000
-            subdivider = 1
-        elif b < 10000000:
-            self.tickScale = 1000000
-            subdivider = 10
-        elif b < 100000000:
-            self.tickScale = 1000000
-            subdivider = 100
 
-        firstTick = self.leftBound_tks
-        firstTick = math.ceil(self.leftBound_tks / (self.tickScale * subdivider))
-        tick = firstTick * (self.tickScale * subdivider)
+        tick = math.ceil(self.leftBound_tks / step) * step
 
         drawNextTick = True
         while drawNextTick:
@@ -464,7 +471,7 @@ class TraceView(customtkinter.CTkCanvas):
             #self.canvasItems.append(self.create_text(pos, self.taskTimelineHeight_px * (len(self.tasks)) + 12, anchor=customtkinter.N, text=self.getTimeString(tick)))
             self.draw_text(pos, self.taskTimelineHeight_px * (len(self.tasks)) + 12, anchor=customtkinter.N, text=self.getTimeString(tick))
 
-            tick = tick + (self.tickScale * subdivider) # Increment tick
+            tick = tick + step # Increment tick
             if tick >= self.rightBound_tks:
                 drawNextTick = False
 
@@ -516,17 +523,17 @@ class TraceView(customtkinter.CTkCanvas):
 
         return (pixel * viewLength) / (plotWidth)
     
-    def zoom(self, direction):
+    def zoom(self, direction, anchor_px=None):
         """
         Function is used to handle zoom events. 
         Depending on the zoom direction the new left and right boundaries are calculated. 
+        The time at anchor_px (x-coordinate on the canvas) stays in place, by default the center of the view.
         """
 
         left_tks = self.leftBound_tks
         right_tks = self.rightBound_tks
 
         oldWidth = right_tks - left_tks
-        center = (oldWidth / 2) + left_tks
         if direction > 0: # Zoom in
             newWidth = oldWidth / self.zoomFactor
         elif direction < 0:  # Zoom out
@@ -537,17 +544,57 @@ class TraceView(customtkinter.CTkCanvas):
         elif newWidth > self.zoomMin:   # Enforce minimum zoom level
             newWidth = self.zoomMin
 
-        self.leftBound_tks = center - (newWidth / 2)
-        self.rightBound_tks = center + (newWidth / 2)
+        anchor_tks = (oldWidth / 2) + left_tks
+        if anchor_px is not None and anchor_px > self.plotXOffset():
+            anchor_tks = left_tks + self.pixelToTime(anchor_px - self.plotXOffset())
 
-        if self.leftBound_tks < 0:  # Don't allow to display negative times
-            self.leftBound_tks = 0
-            self.rightBound_tks = newWidth
-        elif self.rightBound_tks > self.zoomMin:    # Don't allow to display times larger than the last event. self.zoomMin holds the timestamp of the last event.
-            self.leftBound_tks = self.zoomMin - newWidth
-            self.rightBound_tks = self.zoomMin
+        self.setView(anchor_tks - (anchor_tks - left_tks) * newWidth / oldWidth, newWidth)
+
+    def pan(self, fraction):
+        """
+        Moves the view by a fraction of its width, to the right for positive values.
+        """
+        width = self.rightBound_tks - self.leftBound_tks
+        self.setView(self.leftBound_tks + fraction * width, width)
+
+    def setView(self, left_tks, width_tks):
+        """
+        Shows the interval [left_tks, left_tks + width_tks], kept between 0 and the last event, and redraws.
+        """
+        if left_tks < 0:  # Don't allow to display negative times
+            left_tks = 0
+        elif left_tks + width_tks > self.zoomMin:    # Don't allow to display times larger than the last event. self.zoomMin holds the timestamp of the last event.
+            left_tks = self.zoomMin - width_tks
+
+        self.leftBound_tks = left_tks
+        self.rightBound_tks = left_tks + width_tks
 
         self.draw()
+
+    def mouseWheelHandler(self, event):
+        """
+        Mouse wheel: Ctrl+wheel zooms at the mouse position, Shift+wheel scrolls the rows if they don't fit,
+        and the wheel alone moves the view in time. Handles <MouseWheel> (Windows, macOS, Tk 9) and
+        <Button-4>/<Button-5> (X11 with Tk 8.6).
+        """
+        if self.tasks is None:
+            return
+
+        if event.num == 4:
+            up = True
+        elif event.num == 5:
+            up = False
+        elif event.delta != 0:
+            up = event.delta > 0
+        else:
+            return
+
+        if event.state & 0x0004:    # Control
+            self.zoom(1 if up else -1, event.x)
+        elif event.state & 0x0001 and self.ctk_textbox_scrollbar.winfo_ismapped():    # Shift
+            self.yview_scroll(-1 if up else 1, "units")
+        else:
+            self.pan(-0.1 if up else 0.1)
 
     def mouseDragHandler(self, event):
         """
@@ -599,23 +646,6 @@ class TraceView(customtkinter.CTkCanvas):
             id = id - 1
         return None
     
-    def updateWindowHeight(self, oldTraceHeight, traceHeight):
-
-        delta = traceHeight - oldTraceHeight
-        
-         #traceHeight + 290
-        oldHeight = self.gui.windowSizeY
-        newHeight = oldHeight + delta
-
-        if newHeight <= self.gui.maxScreenSizeY:
-            self.gui.windowSizeY = newHeight
-        else:
-            self.gui.windowSizeY = self.gui.maxScreenSizeY
-
-        #print(f"Height delta: {delta} Old height: {oldHeight} New height: {newHeight} Actual new height: {self.gui.windowSizeY}")
-
-        self.gui.geometry("{}x{}".format(self.gui.windowSizeX, self.gui.windowSizeY))
-
     """
     Drawing functions used on draw(). This way, the trace can be drawn on the canvas or on the 
     PDF for exporting, without changing the drawing logic. 

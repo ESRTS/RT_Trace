@@ -10,7 +10,7 @@ import numpy as np
 import DataExport
 
 """
-Set to true to print events read from the trace buffer.
+Set to true to print events read from the trace buffer (print_events in the config).
 """
 enable_entry_print = True
 
@@ -105,8 +105,7 @@ def parseTraceFiles(gui, numCores):
     #enable_event_print = gui.printEvents_var.get()
 
     taskColorIndex = 0      # Reset the task color index, so we always start with the same task color assignments.
-    thread = Thread(target = parser_thread, args = (gui, numCores))
-    thread.start()
+    HelperFunctions.startWorker(gui, lambda g: parser_thread(g, numCores), gui.loadingFinished)
 
 def parser_thread(gui, numCores):
     """
@@ -118,40 +117,41 @@ def parser_thread(gui, numCores):
     if gui is not None:
         #configName = gui.targets[gui.selectedTarget].get('name').replace(' ', '_')    # Get the configuration name
         configName = "general"
-        config = configparser.ConfigParser()
-        config.read(HelperFunctions.getConfigFilePath())
+        config = HelperFunctions.readConfig()
         tickIds = [int(x) for x in config.get(configName,'tickId').split(",")]
+        global enable_entry_print
+        enable_entry_print = config.getboolean(configName, 'print_events', fallback=True)
     else:
         tickIds = [15, 42]
 
     for c in range(0,numCores):
-        filename = os.path.abspath(os.path.join(HelperFunctions.getViewingFolderName(gui), 'raw_buffer' + str(c)))
+        filename = os.path.abspath(os.path.join(gui.viewingFolder, 'raw_buffer' + str(c)))
 
         bufferPaths.append(Path(filename + ".txt"))
         if not bufferPaths[-1].is_file():
-            print("Error: File " + str(bufferPaths[-1]) + " does not exist!")
+            print("Error: File " + str(bufferPaths[-1]) + " does not exist!", file=sys.stderr)
+            return None
 
     allBuffers = []
     core = 0
     for buffer in bufferPaths:
-        fh = open(buffer, "rb")
-        traceBuffer = bytearray(fh.read())
+        with open(buffer, "rb") as fh:
+            traceBuffer = bytearray(fh.read())
         allBuffers.append(traceBuffer)
         
-        HelperFunctions.printState("Loaded trace buffer: ", info=str(buffer))
-        HelperFunctions.hexdump(traceBuffer, base_addr=int(config.get(configName, "buffer"+str(core), fallback="0x00000000"),16))
+        HelperFunctions.printState("Loaded", info=buffer.name + " (" + str(len(traceBuffer)) + " bytes)")
+        if config.getboolean(configName, 'print_hexdump', fallback=True):
+            HelperFunctions.hexdump(traceBuffer, base_addr=int(config.get(configName, "buffer"+str(core), fallback="0x00000000"),16))
         core = core + 1
 
-    eventFilePath = os.path.abspath(os.path.join(HelperFunctions.getViewingFolderName(gui), 'events.txt'))
+    eventFilePath = os.path.abspath(os.path.join(gui.viewingFolder, 'events.txt'))
     tasks = parser(allBuffers, eventFilePath, tickIds, numCores)    # Parse the content of the trace buffers
 
     # If this was called from the GUI, enable the buttons and update the GUI
     if gui is not None:
         DataExport.exportData(gui, tasks)
-        gui.btn_loadTrace.configure(state="normal")
-        gui.traceView.setTasks(tasks)
-        gui.traceView.draw()
-        gui.update()
+
+    return tasks
 
 def parser(buffers, eventFilePath, tickIds, numCores):
     """
@@ -282,7 +282,7 @@ def extractTraceInfo(events, eventFilePath, tickIds, numCores):
    #->  smParser(traceStart, sortedEvents, tasks, len(tickIds))
 
     eventFile.close()
-    HelperFunctions.printState("Wrote event file to: ", info=eventFilePath)
+    HelperFunctions.printState("Wrote events to", info=eventFilePath)
 
     return tasks
 
@@ -583,38 +583,41 @@ def parseTraceEvents(events, buffers):
     coreId = 0
 
     bufferEvents = []
+    fullBuffers = []
     
     for buffer in buffers:
-        HelperFunctions.printState("Reading events of core " + str(coreId))
         bufferEvents.append([])
 
         parser = EventParser(buffer)
 
         while True:
             evt = parser.read_event(coreId)
-            #print(evt)
             if evt is None:
                 break
-            #events.append(evt)
             bufferEvents[-1].append(evt)
+        HelperFunctions.printState("Core " + str(coreId), info=str(len(bufferEvents[-1])) + " events")
+        if parser.isFull() and len(bufferEvents[-1]) > 0:
+            fullBuffers.append(coreId)
         coreId = coreId + 1
 
-    # Find timestamp last timestamp in any of the buffers
+    # A core whose buffer filled up stops recording, while the other cores go on. Events of the other cores
+    # after that point lack their counterparts (for example, the tick on core 0 makes the tasks of core 1 ready),
+    # so the trace is cut where the first full buffer ends.
+    endTs = None
+    if len(fullBuffers) > 0:
+        endCore = min(fullBuffers, key=lambda c: bufferEvents[c][-1].get('ts'))
+        endTs = bufferEvents[endCore][-1].get('ts')
 
-    # Commented out since core 0 has no events if there is no task and time slizing is off.
-    # minTs = -1
-    # for evts in bufferEvents:
-    #     if len(evts) > 0 :
-    #         if minTs == -1:
-    #             minTs = evts[-1].get('ts')
-    #         elif minTs > evts[-1].get('ts'):
-    #             minTs = evts[-1].get('ts')
-
-    # From each buffer, add all events to 'events' that appear up to t=minTs
+    dropped = 0
     for evts in bufferEvents:
         for evt in evts:
-#            if evt.get('ts') <= minTs:
-            events.append(evt)
+            if endTs is None or evt.get('ts') <= endTs:
+                events.append(evt)
+            else:
+                dropped = dropped + 1
+
+    if dropped > 0:
+        HelperFunctions.printState("Trace cut", info="at " + "%.1f" % (endTs / 1000) + " ms, where the recording of core " + str(endCore) + " ends. " + str(dropped) + " later events of the other cores are ignored")
 
 class EventParser:
     """
@@ -630,6 +633,13 @@ class EventParser:
         self.buffer = file = io.BytesIO(inBuffer)
         self.time = 0
         self.bytesRead = 0   
+
+    def isFull(self):
+        """
+        True if the events reach the end of the buffer, so the target ran out of buffer space.
+        The largest event (task create with its name) is shorter than 40 bytes.
+        """
+        return self.maxBytes - self.bytesRead < 40
 
     def printBuffer(self):
         """

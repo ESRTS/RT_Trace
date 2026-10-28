@@ -6,14 +6,12 @@ import configparser
 import os
 
 def loadLinuxraceBuffers(gui):
-    thread = Thread(target = recorderThread, args = (gui,))
-    thread.start()
+    HelperFunctions.startWorker(gui, recorderThread, gui.recordingFinished)
 
 def recorderThread(gui):
     configName = "RPI_Linux"
     # Read the configuration from the ini-file
-    config = configparser.ConfigParser()
-    config.read(HelperFunctions.getConfigFilePath())
+    config = HelperFunctions.readConfig()
     remoteHost = config.get(configName,'target', fallback = None)
     targetApplicationPath = config.get(configName,'target_path', fallback = None)
     remoteBasePath = config.get(configName,'recorderBase_path', fallback = None)
@@ -22,24 +20,24 @@ def recorderThread(gui):
     
     configError = False
 
-    if remoteHost is None:
-        print("[ERROR] 'target' for configuration 'RPI_Linux' not set in config.ini!")
+    if not remoteHost:
+        print("[ERROR] 'target' for configuration 'RPI_Linux' not set in config.ini or config.local.ini!")
         configError = True
 
-    if targetApplicationPath is None:
-        print("[ERROR] 'target_path' for configuration 'RPI_Linux' not set in config.ini!")
+    if not targetApplicationPath:
+        print("[ERROR] 'target_path' for configuration 'RPI_Linux' not set in config.ini or config.local.ini!")
         configError = True
 
-    if remoteBasePath is None:
-        print("[ERROR] 'recorderBase_path' for configuration 'RPI_Linux' not set in config.ini!")
+    if not remoteBasePath:
+        print("[ERROR] 'recorderBase_path' for configuration 'RPI_Linux' not set in config.ini or config.local.ini!")
         configError = True
 
-    if scriptName is None:
-        print("[ERROR] 'recorder_filename' for configuration 'RPI_Linux' not set in config.ini!")
+    if not scriptName:
+        print("[ERROR] 'recorder_filename' for configuration 'RPI_Linux' not set in config.ini or config.local.ini!")
         configError = True
 
-    if traceName is None:
-        print("[ERROR] 'trace_filename' for configuration 'RPI_Linux' not set in config.ini!")
+    if not traceName:
+        print("[ERROR] 'trace_filename' for configuration 'RPI_Linux' not set in config.ini or config.local.ini!")
         configError = True
 
     if configError is False:
@@ -77,7 +75,7 @@ def recorderThread(gui):
 
             if proc.returncode == 0:
 
-                targetPath = HelperFunctions.getRecordingFolderName(gui)
+                targetPath = gui.recordingFolder
                 #cwd = HelperFunctions.getCwd()
                 #targetPath = os.path.abspath(os.path.join(os.path.dirname( cwd ), 'data', gui.targets[gui.selectedTarget].get('name').replace(' ', '_')))
 
@@ -99,11 +97,3 @@ def recorderThread(gui):
         else:
             print(str(remoteScript) + " does not exists on " + remoteHost)
             print("Make sure https://github.com/matthiasthomasbecker/bpfTrace exists on the target platform!")
-
-
-    # Enable the buttons and update the GUI
-    if gui is not None:
-        gui.btn_recordTrace.configure(state="normal")
-        # Update trace view option menu
-        gui.updateTraceViewOptions()
-        gui.update()
