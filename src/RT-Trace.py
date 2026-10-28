@@ -60,9 +60,8 @@ class TraceApp(customtkinter.CTk):
         self.after(50, self.processUiQueue)
 
         ''' Set the default size of the GUI window and give it a name. '''
-        self.windowSizeY = 600
+        self.windowSizeY = min(int(self.winfo_screenheight() * 0.8), 1000)     # The trace view fits its rows into this height
         self.windowSizeX = min(self.winfo_screenwidth(), 1920)   # On Linux/X11 the screen width covers all monitors
-        self.maxScreenSizeY = self.winfo_screenheight()
 
         self.geometry("{}x{}".format(self.windowSizeX, self.windowSizeY))
         self.minsize(800, 400)
@@ -196,6 +195,8 @@ class TraceApp(customtkinter.CTk):
         self.traceView.bind("<B1-Motion>", self.traceView.mouseDragHandler)
         self.traceView.bind("<ButtonPress>", self.traceView.buttonPressed)
         self.traceView.bind("<ButtonRelease>", self.traceView.buttonReleased)
+        for event in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.traceView.bind(event, self.traceView.mouseWheelHandler)
 
         ''' Bind the function to handle window resize events. '''
         self.traceView.bind("<Configure>", self.resize_window_function)
