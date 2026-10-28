@@ -6,6 +6,11 @@
 [general]
 # Absolute path, or relative to the RT_Trace folder
 #project_path = /path/to/your/projects
+# Size of the user interface, auto follows the desktop scaling
+#ui_scale = 1.5
+# Print the raw buffer hexdump and every event when loading a trace
+#print_hexdump = False
+#print_events = False
 
 [RPI_Linux]
 # user@targetAddress of the Raspberry Pi running the traced application
