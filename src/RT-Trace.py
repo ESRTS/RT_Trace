@@ -192,6 +192,7 @@ class TraceApp(customtkinter.CTk):
 
         ''' Print the requirement string for the initially selected target. '''
         print(self.targets[self.selectedTarget].get('requirement_str'))
+        self.refreshProgramList()
 
         # If there is no existing trace to load, disable the buttons
         if len(existingTraces) > 0:
@@ -352,8 +353,31 @@ class TraceApp(customtkinter.CTk):
         self.viewingFolder = HelperFunctions.getViewingFolderName(self)       # Read the GUI state here, the parser runs in a background thread
         self.targets[self.selectedTarget].get('loadTraceFunc')(self, self.targets[self.selectedTarget].get('numCores'))   # Call the target specific function to load the trace buffers
 
+    def refreshProgramList(self):
+        """
+        Reloads the projects for the program selection and prints a hint if there are none.
+        """
+        programs = HelperFunctions.getPossiblePrograms()
+        if len(programs) == 0:
+            self.opt_selectProg.configure(values=["No projects found"])
+            self.opt_selectProg.set("No projects found")
+            self.btn_recordTrace.configure(state="disabled")
+            HelperFunctions.printState("No projects found", info="in " + str(HelperFunctions.getProjectPath()))
+            print("Create one with 'newembproj.py <name> -trace RTT' (or SRAM, PSRAM) and build it, then select the platform again.")
+            print("To use projects from another folder, set project_path in Resources/config.local.ini.")
+        elif self.selectedProgram in programs:
+            self.opt_selectProg.configure(values=programs)
+            self.opt_selectProg.set(self.selectedProgram)
+        else:
+            self.opt_selectProg.configure(values=["Select a program..."] + programs)
+            self.opt_selectProg.set("Select a program...")
+
     def selectProgramSource(self, selectedFolder: str):
         
+        # Ignore the placeholder entries
+        if selectedFolder not in HelperFunctions.getPossiblePrograms():
+            return
+
         # Remove the initial selection from the menu
         if "Select a program..." in self.opt_selectProg.cget("values"):
             self.opt_selectProg.configure(values=HelperFunctions.getPossiblePrograms())
@@ -402,6 +426,7 @@ class TraceApp(customtkinter.CTk):
         if self.targets[self.selectedTarget].get('implemented') is True:    # Make sure only to load from supported targets
             print(self.targets[self.selectedTarget].get('requirement_str'))
             self.enableAllButtons()
+            self.refreshProgramList()   # Picks up projects created since the start
         else:
             HelperFunctions.printState("Target not yet supported", info = self.targets[self.selectedTarget].get('name'))
             self.disableAllButtons()
