@@ -16,6 +16,7 @@ from datetime import datetime
 import HelperFunctions
 import configparser
 import queue
+import signal
 class TraceApp(customtkinter.CTk):
     """
     Main class of the RT-Trace app. 
@@ -498,7 +499,27 @@ def main():
     customtkinter.set_default_color_theme("blue")   # Themes: blue (default), dark-blue, green
 
     app = TraceApp()                                # Create the app instance
-    app.mainloop()                                  # Start the main loop of the GUI
+
+    def stop(signum, frame):
+        """
+        Closes the GUI on Ctrl+C (SIGINT) or SIGTERM from the terminal. Python runs this between
+        Tk events, which happen at least every 50 ms because of processUiQueue().
+        """
+        print("\nStopping RT-Trace...", file=sys.__stdout__, flush=True)
+        app.quit()
+
+    signal.signal(signal.SIGINT, stop)
+    signal.signal(signal.SIGTERM, stop)
+
+    try:
+        app.mainloop()                              # Start the main loop of the GUI
+    except KeyboardInterrupt:                       # Ctrl+C before the handler above was installed
+        pass
+    finally:
+        try:
+            app.destroy()
+        except tk.TclError:                         # Window already closed
+            pass
 
 if __name__ == "__main__":
 
