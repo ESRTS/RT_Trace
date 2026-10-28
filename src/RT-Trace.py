@@ -147,6 +147,21 @@ class TraceApp(customtkinter.CTk):
         sys.stdout = TextRedirector(self.textbox, "stdout")
         sys.stderr = TextRedirector(self.textbox, "stderr")
 
+        ''' Make the output copyable. The textbox is read-only, and read-only text widgets do not take the
+        keyboard focus on a click, so Ctrl+C / Cmd+C did nothing. Focus it on click and add a right-click menu. '''
+        self.textbox.bind("<Button-1>", lambda event: self.textbox.focus_set())
+        self.outputMenu = tk.Menu(self, tearoff=0)
+        self.outputMenu.add_command(label="Copy", command=self.copySelectedOutput)
+        self.outputMenu.add_command(label="Copy All", command=self.copyAllOutput)
+        self.outputMenu.add_separator()
+        self.outputMenu.add_command(label="Clear", command=self.clearOutput)
+        if self.tk.call("tk", "windowingsystem") == "aqua":    # macOS: the right mouse button is Button-2, also allow Control-click
+            rightClickEvents = ["<Button-2>", "<Control-Button-1>"]
+        else:
+            rightClickEvents = ["<Button-3>"]
+        for event in rightClickEvents:
+            self.textbox.bind(event, self.showOutputMenu)
+
         ''' Execution Trace Widget. '''
         self.traceView = TraceView(self)
         self.traceView.grid(row=0, column=1, rowspan=8, columnspan=1, sticky="nswe", padx=5, pady=5)
@@ -213,6 +228,41 @@ class TraceApp(customtkinter.CTk):
         if tasks is not None:
             self.traceView.setTasks(tasks)
             self.traceView.draw()
+
+    def showOutputMenu(self, event):
+        """
+        Opens the copy menu of the output textbox at the mouse position.
+        """
+        try:
+            self.outputMenu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.outputMenu.grab_release()
+
+    def copySelectedOutput(self):
+        """
+        Copies the selected text of the output textbox to the clipboard.
+        """
+        try:
+            text = self.textbox.get("sel.first", "sel.last")
+        except tk.TclError:     # Nothing selected
+            return
+        self.clipboard_clear()
+        self.clipboard_append(text)
+
+    def copyAllOutput(self):
+        """
+        Copies the whole content of the output textbox to the clipboard.
+        """
+        self.clipboard_clear()
+        self.clipboard_append(self.textbox.get("1.0", "end-1c"))
+
+    def clearOutput(self):
+        """
+        Removes all text from the output textbox.
+        """
+        self.textbox.configure(state="normal")
+        self.textbox.delete("1.0", "end")
+        self.textbox.configure(state="disabled")
 
     def printEventsSwitch_event(self):
         pass
