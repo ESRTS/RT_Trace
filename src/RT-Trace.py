@@ -376,7 +376,7 @@ class TraceApp(customtkinter.CTk):
         Callback that is called if a new target is selected from the option menu.
         """
         for target in self.targets:
-            if target.get('name') is traceSource:
+            if target.get('name') == traceSource:
                 self.selectedTarget = self.targets.index(target)
 
         # Reset the textbox if a different target is selected

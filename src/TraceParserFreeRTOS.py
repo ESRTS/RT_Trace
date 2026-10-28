@@ -127,13 +127,14 @@ def parser_thread(gui, numCores):
 
         bufferPaths.append(Path(filename + ".txt"))
         if not bufferPaths[-1].is_file():
-            print("Error: File " + str(bufferPaths[-1]) + " does not exist!")
+            print("Error: File " + str(bufferPaths[-1]) + " does not exist!", file=sys.stderr)
+            return None
 
     allBuffers = []
     core = 0
     for buffer in bufferPaths:
-        fh = open(buffer, "rb")
-        traceBuffer = bytearray(fh.read())
+        with open(buffer, "rb") as fh:
+            traceBuffer = bytearray(fh.read())
         allBuffers.append(traceBuffer)
         
         HelperFunctions.printState("Loaded trace buffer: ", info=str(buffer))

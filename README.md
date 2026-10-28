@@ -9,7 +9,7 @@ All measurements are stored in a ```data``` folder. Each supported platform has 
 * <b>Save</b> the trace as PDF. The current view of the trace is exported to a PDF. This requires ```ps2pdf``` to be in the path.
 
 ## Generate Application
-Use pyinstaller to generate the packaged application. To generate the application for Windows this must be executed on under Windows.
+Use pyinstaller to generate the packaged application. Install the build requirements first with `pip install -r requirements-build.txt`. To generate the application for Windows this must be executed on under Windows.
 Executables for Linux and OSX can be created on OSX directly.
 
 ```$ ./createGui.sh ```
