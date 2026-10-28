@@ -30,6 +30,12 @@ def getLastActivity(tasks):
     return maxActivity
 
 
+def msString(time_us):
+    """
+    Formats a time in us as ms, or "-" if there is none (no job of the task finished in the trace).
+    """
+    return "-" if time_us is None else f"{time_us / 1000:.3f}"
+
 def createDataFile(taskDataFile, task):
     """
     Export the data of all task jobs to a CSV-file.
@@ -71,9 +77,9 @@ def exportData(gui, tasks):
     print(f"\n  {'Task':<{maxName}}  {'Response':>10}  {'Execution':>10}  {'Utilization':>11}")
     print("  " + "-" * (maxName + 37))
     for task in tasks:
-        rt = task.getMaxResponseTime() / 1000
-        wcet = task.getMaxExecutionTime() / 1000
+        rt = msString(task.getMaxResponseTime())
+        wcet = msString(task.getMaxExecutionTime())
         util = task.getUtilization(lastActivity) * 100
-        print(f"  {task.name:<{maxName}}  {rt:>10.3f}  {wcet:>10.3f}  {util:>10.2f}%")
+        print(f"  {task.name:<{maxName}}  {rt:>10}  {wcet:>10}  {util:>10.2f}%")
 
 

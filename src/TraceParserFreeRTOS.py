@@ -583,6 +583,7 @@ def parseTraceEvents(events, buffers):
     coreId = 0
 
     bufferEvents = []
+    fullBuffers = []
     
     for buffer in buffers:
         bufferEvents.append([])
@@ -591,30 +592,32 @@ def parseTraceEvents(events, buffers):
 
         while True:
             evt = parser.read_event(coreId)
-            #print(evt)
             if evt is None:
                 break
-            #events.append(evt)
             bufferEvents[-1].append(evt)
         HelperFunctions.printState("Core " + str(coreId), info=str(len(bufferEvents[-1])) + " events")
+        if parser.isFull() and len(bufferEvents[-1]) > 0:
+            fullBuffers.append(coreId)
         coreId = coreId + 1
 
-    # Find timestamp last timestamp in any of the buffers
+    # A core whose buffer filled up stops recording, while the other cores go on. Events of the other cores
+    # after that point lack their counterparts (for example, the tick on core 0 makes the tasks of core 1 ready),
+    # so the trace is cut where the first full buffer ends.
+    endTs = None
+    if len(fullBuffers) > 0:
+        endCore = min(fullBuffers, key=lambda c: bufferEvents[c][-1].get('ts'))
+        endTs = bufferEvents[endCore][-1].get('ts')
 
-    # Commented out since core 0 has no events if there is no task and time slizing is off.
-    # minTs = -1
-    # for evts in bufferEvents:
-    #     if len(evts) > 0 :
-    #         if minTs == -1:
-    #             minTs = evts[-1].get('ts')
-    #         elif minTs > evts[-1].get('ts'):
-    #             minTs = evts[-1].get('ts')
-
-    # From each buffer, add all events to 'events' that appear up to t=minTs
+    dropped = 0
     for evts in bufferEvents:
         for evt in evts:
-#            if evt.get('ts') <= minTs:
-            events.append(evt)
+            if endTs is None or evt.get('ts') <= endTs:
+                events.append(evt)
+            else:
+                dropped = dropped + 1
+
+    if dropped > 0:
+        HelperFunctions.printState("Trace cut", info="at " + "%.1f" % (endTs / 1000) + " ms, where the recording of core " + str(endCore) + " ends. " + str(dropped) + " later events of the other cores are ignored")
 
 class EventParser:
     """
@@ -630,6 +633,13 @@ class EventParser:
         self.buffer = file = io.BytesIO(inBuffer)
         self.time = 0
         self.bytesRead = 0   
+
+    def isFull(self):
+        """
+        True if the events reach the end of the buffer, so the target ran out of buffer space.
+        The largest event (task create with its name) is shorter than 40 bytes.
+        """
+        return self.maxBytes - self.bytesRead < 40
 
     def printBuffer(self):
         """
