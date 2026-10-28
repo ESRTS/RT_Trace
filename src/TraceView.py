@@ -146,7 +146,7 @@ class TraceView(customtkinter.CTkCanvas):
         if self.tasks is None:
             #self.canvasItems.append(self.create_text(200, 100, anchor=customtkinter.N, text="No Trace Loaded...."))
             #self.draw_rectangle(0, 0, self.sizeX_px-20, self.traceHeight)
-            self.draw_text(200, 100, anchor=customtkinter.N, text="No Trace Loaded....")
+            self.draw_text(200, 100, anchor=customtkinter.NW, text="No trace loaded.\n\nChoose a platform and a program, then press Record Trace.\nOr pick an earlier recording under View Trace and press Load Trace.")
         else: 
             self.traceHeight = len(self.tasks) * self.taskTimelineHeight_px + self.borderY_px
             

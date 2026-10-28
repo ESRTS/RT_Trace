@@ -75,7 +75,7 @@ class TraceApp(customtkinter.CTk):
         self.sidebar_frame.grid_rowconfigure(11, weight=1)
 
         ''' Label for the platform selection. '''
-        self.lbl_selectPlatform = customtkinter.CTkLabel(self.sidebar_frame, text="Platform Selection:", font=customtkinter.CTkFont(size=15, weight="bold"))
+        self.lbl_selectPlatform = customtkinter.CTkLabel(self.sidebar_frame, text="Platform", font=customtkinter.CTkFont(size=15, weight="bold"))
         self.lbl_selectPlatform.grid(row=0, column=0, padx=(0, 0), pady=(10, 0))
 
         ''' Option to select the trace source. '''
@@ -90,26 +90,26 @@ class TraceApp(customtkinter.CTk):
         
         ''' Label for the trace recorder section. '''
         self.lbl_recording = customtkinter.CTkLabel(self.sidebar_frame, text="Record Trace", font=customtkinter.CTkFont(size=15, weight="bold"), anchor="w")
-        self.lbl_recording.grid(row=2, column=0, padx=(0, 0), pady=(10, 0))
+        self.lbl_recording.grid(row=4, column=0, padx=(0, 0), pady=(10, 0))
 
         ''' Button to start recording a new trace from a target. '''
         self.btn_recordTrace = customtkinter.CTkButton(self.sidebar_frame, text="Record Trace", command=self.button_record_function, corner_radius=default_corner_radius)
-        self.btn_recordTrace.grid(row=3, column=0, padx=20, pady=5, sticky="ew")
+        self.btn_recordTrace.grid(row=6, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Entry to specify the trace name. '''
         recordTraceName = tk.StringVar(value="Record")#self.targets[self.selectedTarget].get('name').replace(' ', '_'))
-        self.txt_traceName = customtkinter.CTkEntry(self.sidebar_frame, textvariable=recordTraceName, corner_radius=default_corner_radius)
-        self.txt_traceName.grid(row=4, column=0, padx=20, pady=5, sticky="ew")
+        self.txt_traceName = customtkinter.CTkEntry(self.sidebar_frame, textvariable=recordTraceName, placeholder_text="Recording name", corner_radius=default_corner_radius)
+        self.txt_traceName.grid(row=5, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Label for the target program section. '''
-        self.lbl_progSelect = customtkinter.CTkLabel(self.sidebar_frame, text="Select Program", font=customtkinter.CTkFont(size=12, weight="bold"), anchor="w")
-        self.lbl_progSelect.grid(row=5, column=0, padx=(0, 0), pady=(5, 0))
+        self.lbl_progSelect = customtkinter.CTkLabel(self.sidebar_frame, text="Program", font=customtkinter.CTkFont(size=15, weight="bold"), anchor="w")
+        self.lbl_progSelect.grid(row=2, column=0, padx=(0, 0), pady=(10, 0))
 
         ''' Option to select the target program. '''
         self.possiblePrograms = ["Select a program..."] + HelperFunctions.getPossiblePrograms()
         self.selectedProgram = self.possiblePrograms[0]
         self.opt_selectProg = customtkinter.CTkOptionMenu(self.sidebar_frame, values=self.possiblePrograms, command=self.selectProgramSource, corner_radius=default_corner_radius)
-        self.opt_selectProg.grid(row=6, column=0, padx=20, pady=(0, 5), sticky="ew")
+        self.opt_selectProg.grid(row=3, column=0, padx=20, pady=(0, 5), sticky="ew")
         self.btn_recordTrace.configure(state="disabled")    # Enable the record button only after a valid program is selected
 
         ''' Label for the trace visualization section. '''
@@ -217,16 +217,21 @@ class TraceApp(customtkinter.CTk):
 
     def recordingFinished(self, result=None):
         """
-        Called in the GUI thread once a trace recording is done.
+        Called in the GUI thread once a trace recording is done. Loads the new recording if there is one.
         """
-        self.btn_recordTrace.configure(state="normal")
+        self.btn_recordTrace.configure(state="normal", text="Record Trace")
         self.updateTraceViewOptions()
+
+        newRecording = os.path.basename(self.recordingFolder)
+        if newRecording in self.selectTrace and any(Path(self.recordingFolder).iterdir()):
+            self.opt_selectTrace.set(newRecording)
+            self.load_function()
 
     def loadingFinished(self, tasks):
         """
         Called in the GUI thread once a trace is parsed.
         """
-        self.btn_loadTrace.configure(state="normal")
+        self.btn_loadTrace.configure(state="normal", text="Load Trace")
         if tasks is not None:
             self.traceView.setTasks(tasks)
             self.traceView.draw()
@@ -338,6 +343,7 @@ class TraceApp(customtkinter.CTk):
             self.btn_recordTrace.configure(state="enabled")
             return
 
+        self.btn_recordTrace.configure(text="Recording...")
         HelperFunctions.printHeader("recording trace")
         self.recordingFolder = HelperFunctions.getRecordingFolderName(self)   # Read the GUI state here, the recorder runs in a background thread
         self.targets[self.selectedTarget].get('recordTraceFunc')(self)   # Call the target specific function to record the trace buffers
@@ -347,7 +353,7 @@ class TraceApp(customtkinter.CTk):
         Callback that is called if the button "Load Trace" is clicked.
         """
         
-        self.btn_loadTrace.configure(state="disabled")
+        self.btn_loadTrace.configure(state="disabled", text="Loading...")
         self.update()
         HelperFunctions.printHeader("Loading trace from files")
         self.viewingFolder = HelperFunctions.getViewingFolderName(self)       # Read the GUI state here, the parser runs in a background thread
