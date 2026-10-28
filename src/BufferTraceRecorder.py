@@ -107,7 +107,7 @@ def record_data(configName, elf, probe, target, frequency, measure_seconds, file
         target = session.board.target
         core = target.cores[0]
 
-        print(f"Programming {elf} ...")
+        print(f"Programming {os.path.basename(elf)} ...")
         FileProgrammer(session).program(elf)
         print("Programming complete.")
 

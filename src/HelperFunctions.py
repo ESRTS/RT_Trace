@@ -74,20 +74,11 @@ def startWorker(gui, worker, onFinished):
 
 def printState(state: str, info=""):
     
-    inner = "\r\n=> " + state.upper() + " " + info
-    print( inner ) 
+    print("=> " + state.upper(), end="")    # Separate writes, so the output box highlights only the state
+    print(" " + info)
 
 def printHeader(header:str):
-    width = 70
-
-    assert len(header) <= width - 4, "Header string too long for the configured width of the text in printHeader()" + header
-
-    # Plain ASCII, box drawing characters are not available in the fonts Tk uses on every platform.
-    inner = "| " + header.upper().ljust(width - 4) + " |"
-    top = "\r\n+" + "-" * (width - 2) + "+"
-    bottom = "+" + "-" * (width - 2) + "+"
-
-    print( "\n".join([top, inner, bottom]) )  
+    print("\n=== " + header.upper() + " ===")
 
 def hexdump(buffer: bytes, base_addr: int = 0, width: int = 16):
         for offset in range(0, len(buffer), width):
@@ -238,25 +229,28 @@ def getTraceMode(traceConfigFilePath):
         return "PSRAM"
     return "SRAM"
 
-def validatePicoTrace(gui, traceMode):
+def validatePicoTrace(gui, traceMode, quiet=False):
     """
     Checks that the selected program is built and that its traceConfig.h matches the trace mode of the platform.
+    Prints one line for the selected program, or nothing if quiet is set and the check passes.
     """
     traceConfigFilePath = getTraceConfigPath(gui)
     elfFilePath = getElfFilePath(gui)
+    programPath = os.path.join(getProjectPath(), gui.selectedProgram)
 
     if not Path(elfFilePath).exists():
-        printState("ERROR ELF not found", info=elfFilePath)
+        printState("ERROR ELF not found", info=os.path.relpath(elfFilePath, programPath) + " in " + programPath + ", build the program first")
         return False
-    printState("ELF", info=elfFilePath)
 
     if not Path(traceConfigFilePath).exists():
         printState("ERROR trace config not found", info=traceConfigFilePath)
         return False
-    printState("Trace Config", info=traceConfigFilePath)
 
     projectMode = getTraceMode(traceConfigFilePath)
     if projectMode != traceMode:
         printState("ERROR wrong platform", info=gui.selectedProgram + " is built for " + projectMode + " tracing, select Pico2 FreeRTOS " + projectMode)
         return False
+
+    if not quiet:
+        printState("Program", info=gui.selectedProgram + " (" + projectMode + " tracing, " + os.path.relpath(elfFilePath, programPath) + ")")
     return True

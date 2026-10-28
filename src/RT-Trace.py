@@ -30,9 +30,9 @@ class TraceApp(customtkinter.CTk):
         'recordTraceFunc' is a target specific function that loads the trace buffer
         """
         self.targets = [
-            {'name': 'Pico2 FreeRTOS RTT', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2RttTraceBuffers, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': lambda gui: HelperFunctions.validatePicoTrace(gui, "RTT")},
-            {'name': 'Pico2 FreeRTOS SRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2BufferTraceRecorder, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': lambda gui: HelperFunctions.validatePicoTrace(gui, "SRAM")},
-            {'name': 'Pico2 FreeRTOS PSRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2BufferTraceRecorder, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': lambda gui: HelperFunctions.validatePicoTrace(gui, "PSRAM")},
+            {'name': 'Pico2 FreeRTOS RTT', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2RttTraceBuffers, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': lambda gui, quiet=False: HelperFunctions.validatePicoTrace(gui, "RTT", quiet)},
+            {'name': 'Pico2 FreeRTOS SRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2BufferTraceRecorder, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': lambda gui, quiet=False: HelperFunctions.validatePicoTrace(gui, "SRAM", quiet)},
+            {'name': 'Pico2 FreeRTOS PSRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2BufferTraceRecorder, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': lambda gui, quiet=False: HelperFunctions.validatePicoTrace(gui, "PSRAM", quiet)},
             #{'name': 'STM FreeRTOS', 'numCores': 1, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : loadSTM32L476TraceBuffers},
             #{'name': 'RPI QNX', 'numCores': 4, 'implemented': False, 'requirement_str' : 'To load the trace buffer, telnet needs to be on the path.', 'recordTraceFunc' : None},
             {'name': 'RPI Linux', 'numCores': 4, 'implemented': True, 'requirement_str' : 'Experimental...', 'recordTraceFunc' : loadLinuxraceBuffers, 'loadTraceFunc': linuxParseTraceFiles, 'pathValidationFunc': None}
@@ -144,6 +144,13 @@ class TraceApp(customtkinter.CTk):
         ''' Redirect stdout and stderr to the textbox. '''
         self.textbox.tag_config('stderr', foreground="red")
         self.textbox.tag_config('stdout', foreground="black")
+        boldFont = tkinter.font.Font(font=self.textbox._textbox.cget("font"))   # Same family and size as the output, in bold
+        boldFont.configure(weight="bold")
+        self.outputBoldFont = boldFont                  # Keep a reference, Tk drops fonts that are garbage collected
+        self.textbox._textbox.tag_config('header', foreground="#1f538d", font=boldFont)   # CTkTextbox forbids the font option, set it on the Tk widget
+        self.textbox._textbox.tag_config('state', foreground="#1f538d", font=boldFont)
+        self.textbox._textbox.tag_config('error', foreground="red", font=boldFont)
+        self.textbox._textbox.configure(spacing1=2, spacing3=2)    # A little space between lines
 
         sys.stdout = TextRedirector(self.textbox, "stdout")
         sys.stderr = TextRedirector(self.textbox, "stderr")
@@ -339,7 +346,7 @@ class TraceApp(customtkinter.CTk):
 
         # Check again here, the platform may have changed since the program was selected
         validate = self.targets[self.selectedTarget].get('pathValidationFunc')
-        if validate is not None and validate(self) is not True:
+        if validate is not None and validate(self, quiet=True) is not True:
             self.btn_recordTrace.configure(state="enabled")
             return
 
@@ -391,14 +398,13 @@ class TraceApp(customtkinter.CTk):
         # Remember which program is selected
         self.selectedProgram = selectedFolder
 
-        HelperFunctions.printState("Select Program", info=selectedFolder)
-        
-        if self.targets[self.selectedTarget].get('pathValidationFunc') is not None:
+        if self.targets[self.selectedTarget].get('pathValidationFunc') is not None:     # Prints the program and its trace mode
             if self.targets[self.selectedTarget].get('pathValidationFunc')(self) is True:
                 self.btn_recordTrace.configure(state="enable")
             else:
                 self.btn_recordTrace.configure(state="disabled")
         else:
+            HelperFunctions.printState("Program", info=selectedFolder)
             self.btn_recordTrace.configure(state="enable")
 
         # Validate if the selected program is ok
@@ -507,6 +513,19 @@ class TextRedirector(object):
         if string:
             self.queue.put(string)
 
+    def styleFor(self, text):
+        """
+        Returns the text tag for a chunk of output: errors in red, state lines and headers highlighted.
+        """
+        line = text.lstrip()
+        if self.tag == "stderr" or line.startswith("=> ERROR"):
+            return "error"
+        if line.startswith("=>"):
+            return "state"
+        if line.startswith("=== ") and line.rstrip().endswith(" ==="):
+            return "header"
+        return self.tag
+
     def flush(self):    # Needed to have the interface of a file-like object
         pass   
     
@@ -515,7 +534,8 @@ class TextRedirector(object):
             self.widget.configure(state="normal")
 
             while not self.queue.empty():
-                self.widget.insert("end", self.queue.get_nowait(), (self.tag,))
+                text = self.queue.get_nowait()
+                self.widget.insert("end", text, (self.styleFor(text),))
 
             self.widget.configure(state="disabled")
             self.widget.see("end")

@@ -10,7 +10,7 @@ import numpy as np
 import DataExport
 
 """
-Set to true to print events read from the trace buffer.
+Set to true to print events read from the trace buffer (print_events in the config).
 """
 enable_entry_print = True
 
@@ -119,6 +119,8 @@ def parser_thread(gui, numCores):
         configName = "general"
         config = HelperFunctions.readConfig()
         tickIds = [int(x) for x in config.get(configName,'tickId').split(",")]
+        global enable_entry_print
+        enable_entry_print = config.getboolean(configName, 'print_events', fallback=True)
     else:
         tickIds = [15, 42]
 
@@ -137,7 +139,7 @@ def parser_thread(gui, numCores):
             traceBuffer = bytearray(fh.read())
         allBuffers.append(traceBuffer)
         
-        HelperFunctions.printState("Loaded trace buffer: ", info=str(buffer))
+        HelperFunctions.printState("Loaded", info=buffer.name + " (" + str(len(traceBuffer)) + " bytes)")
         if config.getboolean(configName, 'print_hexdump', fallback=True):
             HelperFunctions.hexdump(traceBuffer, base_addr=int(config.get(configName, "buffer"+str(core), fallback="0x00000000"),16))
         core = core + 1
@@ -280,7 +282,7 @@ def extractTraceInfo(events, eventFilePath, tickIds, numCores):
    #->  smParser(traceStart, sortedEvents, tasks, len(tickIds))
 
     eventFile.close()
-    HelperFunctions.printState("Wrote event file to: ", info=eventFilePath)
+    HelperFunctions.printState("Wrote events to", info=eventFilePath)
 
     return tasks
 
@@ -583,7 +585,6 @@ def parseTraceEvents(events, buffers):
     bufferEvents = []
     
     for buffer in buffers:
-        HelperFunctions.printState("Reading events of core " + str(coreId))
         bufferEvents.append([])
 
         parser = EventParser(buffer)
@@ -595,6 +596,7 @@ def parseTraceEvents(events, buffers):
                 break
             #events.append(evt)
             bufferEvents[-1].append(evt)
+        HelperFunctions.printState("Core " + str(coreId), info=str(len(bufferEvents[-1])) + " events")
         coreId = coreId + 1
 
     # Find timestamp last timestamp in any of the buffers
