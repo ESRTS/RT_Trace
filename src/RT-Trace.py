@@ -23,6 +23,9 @@ class TraceApp(customtkinter.CTk):
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.uiScale = HelperFunctions.getUiScale()
+        customtkinter.set_widget_scaling(self.uiScale)
+        HelperFunctions.scaleTkFonts(self, self.uiScale)
 
         """
         Here all available targets are configures. If the flag 'implemented' is False, they are not supported yet.
@@ -137,15 +140,15 @@ class TraceApp(customtkinter.CTk):
         
         ''' Textbox to display stdout. '''
         monospaceFamily = tkinter.font.nametofont("TkFixedFont").actual("family")   # The platform's default monospace font
-        font = customtkinter.CTkFont(family=monospaceFamily, size=14)
+        outputFontSize = 14
+        font = customtkinter.CTkFont(family=monospaceFamily, size=outputFontSize)
         self.textbox = customtkinter.CTkTextbox(self, corner_radius=10, font=font)
         self.textbox.grid(row=9, column=1, rowspan=2, columnspan=1, sticky="nswe", padx=5, pady=5)
         
         ''' Redirect stdout and stderr to the textbox. '''
         self.textbox.tag_config('stderr', foreground="red")
         self.textbox.tag_config('stdout', foreground="black")
-        boldFont = tkinter.font.Font(font=self.textbox._textbox.cget("font"))   # Same family and size as the output, in bold
-        boldFont.configure(weight="bold")
+        boldFont = tkinter.font.Font(family=monospaceFamily, size=-round(outputFontSize * self.uiScale), weight="bold")   # Same pixel size as the scaled output font
         self.outputBoldFont = boldFont                  # Keep a reference, Tk drops fonts that are garbage collected
         self.textbox._textbox.tag_config('header', foreground="#1f538d", font=boldFont)   # CTkTextbox forbids the font option, set it on the Tk widget
         self.textbox._textbox.tag_config('state', foreground="#1f538d", font=boldFont)

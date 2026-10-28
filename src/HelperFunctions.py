@@ -4,6 +4,8 @@ from pathlib import Path
 import platform
 from datetime import datetime
 import configparser
+import subprocess
+import tkinter.font
 from threading import Thread
 
 def getCwd():
@@ -55,6 +57,48 @@ def readConfig():
     config = configparser.ConfigParser()
     config.read([getConfigFilePath(), getLocalConfigFilePath()])
     return config
+
+def getUiScale():
+    """
+    Returns the UI scale: ui_scale from the config, or "auto". With "auto", Linux follows the desktop
+    scaling (Xft.dpi, else GDK_SCALE), customtkinter already does this on macOS and Windows.
+    """
+    value = readConfig().get("general", "ui_scale", fallback="auto").strip().lower()
+    if value != "auto":
+        try:
+            return min(max(float(value), 0.5), 4.0)
+        except ValueError:
+            print("Ignoring invalid ui_scale in the config: " + value, file=sys.stderr)
+
+    if not sys.platform.startswith("linux"):
+        return 1.0
+
+    scale = 1.0
+    try:
+        resources = subprocess.run(["xrdb", "-query"], capture_output=True, text=True, timeout=2).stdout
+        for line in resources.splitlines():
+            if line.startswith("Xft.dpi:"):
+                scale = float(line.split(":", 1)[1]) / 96
+    except (OSError, ValueError, subprocess.TimeoutExpired):     # No xrdb, or no X resources
+        pass
+    if scale == 1.0:
+        try:
+            scale = float(os.environ.get("GDK_SCALE", "1")) * float(os.environ.get("GDK_DPI_SCALE", "1"))
+        except ValueError:
+            pass
+    return min(max(scale, 0.5), 4.0)
+
+def scaleTkFonts(root, scale):
+    """
+    Scales Tk's named fonts, which the trace view and the menus use. customtkinter widgets are scaled separately.
+    Negative sizes are pixels. Positive sizes are points, which Tk already converts with its own DPI.
+    """
+    pointScale = scale * 96 / (72 * float(root.tk.call("tk", "scaling")))
+    for name in ["TkDefaultFont", "TkTextFont", "TkFixedFont", "TkMenuFont", "TkHeadingFont",
+                 "TkCaptionFont", "TkSmallCaptionFont", "TkIconFont", "TkTooltipFont"]:
+        font = tkinter.font.nametofont(name, root=root)
+        size = font.cget("size")
+        font.configure(size=round(size * (scale if size < 0 else pointScale)))
 
 def startWorker(gui, worker, onFinished):
     """
