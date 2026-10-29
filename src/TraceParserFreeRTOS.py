@@ -365,7 +365,8 @@ def parseScheduler(sortedEvents, schedulerTask):
 
 def parseIdleTask(sortedEvents, task):
 
-    coreId = int(task.name[len("IDLE"):])
+    coreSuffix = task.name[len("IDLE"):]
+    coreId = int(coreSuffix) if coreSuffix.isdigit() else 0    # FreeRTOS names the idle task "IDLE" without a core number on a single core
     lastExecTask = None
 
     for evt in sortedEvents:
