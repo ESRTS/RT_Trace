@@ -12,7 +12,7 @@ import DataExport
 """
 Set to true to print events read from the trace buffer (print_events in the config).
 """
-enable_entry_print = True
+enable_entry_print = False
 
 """
 All supported trace event id's.
@@ -120,7 +120,7 @@ def parser_thread(gui, numCores):
         config = HelperFunctions.readConfig()
         tickIds = [int(x) for x in config.get(configName,'tickId').split(",")]
         global enable_entry_print
-        enable_entry_print = config.getboolean(configName, 'print_events', fallback=True)
+        enable_entry_print = config.getboolean(configName, 'print_events', fallback=False)
     else:
         tickIds = [15, 42]
 
@@ -140,7 +140,7 @@ def parser_thread(gui, numCores):
         allBuffers.append(traceBuffer)
         
         HelperFunctions.printState("Loaded", info=buffer.name + " (" + str(len(traceBuffer)) + " bytes)")
-        if config.getboolean(configName, 'print_hexdump', fallback=True):
+        if config.getboolean(configName, 'print_hexdump', fallback=False):
             HelperFunctions.hexdump(traceBuffer, base_addr=int(config.get(configName, "buffer"+str(core), fallback="0x00000000"),16))
         core = core + 1
 
