@@ -11,7 +11,7 @@ class TraceView(customtkinter.CTkCanvas):
     Class to implement a widget that displays the execution trace.
     """
 
-    def __init__(self, master):
+    def __init__(self, master, gui=None):
         super().__init__(master, scrollregion = (0,0,100,500))
 
         """
@@ -25,7 +25,7 @@ class TraceView(customtkinter.CTkCanvas):
         self.scaleFactor = 1                                    # Factor to scale the complete view (not used)
         self.taskTimelineHeight_px = 45                         # Describes the height of one task's timeline (fitted to the view in fitRows())
         self.taskHeight_px = 25                                 # Describes the height of one task
-        self.maxTimelineHeight_px = 45                          # Largest timeline height when the rows are fitted to the view
+        self.maxTimelineHeight_px = 45                          # Timeline height the view is first sized for when a trace is loaded
         self.minTimelineHeight_px = 30                          # Smallest timeline height, below this the view scrolls
         self.releaseArrowWidth_px = 2                           # Stroke width of release arrow
         self.releaseArrowLength_px = 10                         # Length of the release arrow
@@ -51,7 +51,7 @@ class TraceView(customtkinter.CTkCanvas):
         self.coreColors = [(98, 152, 210), (51, 156, 156), (255, 209, 102), (204, 157, 251), (0, 109, 119), (226, 149, 120)]      # Colors to indicate that a task executes on a CPU, used if the trace contains more than one CPU
         self.deadlineMissColor = '#f5697c'                    # Color to use for the job section after a deadline is missed
         self.cores = 1                                          # Number of cores in the trace (will be set automatically)
-        self.gui = master                                       # GUI instance, needed to change the Y-dimension to fit the trace.
+        self.gui = gui if gui is not None else master           # GUI instance, needed to change the Y-dimension to fit the trace.
         self.exportCanvas = None                                # Instance of the canvas to export to PDF. This is only set for one call to draw()
         self.pdf_scale = 1
         self.pdf_height_pt = 0
@@ -62,6 +62,8 @@ class TraceView(customtkinter.CTkCanvas):
         self.ctk_textbox_scrollbar.place(relx=1,rely=0,relheight=1,anchor='ne')
         self.configure(yscrollcommand=self.ctk_textbox_scrollbar.set)
         self.ctk_textbox_scrollbar.configure(height=330)
+
+        self.xScrollbar = customtkinter.CTkScrollbar(master, orientation="horizontal", command=self.xScrollHandler)   # Shows which part of the trace is visible, placed by the GUI
         self.tasks = None
 
         self.canvasItems = []           # Used to store all canvas items that are updated with a new view, so we can delete those easily
@@ -151,7 +153,7 @@ class TraceView(customtkinter.CTkCanvas):
             self.draw_text(200, 100, anchor=customtkinter.NW, text="No trace loaded.\n\nChoose a platform and a program, then press Record Trace.\nOr pick an earlier recording under View Trace and press Load Trace.")
         else: 
             self.fitRows()
-            self.traceHeight = len(self.tasks) * self.taskTimelineHeight_px + self.borderY_px
+            self.traceHeight = len(self.tasks) * self.taskTimelineHeight_px + self.scaledBorderY()
             
             # In case the view was updated, make sure to delete all canvas items first
             self.clearTrace()
@@ -185,6 +187,12 @@ class TraceView(customtkinter.CTkCanvas):
         
         self.configure(scrollregion = (0,0,100,self.traceHeight))
 
+        # Show the visible part of the trace in the horizontal scrollbar
+        if self.tasks is not None and self.zoomMin > 0:
+            self.xScrollbar.set(self.leftBound_tks / self.zoomMin, self.rightBound_tks / self.zoomMin)
+        else:
+            self.xScrollbar.set(0, 1)
+
         # Show the scrollbar only if the rows don't fit into the view
         if self.traceHeight > self.winfo_height():
             if not self.ctk_textbox_scrollbar.winfo_ismapped():
@@ -195,13 +203,13 @@ class TraceView(customtkinter.CTkCanvas):
 
     def fitRows(self):
         """
-        Sets the height of the task timelines so that all tasks fit into the visible height of the view.
+        Sets the height of the task timelines so that the tasks fill the visible height of the view.
         If they don't fit at the smallest height, the view can be scrolled.
         """
         scale = getattr(self.gui, "uiScale", 1)     # Larger rows when the UI is scaled, the task names use a larger font
-        available_px = self.winfo_height() - self.borderY_px
+        available_px = self.winfo_height() - self.scaledBorderY()
         rowHeight = available_px // len(self.tasks)
-        rowHeight = max(round(self.minTimelineHeight_px * scale), min(round(self.maxTimelineHeight_px * scale), rowHeight))
+        rowHeight = max(round(self.minTimelineHeight_px * scale), rowHeight)
         self.taskTimelineHeight_px = rowHeight
         self.taskHeight_px = round(rowHeight * 25 / 45)     # Keep the proportions of the original 45 px rows
 
@@ -491,6 +499,33 @@ class TraceView(customtkinter.CTkCanvas):
             return str(int(tmp)) + " s"
         return None
     
+    def scaledBorderY(self):
+        """
+        Returns the space below the rows, it holds the time labels and grows with the UI scale.
+        """
+        return round(self.borderY_px * getattr(self.gui, "uiScale", 1))
+
+    def fittedHeight(self):
+        """
+        Returns the height the view needs to show all rows at their largest height.
+        """
+        if self.tasks is None:
+            return 0
+        return len(self.tasks) * round(self.maxTimelineHeight_px * getattr(self.gui, "uiScale", 1)) + self.scaledBorderY()
+
+    def xScrollHandler(self, *args):
+        """
+        Moves the view when the horizontal scrollbar is used.
+        """
+        if self.tasks is None or self.zoomMin <= 0:
+            return
+        width = self.rightBound_tks - self.leftBound_tks
+        if args[0] == "moveto":
+            self.setView(float(args[1]) * self.zoomMin, width)
+        elif args[0] == "scroll":
+            step = width if args[2] == "pages" else width / 10
+            self.setView(self.leftBound_tks + int(args[1]) * step, width)
+
     def plotXOffset(self):
         """
         Returns the start pixel of the main plot area.

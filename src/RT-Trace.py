@@ -17,6 +17,7 @@ import HelperFunctions
 import configparser
 import queue
 import signal
+import argparse
 class TraceApp(customtkinter.CTk):
     """
     Main class of the RT-Trace app. 
@@ -67,14 +68,26 @@ class TraceApp(customtkinter.CTk):
         self.minsize(800, 400)
         self.title("RT-Trace")
 
-        self.grid_columnconfigure(0, weight=0)
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure((0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11), weight=1)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        ''' Split the window into the sidebar and the right side. The separator can be dragged. '''
+        paneColor = self._apply_appearance_mode(self.cget("fg_color"))
+        self.hpaned = tk.PanedWindow(self, orient=tk.HORIZONTAL, sashwidth=8, bd=0, opaqueresize=True, sashcursor="sb_h_double_arrow", bg=paneColor)
+        self.hpaned.grid(row=0, column=0, sticky="nswe", padx=5, pady=5)
 
         ''' Create a frame for each main GUI area. '''
-        self.sidebar_frame = customtkinter.CTkFrame(self, width=140, corner_radius=10)
-        self.sidebar_frame.grid(row=0, column=0, rowspan=11, sticky="nsew", padx=5, pady=5)
+        self.sidebar_frame = customtkinter.CTkFrame(self.hpaned, width=140, corner_radius=10)
         self.sidebar_frame.grid_rowconfigure(11, weight=1)
+        self.sidebar_frame.grid_columnconfigure(0, weight=1)    # The widgets follow the sidebar width
+
+        ''' Split the right side into the trace view and the output box. The separator can be dragged. '''
+        self.paned = tk.PanedWindow(self.hpaned, orient=tk.VERTICAL, sashwidth=8, bd=0, opaqueresize=True, sashcursor="sb_v_double_arrow", bg=paneColor)
+        self.hpaned.add(self.sidebar_frame, minsize=200, stretch="never")
+        self.hpaned.add(self.paned, minsize=400, stretch="always")
+        self.trace_frame = customtkinter.CTkFrame(self.paned, fg_color="transparent")
+        self.trace_frame.grid_columnconfigure(0, weight=1)
+        self.trace_frame.grid_rowconfigure(0, weight=1)
 
         ''' Label for the platform selection. '''
         self.lbl_selectPlatform = customtkinter.CTkLabel(self.sidebar_frame, text="Platform", font=customtkinter.CTkFont(size=15, weight="bold"))
@@ -99,8 +112,8 @@ class TraceApp(customtkinter.CTk):
         self.btn_recordTrace.grid(row=6, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Entry to specify the trace name. '''
-        recordTraceName = tk.StringVar(value="Record")#self.targets[self.selectedTarget].get('name').replace(' ', '_'))
-        self.txt_traceName = customtkinter.CTkEntry(self.sidebar_frame, textvariable=recordTraceName, placeholder_text="Recording name", corner_radius=default_corner_radius)
+        self.recordTraceName = tk.StringVar(value="Record")     # Replaced by the program name once a program is selected
+        self.txt_traceName = customtkinter.CTkEntry(self.sidebar_frame, textvariable=self.recordTraceName, placeholder_text="Recording name", corner_radius=default_corner_radius)
         self.txt_traceName.grid(row=5, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Label for the target program section. '''
@@ -110,8 +123,16 @@ class TraceApp(customtkinter.CTk):
         ''' Option to select the target program. '''
         self.possiblePrograms = ["Select a program..."] + HelperFunctions.getPossiblePrograms()
         self.selectedProgram = self.possiblePrograms[0]
-        self.opt_selectProg = customtkinter.CTkOptionMenu(self.sidebar_frame, values=self.possiblePrograms, command=self.selectProgramSource, corner_radius=default_corner_radius)
-        self.opt_selectProg.grid(row=3, column=0, padx=20, pady=(0, 5), sticky="ew")
+        self.prog_frame = customtkinter.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        self.prog_frame.grid(row=3, column=0, padx=20, pady=(0, 5), sticky="ew")
+        self.prog_frame.grid_columnconfigure(0, weight=1)
+        self.opt_selectProg = customtkinter.CTkOptionMenu(self.prog_frame, values=self.possiblePrograms, command=self.selectProgramSource, corner_radius=default_corner_radius)
+        self.opt_selectProg.grid(row=0, column=0, sticky="ew")
+
+        ''' Button to select the folder with the projects. '''
+        self.folderIcon = customtkinter.CTkImage(HelperFunctions.folderIcon(), size=(18, 18))
+        self.btn_projectFolder = customtkinter.CTkButton(self.prog_frame, text="", image=self.folderIcon, width=32, command=self.selectProjectFolder, corner_radius=default_corner_radius)
+        self.btn_projectFolder.grid(row=0, column=1, padx=(5, 0))
         self.btn_recordTrace.configure(state="disabled")    # Enable the record button only after a valid program is selected
 
         ''' Label for the trace visualization section. '''
@@ -141,8 +162,7 @@ class TraceApp(customtkinter.CTk):
         monospaceFamily = tkinter.font.nametofont("TkFixedFont").actual("family")   # The platform's default monospace font
         outputFontSize = 14
         font = customtkinter.CTkFont(family=monospaceFamily, size=outputFontSize)
-        self.textbox = customtkinter.CTkTextbox(self, corner_radius=10, font=font)
-        self.textbox.grid(row=9, column=1, rowspan=2, columnspan=1, sticky="nswe", padx=5, pady=5)
+        self.textbox = customtkinter.CTkTextbox(self.paned, corner_radius=10, font=font)
         
         ''' Redirect stdout and stderr to the textbox. '''
         self.textbox.tag_config('stderr', foreground="red")
@@ -173,8 +193,12 @@ class TraceApp(customtkinter.CTk):
             self.textbox.bind(event, self.showOutputMenu)
 
         ''' Execution Trace Widget. '''
-        self.traceView = TraceView(self)
-        self.traceView.grid(row=0, column=1, rowspan=8, columnspan=1, sticky="nswe", padx=5, pady=5)
+        self.traceView = TraceView(self.trace_frame, gui=self)
+        self.traceView.grid(row=0, column=0, sticky="nswe")
+        self.traceView.xScrollbar.grid(row=1, column=0, sticky="ew")
+        self.paned.add(self.trace_frame, minsize=150, stretch="always")
+        self.paned.add(self.textbox, minsize=80, stretch="always")
+        self.after(100, self.initialPaneSizes)
 
         ''' Print Events Switch '''
        #self.printEvents_var = customtkinter.BooleanVar(value=False)
@@ -245,7 +269,25 @@ class TraceApp(customtkinter.CTk):
         self.btn_loadTrace.configure(state="normal", text="Load Trace")
         if tasks is not None:
             self.traceView.setTasks(tasks)
+            self.fitTracePane()
             self.traceView.draw()
+
+    def initialPaneSizes(self):
+        """
+        Sets the initial separators once the window is shown: the sidebar fits its widgets, the trace view takes 60% of the height.
+        """
+        self.update_idletasks()
+        self.hpaned.sash_place(0, max(200, self.sidebar_frame.winfo_reqwidth()), 0)
+        self.paned.sash_place(0, 0, int(self.paned.winfo_height() * 0.6))
+
+    def fitTracePane(self):
+        """
+        Moves the separator so that the trace view is as high as the loaded trace, at most 70% of the window.
+        The user can drag it afterwards.
+        """
+        height = self.traceView.fittedHeight() + self.traceView.xScrollbar.winfo_reqheight()
+        self.paned.sash_place(0, 0, min(height, int(self.paned.winfo_height() * 0.7)))
+        self.update_idletasks()
 
     def showOutputMenu(self, event):
         """
@@ -381,13 +423,35 @@ class TraceApp(customtkinter.CTk):
             self.btn_recordTrace.configure(state="disabled")
             HelperFunctions.printState("No projects found", info="in " + str(HelperFunctions.getProjectPath()))
             print("Create one with 'newembproj.py <name> -trace RTT' (or SRAM, PSRAM) and build it, then select the platform again.")
-            print("To use projects from another folder, set project_path in Resources/config.local.ini.")
+            print("To use projects from another folder, click the folder button next to the program selection.")
         elif self.selectedProgram in programs:
             self.opt_selectProg.configure(values=programs)
             self.opt_selectProg.set(self.selectedProgram)
         else:
             self.opt_selectProg.configure(values=["Select a program..."] + programs)
             self.opt_selectProg.set("Select a program...")
+
+    def selectProjectFolder(self):
+        """
+        Lets the user pick a project, or a folder with projects, and saves it as project_path in config.local.ini.
+        """
+        folder = HelperFunctions.askProjectFolder(self)
+        if folder is None:
+            return
+
+        folder = os.path.abspath(folder)
+        if HelperFunctions.isProjectFolder(folder):     # A single project, list it together with the projects next to it
+            HelperFunctions.setProjectPath(os.path.dirname(folder))
+            self.refreshProgramList()
+            self.opt_selectProg.set(os.path.basename(folder))
+            self.selectProgramSource(os.path.basename(folder))
+        else:                                           # A folder with projects
+            HelperFunctions.setProjectPath(folder)
+            self.selectedProgram = None
+            self.btn_recordTrace.configure(state="disabled")
+            self.refreshProgramList()
+            if len(HelperFunctions.getPossiblePrograms()) > 0:
+                HelperFunctions.printState("Project folder", info=folder)
 
     def selectProgramSource(self, selectedFolder: str):
         
@@ -398,6 +462,10 @@ class TraceApp(customtkinter.CTk):
         # Remove the initial selection from the menu
         if "Select a program..." in self.opt_selectProg.cget("values"):
             self.opt_selectProg.configure(values=HelperFunctions.getPossiblePrograms())
+
+        # Name the recording after the program, unless the user typed another name
+        if self.recordTraceName.get() in ("Record", self.selectedProgram):
+            self.recordTraceName.set(selectedFolder)
 
         # Remember which program is selected
         self.selectedProgram = selectedFolder
@@ -550,10 +618,29 @@ def main():
     """
     Main Function of the program.
     """
+    parser = argparse.ArgumentParser(description="RT-Trace: record and view execution traces.")
+    parser.add_argument("--project-path", help="A project, or a folder with projects, to use instead of project_path for this run.")
+    args, _ = parser.parse_known_args()     # Ignore options added by the OS, such as -psn_ on macOS
+
+    selectProgram = None
+    if args.project_path is not None:
+        callerCwd = os.environ.get("RT_TRACE_CALLER_CWD", os.getcwd())     # rt-trace.py starts RT-Trace in the RT_Trace folder
+        projectPath = os.path.abspath(os.path.join(callerCwd, os.path.expanduser(args.project_path)))
+        if not os.path.isdir(projectPath):
+            parser.error("project path not found: " + projectPath)
+        if HelperFunctions.isProjectFolder(projectPath):    # A single project, list it together with the projects next to it
+            selectProgram = os.path.basename(projectPath)
+            projectPath = os.path.dirname(projectPath)
+        HelperFunctions.projectPathOverride = projectPath
+
     customtkinter.set_appearance_mode("light")      # Modes: system (default), light, dark
     customtkinter.set_default_color_theme("blue")   # Themes: blue (default), dark-blue, green
 
     app = TraceApp()                                # Create the app instance
+    if selectProgram is not None:
+        app.refreshProgramList()
+        app.opt_selectProg.set(selectProgram)
+        app.selectProgramSource(selectProgram)
 
     def stop(signum, frame):
         """

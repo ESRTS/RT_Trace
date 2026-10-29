@@ -204,6 +204,8 @@ def makeFolder(pathstring: str):
 def get_subfolders(path):
     return [p.name for p in Path(path).iterdir() if p.is_dir()]
 
+projectPathOverride = None     # Set by the --project-path option, used instead of project_path for this run
+
 def getProjectPath():
     """
     Get the folder that contains the programs that can be traced (project_path in the config).
@@ -211,6 +213,8 @@ def getProjectPath():
     is started. Earlier versions resolved it against the current working directory, which is still
     used if the path only exists there.
     """
+    if projectPathOverride is not None:
+        return projectPathOverride
     projectPath = os.path.expanduser(readConfig().get('general','project_path'))
     rtTraceFolder = os.path.dirname(os.path.dirname(getConfigFilePath()))   # <RT_Trace>/Resources/config.ini
     resolved = os.path.abspath(os.path.join(rtTraceFolder, projectPath))
@@ -221,14 +225,78 @@ def getProjectPath():
 def getPossiblePrograms():
     """ 
     The function searches all projects found in the project folder. 
-    The assumption is that each folder is a project. 
+    Each folder with a CMakeLists.txt is a project.
     """
     programPath = getProjectPath()
 
     if not Path(programPath).exists():
         return []
     
-    return get_subfolders(programPath)
+    return sorted(f for f in get_subfolders(programPath) if isProjectFolder(os.path.join(programPath, f)))
+
+def isProjectFolder(path):
+    """ A folder with a CMakeLists.txt is a project. """
+    return os.path.isfile(os.path.join(path, "CMakeLists.txt"))
+
+def askProjectFolder(parent):
+    """
+    Opens the native folder picker and returns the selected folder, or None if it was cancelled.
+    On Linux, Tk only has its own dialog, so the desktop's picker is used through zenity or kdialog if one is installed.
+    """
+    initialDir = getProjectPath() if os.path.isdir(getProjectPath()) else os.path.expanduser("~")
+    title = "Select a project, or a folder with projects"
+    if platform.system() == "Linux":
+        for cmd in (["zenity", "--file-selection", "--directory", "--title=" + title, "--filename=" + os.path.join(initialDir, "")],
+                    ["kdialog", "--getexistingdirectory", initialDir, "--title", title]):
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True)
+            except FileNotFoundError:
+                continue                                    # Picker not installed, try the next one
+            folder = result.stdout.strip()
+            return folder if result.returncode == 0 and folder else None
+    from tkinter import filedialog
+    folder = filedialog.askdirectory(parent=parent, initialdir=initialDir, title=title, mustexist=True)
+    return folder if folder else None
+
+def folderIcon(color="#FFFFFF"):
+    """
+    Returns a folder icon for the project folder button, drawn so that no image file is needed.
+    """
+    from PIL import Image, ImageDraw
+    image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((4, 10, 28, 24), radius=4, fill=color)     # Tab
+    draw.rounded_rectangle((4, 16, 60, 54), radius=6, fill=color)     # Body
+    return image
+
+def setProjectPath(projectPath):
+    """
+    Saves project_path in config.local.ini. Other lines of the file, including comments, are kept.
+    """
+    global projectPathOverride
+    projectPathOverride = None      # A folder picked in the GUI replaces the --project-path option
+    localConfig = getLocalConfigFilePath()
+    lines = Path(localConfig).read_text().splitlines() if Path(localConfig).exists() else []
+    entry = "project_path = " + projectPath
+
+    section = None
+    general = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section = stripped[1:-1].strip()
+            if section == "general" and general is None:
+                general = i
+        elif section == "general" and stripped.split("=")[0].strip() == "project_path":
+            lines[i] = entry
+            break
+    else:
+        if general is None:
+            lines += ([""] if lines else []) + ["[general]", entry]
+        else:
+            lines.insert(general + 1, entry)
+
+    Path(localConfig).write_text("\n".join(lines) + "\n")
 
 def validateProgramFolder(gui, selectedFolder) -> bool:
 

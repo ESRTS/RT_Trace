@@ -131,6 +131,10 @@ The file ```traceConfig.h``` should have the following content and is adjusted b
 
 RT-Trace reads its settings from `Resources/config.ini`. If `Resources/config.local.ini` exists, its values override the ones in `config.ini`. It is not tracked by git, so machine-specific settings belong there. Copy `config.local.ini.example` to start, and only add the keys you want to change.
 
+The folder button next to the program selection opens a folder picker. Pick a single project or a folder with projects, and RT-Trace saves it as `project_path` in `config.local.ini`. Every subfolder with a `CMakeLists.txt` is listed as a project.
+
+To use a folder for one run only, without changing the config, start RT-Trace with `--project-path <folder>`. The folder can again be a single project or a folder with projects.
+
 The `[general]` section holds the settings for all targets:
 
 ```
@@ -147,8 +151,8 @@ measure_seconds = 2
 tickId = 15,16,42,45,41
 irqName = SysTick,Tick,Bell,Timer,FIFO
 # Print a hexdump of each raw trace buffer and every event when loading a trace
-print_hexdump = True
-print_events = True
+print_hexdump = False
+print_events = False
 ```
 
 Each target has a dedicated section in the configuration file. For example, the RP2350 target with the trace buffers in SRAM is configured as follows. The addresses and the size must match `TRACE_BUFFER_SIZE` in `target/trace.h`.
