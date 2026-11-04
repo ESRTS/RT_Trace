@@ -416,6 +416,7 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
     """
     
     finishJob = False           # Flag to indicate that the job is about to finish.
+    finishJobOnEventGroup = False   # The finish flag comes from an event group wait/sync, which is traced on entry, before the task blocks.
     deadlineMiss = False        # Flag to indicate that a deadline was missed.
     startExecCore = None        # Task started to execute on this core.
     lastExecTask = None         # Keep track of the last task started on the core.
@@ -464,6 +465,14 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
                     if task.currentJob.activeInterval is not None:
                         task.stopExec(ts)
                     startExecCore = None
+                    if finishJob and finishJobOnEventGroup:
+                        # The task may be preempted (or not block at all) after the wait/sync. The job only ends
+                        # if the task becomes ready again before it executes next.
+                        for followingEvent in sortedEvents[i + 1:]:
+                            if followingEvent.get('taskId') == task.id and followingEvent.get('type') in (TRACE_TASK_START_READY, TRACE_TASK_START_EXEC):
+                                finishJob = followingEvent.get('type') == TRACE_TASK_START_READY
+                                break
+                        finishJobOnEventGroup = False
                     if finishJob == True:
                         finishJob = False
                         #print(f"Finish job at {ts}")
@@ -485,6 +494,7 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
         if type == TRACE_EVT_GROUP_SYNC or type == TRACE_EVT_GROUP_WAIT:
             if task.id == taskId:
                 finishJob = True
+                finishJobOnEventGroup = True
 
         elif type == TRACE_ISR_ENTER:
             if startExecCore == core:
@@ -505,6 +515,7 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
                 if lastExecTask == task.id:
                     #print(f"Delay Until called at {ts}")
                     finishJob = True
+                    finishJobOnEventGroup = False
                     if evt.get('deadlineMiss') == True:
                         missedDeadlineAt = evt.get('timeToWake')
                         deadlineMiss = True
@@ -514,6 +525,7 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
                 if lastExecTask == task.id:
                     #print(f"Delay called at {ts}")
                     finishJob = True
+                    finishJobOnEventGroup = False
 
         elif type == TRACE_MUTEX_TAKE:
             if startExecCore == core:
@@ -531,6 +543,7 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
                 if lastExecTask == task.id:
                     #print(f"Delay Until called at {ts}")
                     finishJob = True
+                    finishJobOnEventGroup = False
                     jldJobNextRelDelta = evt.get('period_us')
             
     # In case there are unfinished jobs, we handle them here.
