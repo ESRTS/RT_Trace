@@ -15,6 +15,11 @@ Set to true to print events read from the trace buffer (print_events in the conf
 enable_entry_print = False
 
 """
+RTT streams that end within this time of the end of the recording ran until the end (in us).
+"""
+RTT_END_WINDOW_US = 100000
+
+"""
 All supported trace event id's.
 """
 TRACE_IDLE                      = 1
@@ -121,8 +126,10 @@ def parser_thread(gui, numCores):
         tickIds = [int(x) for x in config.get(configName,'tickId').split(",")]
         global enable_entry_print
         enable_entry_print = config.getboolean(configName, 'print_events', fallback=False)
+        fixedBuffers = not HelperFunctions.getTargetName(gui).endswith('RTT')    # RTT streams the events, so there is no fixed buffer that can fill up.
     else:
         tickIds = [15, 42]
+        fixedBuffers = True
 
     for c in range(0,numCores):
         filename = os.path.abspath(os.path.join(gui.viewingFolder, 'raw_buffer' + str(c)))
@@ -145,7 +152,7 @@ def parser_thread(gui, numCores):
         core = core + 1
 
     eventFilePath = os.path.abspath(os.path.join(gui.viewingFolder, 'events.txt'))
-    tasks = parser(allBuffers, eventFilePath, tickIds, numCores)    # Parse the content of the trace buffers
+    tasks = parser(allBuffers, eventFilePath, tickIds, numCores, fixedBuffers)    # Parse the content of the trace buffers
 
     # If this was called from the GUI, enable the buttons and update the GUI
     if gui is not None:
@@ -153,16 +160,17 @@ def parser_thread(gui, numCores):
 
     return tasks
 
-def parser(buffers, eventFilePath, tickIds, numCores):
+def parser(buffers, eventFilePath, tickIds, numCores, fixedBuffers=True):
     """
     Function parses a variable number of trace buffers.
     Trace events are then converted to tasks, jobs and execution segments.
     The function returns an array with all trace tasks.
+    fixedBuffers is False for streamed traces (RTT), which are not cut where a buffer is full.
     """
     HelperFunctions.printHeader("parsing files")
 
     events = []
-    parseTraceEvents(events, buffers)       # Parse the raw events from the trace files of each core
+    parseTraceEvents(events, buffers, fixedBuffers)       # Parse the raw events from the trace files of each core
 
     allTasks = []
     allTasks = extractTraceInfo(events, eventFilePath, tickIds, numCores)     # Parse all trace tasks from the event trace (afterwards we have trace tasks, jobs and execution segments). 
@@ -586,7 +594,7 @@ def parseIrq(sortedEvents, irqTask):
                     irqTask.finishJob()
                     enterCore = None
     
-def parseTraceEvents(events, buffers):
+def parseTraceEvents(events, buffers, fixedBuffers=True):
     """
     This function converts the trace buffer of the traget into processable trace events.
     As buffers of different cores can contain events up to different timestamps, this function
@@ -613,6 +621,15 @@ def parseTraceEvents(events, buffers):
         if parser.isFull() and len(bufferEvents[-1]) > 0:
             fullBuffers.append(coreId)
         coreId = coreId + 1
+
+    # Streamed (RTT) recordings have no buffer that fills up, but the streams of the cores are read one after
+    # the other, so they end at slightly different times. Treat the streams that run until the end of the
+    # recording like full buffers. A core whose last event is much earlier was idle, not cut off.
+    if not fixedBuffers:
+        lastTs = {c: evts[-1].get('ts') for c, evts in enumerate(bufferEvents) if len(evts) > 0}
+        if len(lastTs) > 0:
+            recordingEnd = max(lastTs.values())
+            fullBuffers = [c for c, ts in lastTs.items() if ts >= recordingEnd - RTT_END_WINDOW_US]
 
     # A core whose buffer filled up stops recording, while the other cores go on. Events of the other cores
     # after that point lack their counterparts (for example, the tick on core 0 makes the tasks of core 1 ready),
