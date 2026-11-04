@@ -113,6 +113,7 @@ class TraceApp(customtkinter.CTk):
 
         ''' Entry to specify the trace name. '''
         self.recordTraceName = tk.StringVar(value="Record")     # Replaced by the program name once a program is selected
+        self.autoTraceName = "Record"                           # Last name filled in automatically, replaced again unless the user typed another name
         self.txt_traceName = customtkinter.CTkEntry(self.sidebar_frame, textvariable=self.recordTraceName, placeholder_text="Recording name", corner_radius=default_corner_radius)
         self.txt_traceName.grid(row=5, column=0, padx=20, pady=5, sticky="ew")
 
@@ -464,8 +465,9 @@ class TraceApp(customtkinter.CTk):
             self.opt_selectProg.configure(values=HelperFunctions.getPossiblePrograms())
 
         # Name the recording after the program, unless the user typed another name
-        if self.recordTraceName.get() in ("Record", self.selectedProgram):
+        if self.recordTraceName.get() == self.autoTraceName:
             self.recordTraceName.set(selectedFolder)
+            self.autoTraceName = selectedFolder
 
         # Remember which program is selected
         self.selectedProgram = selectedFolder
