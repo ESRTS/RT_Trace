@@ -561,6 +561,8 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
     deadlineMiss = False        # Flag to indicate that a deadline was missed.
     startExecCore = None        # Task started to execute on this core.
     lastExecTask = None         # Keep track of the last task started on the core.
+    isrDepth = {}               # Nesting depth of ISRs on each core
+    pausedByIsr = False         # The task was running when the outermost ISR started
     jldJobNextRelDelta = None   # Used for JLD jobs only, indicates that the next job is released automatically relative to the previous release.
     tickTs = []                 # We keep track if tick timestamps to be able to handle deadline misses.
     tickTs.append(0)            # By default the first tick appears at t=0
@@ -582,6 +584,7 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
                     task.newJob(ts, None)
 
         if type == TRACE_TASK_START_EXEC:
+            isrDepth[core] = 0      # Context switches run outside of ISRs
             #if task.currentJob is not None: # If there is an active job, and this event if from the same core, remember the task id
             if core == startExecCore:
                 lastExecTask = taskId
@@ -641,18 +644,24 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
                 delayKind = None
 
         elif type == TRACE_ISR_ENTER:
-            if startExecCore == core:
-                if lastExecTask == task.id:
+            # The task pauses for the outermost ISR on its core and resumes when that ISR returns to it.
+            # After an exit to the scheduler the task stays paused until the next context switch, also
+            # if another ISR runs before it.
+            depth = isrDepth.get(core, 0)
+            isrDepth[core] = depth + 1
+            if depth == 0 and startExecCore == core and lastExecTask == task.id:
+                pausedByIsr = task.currentJob is not None and task.currentJob.activeInterval is not None
+                if pausedByIsr:
                     #print(f"Stop execution due to ISR at {ts}")
                     task.stopExec(ts)
             irqId = evt.get('irqId')
             if irqId == tickId:
                 tickTs.append(ts)
-        elif type == TRACE_ISR_EXIT:
-            if startExecCore == core:
-                if lastExecTask == task.id:
-                    #print(f"Stop execution due to ISR at {ts}")
-                    task.startExec(ts, core, ExecutionType.EXECUTE)
+        elif type == TRACE_ISR_EXIT or type == TRACE_ISR_EXIT_TO_SCHEDULER:
+            isrDepth[core] = max(0, isrDepth.get(core, 0) - 1)
+            if type == TRACE_ISR_EXIT and isrDepth[core] == 0 and pausedByIsr and startExecCore == core and lastExecTask == task.id:
+                task.startExec(ts, core, ExecutionType.EXECUTE)
+                pausedByIsr = False
 
         elif type == TRACE_DELAY_UNTIL:
             if startExecCore == core:
