@@ -111,7 +111,7 @@ def record_data(elf, probe, target, frequency, measure_seconds, filename1, filen
             print("Could not resolve symbol: main", file=sys.stderr)
             return 1
         if hook_addr is None:
-            print("Could not resolve symbol: trace_init", file=sys.stderr)
+            HelperFunctions.printState("ERROR no tracing", info=HelperFunctions.noTracingHint(elf))
             return 1
         if rtt_addr is None:
             print("Could not resolve symbol: _SEGGER_RTT", file=sys.stderr)
