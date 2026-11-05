@@ -127,6 +127,12 @@ static bool idleRunning_core1;
 #define getIdleRunning() ((sio_hw->cpuid == 0) ? &idleRunning_core0 : &idleRunning_core1)
 #endif
 
+/**
+ * @brief Set by trace_init(). Event groups created before it belong to the port (pico_sync interop).
+ */
+static bool traceInitialized;
+static uint32_t internalEventGroup;
+
 /****************************************************************************************************************
  * Platform specific makro definitions. For multiple cores, those should work on each core independently.
  ****************************************************************************************************************/
@@ -258,6 +264,7 @@ void trace_init() {
     writeIndex = 0;
 
     enableTrace = true;
+    traceInitialized = true;
 }
 #endif
 
@@ -290,6 +297,7 @@ void trace_init() {
 
     enableTrace_core0 = true;
     enableTrace_core1 = true;
+    traceInitialized = true;
 }
 #endif
 
@@ -706,6 +714,22 @@ void trace_timeZero(void) {
     trace_rttWrite(buffer, 4);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
     restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+}
+
+/**
+ * @brief Remembers the event group the port creates before trace_init() for the SDK locks.
+ */
+void trace_eventGroupCreate(uint32_t eventGroup) {
+	if (!traceInitialized) {
+		internalEventGroup = eventGroup;
+	}
+}
+
+/**
+ * @brief True for the port's internal event group, whose waits are not traced.
+ */
+int trace_isInternalEventGroup(uint32_t eventGroup) {
+	return eventGroup != 0 && eventGroup == internalEventGroup;
 }
 
 /**

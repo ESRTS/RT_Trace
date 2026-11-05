@@ -86,6 +86,8 @@ void trace_mutexCreate(uint32_t mutexId);
 void trace_mutexTake(uint32_t mutexId);
 void trace_mutexGive(uint32_t mutexId);
 void trace_jldJobFinished(uint32_t period_us);
+void trace_eventGroupCreate(uint32_t eventGroup);
+int trace_isInternalEventGroup(uint32_t eventGroup);
 
 /****************************************************************************************************************
  * FreeRTOS trace defines to map to the trace infrastructure.
@@ -148,9 +150,18 @@ void trace_jldJobFinished(uint32_t period_us);
 
 #define traceTimeZero()                                 trace_timeZero()
 
-#define traceENTER_xEventGroupWaitBits( x ,y, z, u, i ) trace_eventGroupWait((uint32_t)xTaskGetCurrentTaskHandle())
+/* The Pico port waits on an internal event group for SDK locks (pico_sync interop, for example the stdio mutex
+ * inside printf). That group is created before main(), so before trace_init(). Waits on it are not traced, as
+ * they are not job boundaries. */
+#define traceEVENT_GROUP_CREATE( pxEventBits )          trace_eventGroupCreate((uint32_t)(pxEventBits))
 
-#define traceENTER_xEventGroupSync( x, y, z, u )        trace_eventGroupSync((uint32_t)xTaskGetCurrentTaskHandle())
+#define traceENTER_xEventGroupWaitBits( x ,y, z, u, i ) do { if (!trace_isInternalEventGroup((uint32_t)(x))) {           \
+                                                            trace_eventGroupWait((uint32_t)xTaskGetCurrentTaskHandle());     \
+                                                        } } while (0)
+
+#define traceENTER_xEventGroupSync( x, y, z, u )        do { if (!trace_isInternalEventGroup((uint32_t)(x))) {           \
+                                                            trace_eventGroupSync((uint32_t)xTaskGetCurrentTaskHandle());     \
+                                                        } } while (0)
 
 #define traceRETURN_xQueueCreateMutex( x )              if ( x->ucQueueType == queueQUEUE_TYPE_MUTEX ) trace_mutexCreate((uint32_t)x)
 
