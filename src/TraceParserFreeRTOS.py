@@ -44,6 +44,7 @@ TRACE_MUTEX_GIVE                = 20
 TRACE_JLDJOB_FINISHED           = 21
 TRACE_EVENTS_LOST               = 22    # Payload: number of events the target could not write since the last written event
 TRACE_TASK_BLOCK                = 23    # The task blocks on a queue, semaphore or task notification
+TRACE_VERSION                   = 24    # Written by trace_init(), payload: format version (2: lost events are reported)
 
 # Those events are not in the original trace and are created during parsing
 #TRACE_IDLE_START                = 23
@@ -71,7 +72,8 @@ eventMap = {
     TRACE_MUTEX_GIVE: "TRACE_MUTEX_GIVE",
     TRACE_JLDJOB_FINISHED: "TRACE_JLDJOB_FINISHED",
     TRACE_EVENTS_LOST: "TRACE_EVENTS_LOST",
-    TRACE_TASK_BLOCK: "TRACE_TASK_BLOCK"
+    TRACE_TASK_BLOCK: "TRACE_TASK_BLOCK",
+    TRACE_VERSION: "TRACE_VERSION"
 }
 
 """
@@ -1111,6 +1113,12 @@ class EventParser:
                 return None
             entryPrint("[t=" + str(self.time) + "us] TRACE_MUTEX_GIVE -> mutexId: " + str(mutexId) + " Core: " + str(coreId)) 
             evt = {'type':TRACE_MUTEX_GIVE, 'ts':self.time, 'core':coreId, 'mutexId':mutexId}
+        elif eventId == TRACE_VERSION:
+            version = self.readInteger()
+            if version is None:
+                return None
+            entryPrint("[t=" + str(self.time) + "us] TRACE_VERSION -> " + str(version) + " Core: " + str(coreId))
+            evt = {'type':TRACE_VERSION, 'ts':self.time, 'core':coreId, 'version':version}
         elif eventId == TRACE_TASK_BLOCK:
             taskId = self.readInteger()
             if taskId is None:
@@ -1141,8 +1149,8 @@ def checkTickIntervals(events, irqCore0, report):
     dropped event is lost as well, so the trace gets shorter than the recording and ticks come
     too early. Recordings with the marker report lost events in parseTraceEvents instead.
     """
-    if report['eventsLost'] > 0:
-        return
+    if report['eventsLost'] > 0 or any(e.get('type') == TRACE_VERSION for e in events):
+        return      # This firmware reports lost events itself. Irregular ticks then come from long critical sections.
     ticks = [e.get('ts') for e in events if e.get('type') == TRACE_ISR_ENTER and e.get('irqId') == irqCore0 and e.get('core') == 0]
     if len(ticks) < 10:
         return

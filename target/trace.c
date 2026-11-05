@@ -201,6 +201,8 @@ static bool enableTrace;
 #define getTimeUs() timer_time_us_64(timer0_hw)
 #endif /* TRACE_PICO2 */
 
+void trace_formatVersion(void);
+
 /****************************************************************************************************************
  * Platform specific functions.
  ****************************************************************************************************************/
@@ -262,6 +264,7 @@ void trace_init() {
 
     enableTrace = true;
     traceInitialized = true;
+    trace_formatVersion();
 }
 #endif
 
@@ -295,6 +298,7 @@ void trace_init() {
     enableTrace_core0 = true;
     enableTrace_core1 = true;
     traceInitialized = true;
+    trace_formatVersion();
 }
 #endif
 
@@ -588,9 +592,17 @@ void trace_delayUntil(uint32_t* prev, uint32_t timeInc, uint32_t tickCount) {
     uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_DELAY_UNTIL);      		/* Encodes the event ID and the timestamp delta */
 
-	uint32_t expiryTime = *prev + timeInc;															/* Compute the absolute expiry time of the delay. */
-	if (expiryTime < tickCount) {
-		expiryTime |= (0x01 << 31);																				/* We use bit 32 to indicate if the deadline was missed! (31 bits allow us to count for ~24 days, so no need to worry here about overflow etc.). */
+	uint32_t prevWake = *prev;
+	uint32_t expiryTime = prevWake + timeInc;															/* Compute the absolute expiry time of the delay. */
+	bool shouldDelay;														/* The same test as in xTaskDelayUntil(), which also works when the tick count wraps */
+	if (tickCount < prevWake) {
+		shouldDelay = (expiryTime < prevWake) && (expiryTime > tickCount);
+	} else {
+		shouldDelay = (expiryTime < prevWake) || (expiryTime > tickCount);
+	}
+	expiryTime &= 0x7fffffff;
+	if (!shouldDelay) {
+		expiryTime |= (0x01u << 31);										/* We use bit 32 to indicate if the deadline was missed! vTaskDelayUntil() does not block. */
 	}
 
     if (buffer != NULL) {
@@ -709,6 +721,26 @@ void trace_timeZero(void) {
 
 #ifdef TRACE_RTT
     trace_rttWrite(buffer, 4);                                              /* Add the data to the RTT buffer of this core. */
+#endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+}
+
+/**
+ * @brief Record the format version of the trace. Called by trace_init().
+ *
+ */
+void trace_formatVersion(void) {
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_VERSION);          		/* Encodes the event ID and the timestamp delta */
+
+    if (buffer != NULL) {
+        buffer[0] = identifyer;
+        buffer[1] = TRACE_FORMAT_VERSION;
+    }
+
+#ifdef TRACE_RTT
+    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
     restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }

@@ -64,6 +64,12 @@
 #define TRACE_JLDJOB_FINISHED           (21u)
 #define TRACE_EVENTS_LOST               (22u)   /* RTT only: number of events dropped since the last written event */
 #define TRACE_TASK_BLOCK                (23u)   /* The task blocks on a queue, semaphore or task notification */
+#define TRACE_VERSION                   (24u)   /* Written by trace_init(): format version of the trace */
+
+/**
+ * Format version written at trace_init(). Version 2 reports lost events with TRACE_EVENTS_LOST.
+ */
+#define TRACE_FORMAT_VERSION            (2u)
 
 // Not yet supported
 /*
