@@ -7,6 +7,7 @@ import configparser
 import subprocess
 import tkinter.font
 from threading import Thread
+from elftools.elf.elffile import ELFFile
 
 def getCwd():
     """
@@ -341,6 +342,22 @@ def getTraceMode(traceConfigFilePath):
         return "PSRAM"
     return "SRAM"
 
+def elfHasSymbol(elfFilePath, name):
+    """
+    Returns True if the symbol table of the ELF file contains the symbol.
+    """
+    with open(elfFilePath, "rb") as f:
+        symtab = ELFFile(f).get_section_by_name(".symtab")
+        return symtab is not None and bool(symtab.get_symbol_by_name(name))
+
+def noTracingHint(elfFilePath):
+    """
+    Explains what to do if a program was built without RT-Trace support.
+    """
+    return (os.path.basename(elfFilePath) + " has no trace_init(), so it was built without RT-Trace support. "
+            "Make sure main() calls trace_init() and the project builds trace.c (see the README), then delete build/ and build again. "
+            "An old checkout or a stale build/ folder is the usual cause.")
+
 def validatePicoTrace(gui, traceMode, quiet=False):
     """
     Checks that the selected program is built and that its traceConfig.h matches the trace mode of the platform.
@@ -361,6 +378,10 @@ def validatePicoTrace(gui, traceMode, quiet=False):
     projectMode = getTraceMode(traceConfigFilePath)
     if projectMode != traceMode:
         printState("ERROR wrong platform", info=gui.selectedProgram + " is built for " + projectMode + " tracing, select Pico2 FreeRTOS " + projectMode)
+        return False
+
+    if not elfHasSymbol(elfFilePath, "trace_init"):     # Checked before flashing, the recorders need it to start the trace
+        printState("ERROR no tracing", info=noTracingHint(elfFilePath))
         return False
 
     if not quiet:

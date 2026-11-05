@@ -113,6 +113,7 @@ class TraceApp(customtkinter.CTk):
 
         ''' Entry to specify the trace name. '''
         self.recordTraceName = tk.StringVar(value="Record")     # Replaced by the program name once a program is selected
+        self.autoTraceName = "Record"                           # Last name filled in automatically, replaced again unless the user typed another name
         self.txt_traceName = customtkinter.CTkEntry(self.sidebar_frame, textvariable=self.recordTraceName, placeholder_text="Recording name", corner_radius=default_corner_radius)
         self.txt_traceName.grid(row=5, column=0, padx=20, pady=5, sticky="ew")
 
@@ -246,9 +247,11 @@ class TraceApp(customtkinter.CTk):
         """
         Executes the functions queued by background threads.
         """
-        while not self.uiQueue.empty():
-            self.uiQueue.get_nowait()()
-        self.after(50, self.processUiQueue)
+        try:
+            while not self.uiQueue.empty():
+                self.uiQueue.get_nowait()()
+        finally:
+            self.after(50, self.processUiQueue)     # Keep polling, also if a queued function raised
 
     def recordingFinished(self, result=None):
         """
@@ -267,7 +270,9 @@ class TraceApp(customtkinter.CTk):
         Called in the GUI thread once a trace is parsed.
         """
         self.btn_loadTrace.configure(state="normal", text="Load Trace")
-        if tasks is not None:
+        if tasks is not None and len(tasks) == 0:
+            HelperFunctions.printState("ERROR no tasks", info="no task executed in this trace")
+        elif tasks is not None:
             self.traceView.setTasks(tasks)
             self.fitTracePane()
             self.traceView.draw()
@@ -464,8 +469,9 @@ class TraceApp(customtkinter.CTk):
             self.opt_selectProg.configure(values=HelperFunctions.getPossiblePrograms())
 
         # Name the recording after the program, unless the user typed another name
-        if self.recordTraceName.get() in ("Record", self.selectedProgram):
+        if self.recordTraceName.get() == self.autoTraceName:
             self.recordTraceName.set(selectedFolder)
+            self.autoTraceName = selectedFolder
 
         # Remember which program is selected
         self.selectedProgram = selectedFolder
@@ -602,17 +608,18 @@ class TextRedirector(object):
         pass   
     
     def _flush(self):
-        if not self.queue.empty():
-            self.widget.configure(state="normal")
+        try:
+            if not self.queue.empty():
+                self.widget.configure(state="normal")
 
-            while not self.queue.empty():
-                text = self.queue.get_nowait()
-                self.widget.insert("end", text, (self.styleFor(text),))
+                while not self.queue.empty():
+                    text = self.queue.get_nowait()
+                    self.widget.insert("end", text, (self.styleFor(text),))
 
-            self.widget.configure(state="disabled")
-            self.widget.see("end")
-
-        self.widget.after(30, self._flush)
+                self.widget.configure(state="disabled")
+                self.widget.see("end")
+        finally:
+            self.widget.after(30, self._flush)      # Keep flushing, also if an insert failed
 
 def main():
     """
