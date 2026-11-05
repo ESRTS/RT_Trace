@@ -328,17 +328,26 @@ def extractTraceInfo(events, eventFilePath, tickIds, numCores, report=None):
             tasks.append(TraceTask(id, "IRQ_" + str(tickIds[irq]) + "_C" + str(i), None, getTaskColor(id)))
 
     # All other tasks are parsed from the trace events. 
+    names = set()
     for evt in events:
         if evt.get('type') is TRACE_TASK_CREATE:    # Parse all task create events and create trace tasks for each.
             id = evt.get('taskId')
             prio = evt.get('priority')
             #name = evt.get('name').split('\\')[0]
             name = evt.get('name').split('\x00', 1)[0]
-            tmpTask = TraceTask(id, name, prio, getTaskColor(id))
+            unique = name
+            n = 2
+            while unique in names:                  # Two tasks with the same name get different rows
+                unique = name + " #" + str(n)
+                n = n + 1
+            names.add(unique)
+            tmpTask = TraceTask(id, unique, prio, getTaskColor(id))
             tasks.append(tmpTask)
         if evt.get('type') is TRACE_TASK_START_READY:   # We set the trace time t=0 to the first task ready event (if no TRACE_TIME_ZERO event was found).
             if traceStart is None:
                 traceStart = evt.get('ts')  # By convention we set the start of the first task to t=0
+
+    addTasksWithoutCreate(events, tasks, report)
 
     # Parse all mutex create events to map each mutex ID to a letter (max. 26 mutexes).
     mutex_id_to_letter: dict[int, str] = {}
@@ -398,6 +407,27 @@ def extractTraceInfo(events, eventFilePath, tickIds, numCores, report=None):
 
     return tasks
 
+def addTasksWithoutCreate(events, tasks, report):
+    """
+    Tasks created before trace_init() have no TASK_CREATE event. Add a task for every id that starts to
+    run at least twice, named after its id. Ids outside the SRAM come from corrupted events.
+    """
+    known = {t.id for t in tasks}
+    starts = {}
+    for evt in events:
+        if evt.get('type') == TRACE_TASK_START_EXEC:
+            id = evt.get('taskId')
+            if id not in known and 0x20000000 <= id < 0x20082000:
+                starts[id] = starts.get(id, 0) + 1
+    added = [id for id, n in starts.items() if n >= 2]
+    for id in sorted(added):
+        task = TraceTask(id, "Task_0x%08X" % id, None, getTaskColor(id))
+        task.readyBeforeTrace = True        # Its first READY event was before trace_init() as well
+        tasks.append(task)
+    if len(added) > 0:
+        warn(report, str(len(added)) + " tasks run without a create event, they are shown by their id. "
+             "They were created before trace_init(): call trace_init() before creating tasks to see their names.")
+
 def map_mutex_id(mutex_map, mutex_id: int) -> str | None:
     """
     Function maps a mutex id to letters A to Z. If 26 IDs are already mapped, the function returns NULL.
@@ -422,6 +452,7 @@ def executionParser(sortedEvents, tasks, tickIds, mutex_id_to_letter, numCores):
 
     # This hardcodes that there are 2 cores, should be generalized!
     core1Flag = False
+    delayUntilTasks = tasksUsingDelayUntil(sortedEvents)
 
     for task in tasks:
 
@@ -432,7 +463,7 @@ def executionParser(sortedEvents, tasks, tickIds, mutex_id_to_letter, numCores):
         elif task.id <= len(tickIds) * numCores: #in tickIds:
             parseIrq(sortedEvents, task)
         else:
-            parseTask(sortedEvents, task, mutex_id_to_letter, tickIds[0])
+            parseTask(sortedEvents, task, mutex_id_to_letter, tickIds[0], delayUntilTasks)
             for job in task.jobs:
                 for execInterval in job.execIntervals:
                     if execInterval.core == 1:
@@ -549,7 +580,22 @@ def releaseAtTick(tickTs, tick, ts):
         release = max([t for t in tickTs[-2:] if t <= ts], default=ts)
     return max(release, 0)
 
-def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
+def tasksUsingDelayUntil(sortedEvents):
+    """
+    Ids of the tasks that call vTaskDelayUntil(). Their jobs end there, so a vTaskDelay() in such a task
+    is a pause inside the job. DELAY_UNTIL carries no task id, it belongs to the task running on its core.
+    """
+    running = {}
+    result = set()
+    for evt in sortedEvents:
+        type = evt.get('type')
+        if type == TRACE_TASK_START_EXEC:
+            running[evt.get('core')] = evt.get('taskId')
+        elif type == TRACE_DELAY_UNTIL and running.get(evt.get('core')) is not None:
+            result.add(running[evt.get('core')])
+    return result
+
+def parseTask(sortedEvents, task, mutex_id_to_letter, tickId, delayUntilTasks=frozenset()):
     """
     Parses the execution of a single task.
     """
@@ -597,6 +643,9 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
                 #     if next_evt.get('type') == TRACE_DEADLINE_MISS and next_evt.get('taskId') == task.id: 
                 #         task.newJob(ts, None)
 
+                if task.currentJob is None and getattr(task, 'readyBeforeTrace', False):
+                    task.newJob(ts, None, core)
+                task.readyBeforeTrace = False
                 task.startExec(ts, core, ExecutionType.EXECUTE)
                 startExecCore = core
                 lastExecTask = taskId
@@ -674,7 +723,7 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
                     deadlineMiss = evt.get('deadlineMiss') == True
         
         elif type == TRACE_DELAY:
-            if startExecCore == core:
+            if startExecCore == core and task.id not in delayUntilTasks:   # Otherwise vTaskDelay() only pauses the job
                 if lastExecTask == task.id:
                     #print(f"Delay called at {ts}")
                     finishJob = True
