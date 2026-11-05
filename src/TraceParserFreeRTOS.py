@@ -130,7 +130,38 @@ def parseTraceFiles(gui, numCores):
 def parser_thread(gui, numCores):
     """
     Thread to parse the trace buffers. The trace events are then converted to tasks, jobs and execution segments.
+    Errors are reported as one line in the output, with the traceback in parse_error.log in the recording folder.
     """
+    folder = gui.viewingFolder
+    mode = HelperFunctions.getTargetName(gui)
+    try:
+        return loadRecording(gui, numCores)
+    except TraceInconsistency as e:
+        HelperFunctions.reportError("Trace data inconsistent", e, folder, "parse_error.log",
+            "Events were probably lost or corrupted (" + mode + "). Set strict = False in the config to load the trace with repairs.",
+            context=describeRecording(folder, mode), showType=False)
+    except Exception as e:      # Any other parser failure: one line for the user, the traceback in the log
+        HelperFunctions.reportError("Parsing failed", e, folder, "parse_error.log",
+            "This is a bug in RT-Trace or a damaged recording (" + mode + "). Please report it with the recording folder.",
+            context=describeRecording(folder, mode))
+    return None
+
+def describeRecording(folder, mode):
+    """
+    Context for error logs: platform, files and what the parser found so far.
+    """
+    lines = ["Recording: " + str(folder), "Platform: " + str(mode)]
+    for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+        if name.startswith("raw_buffer"):
+            lines.append(name + ": " + str(os.path.getsize(os.path.join(folder, name))) + " bytes")
+    report = lastReport or {}
+    lines.append("Lost events: " + str(report.get('eventsLost', 0)) + ", corrupt stream positions: " + str(len(report.get('desyncs', [])))
+                 + ", repairs: " + str(sum(repairs.values())))
+    for w in report.get('warnings', []):
+        lines.append("Warning: " + w)
+    return "\n".join(lines)
+
+def loadRecording(gui, numCores):
     bufferPaths = []
     
     # Get the tick id for each core from the config file.
@@ -141,17 +172,19 @@ def parser_thread(gui, numCores):
         tickIds = [int(x) for x in config.get(configName,'tickId').split(",")]
         global enable_entry_print
         enable_entry_print = config.getboolean(configName, 'print_events', fallback=False)
+        strict = config.getboolean(configName, 'strict', fallback=False)
         fixedBuffers = not HelperFunctions.getTargetName(gui).endswith('RTT')    # RTT streams the events, so there is no fixed buffer that can fill up.
     else:
         tickIds = [15, 42]
         fixedBuffers = True
+        strict = False
 
     for c in range(0,numCores):
         filename = os.path.abspath(os.path.join(gui.viewingFolder, 'raw_buffer' + str(c)))
 
         bufferPaths.append(Path(filename + ".txt"))
         if not bufferPaths[-1].is_file():
-            print("Error: File " + str(bufferPaths[-1]) + " does not exist!", file=sys.stderr)
+            HelperFunctions.printState("ERROR missing file", info=str(bufferPaths[-1]) + " does not exist. Record the trace again or select another recording.")
             return None
 
     allBuffers = []
@@ -166,8 +199,12 @@ def parser_thread(gui, numCores):
             HelperFunctions.hexdump(traceBuffer, base_addr=int(config.get(configName, "buffer"+str(core), fallback="0x00000000"),16))
         core = core + 1
 
+    if sum(len(b) for b in allBuffers) == 0:
+        HelperFunctions.printState("ERROR empty recording", info="The trace buffers in " + str(gui.viewingFolder) + " are empty. Check that the program calls trace_init() and record again.")
+        return None
+
     eventFilePath = os.path.abspath(os.path.join(gui.viewingFolder, 'events.txt'))
-    tasks = parser(allBuffers, eventFilePath, tickIds, numCores, fixedBuffers)    # Parse the content of the trace buffers
+    tasks = parser(allBuffers, eventFilePath, tickIds, numCores, fixedBuffers, strict)    # Parse the content of the trace buffers
 
     # If this was called from the GUI, enable the buttons and update the GUI
     if gui is not None:

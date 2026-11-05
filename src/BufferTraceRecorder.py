@@ -37,12 +37,16 @@ def recorder_thread(gui):
     frequency = int(config.get(configName,'frequency', fallback = '4_000_000'))
     measure_seconds = float(config.get(configName,'measure_seconds', fallback = '10.0'))
 
-    if elf is None:
-        HelperFunctions.printState("ERROR", info="No elf-file configured")
+    if elf is None or not os.path.exists(elf):
+        HelperFunctions.printState("ERROR ELF not found", info=str(elf) + " does not exist. Build the program first.")
         return 
     
     # Record the trace from the target platform
-    record_data(HelperFunctions.getTargetName(gui), elf, probe, target, frequency, measure_seconds, filename1, filename2)
+    try:
+        record_data(HelperFunctions.getTargetName(gui), elf, probe, target, frequency, measure_seconds, filename1, filename2)
+    except Exception as e:      # One line for the user, the traceback in record_error.log
+        HelperFunctions.reportError("Recording failed", e, folderName, "record_error.log",
+                                    HelperFunctions.recordHint(e), context=HelperFunctions.recordContext(gui, elf))
 
 def parse_int(value: str) -> int:
     return int(value, 0)
@@ -100,7 +104,7 @@ def record_data(configName, elf, probe, target, frequency, measure_seconds, file
     )
 
     if session is None:
-        print("No debug probe found.", file=sys.stderr)
+        HelperFunctions.printState("ERROR no debug probe", info=HelperFunctions.NO_PROBE_HINT)
         return 1
 
     with session:
@@ -118,7 +122,7 @@ def record_data(configName, elf, probe, target, frequency, measure_seconds, file
         hook_addr = symbol_provider.get_symbol_value("trace_init")
 
         if main_addr is None:
-            print("Could not resolve symbol: main", file=sys.stderr)
+            HelperFunctions.printState("ERROR not a program", info=os.path.basename(elf) + " has no main(). Select the ELF of a program.")
             return 1
         if hook_addr is None:
             HelperFunctions.printState("ERROR no tracing", info=HelperFunctions.noTracingHint(elf))
@@ -139,7 +143,7 @@ def record_data(configName, elf, probe, target, frequency, measure_seconds, file
         core.resume()
 
         if not wait_for_pc(core, hook_addr, timeout=10.0):
-            print("Timed out before reaching trace_init()", file=sys.stderr)
+            HelperFunctions.printState("ERROR program did not start", info="The program did not reach trace_init() within 10 s. It crashes or waits before it (for example in BSP_Init()). Check it with the debugger.")
             return 1
         print("Hit trace_init().")
 

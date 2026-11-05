@@ -11,6 +11,8 @@
 # Print the raw buffer hexdump and every event when loading a trace
 #print_hexdump = True
 #print_events = True
+# Stop at the first inconsistency in the trace data instead of repairing it
+#strict = True
 
 [RPI_Linux]
 # user@targetAddress of the Raspberry Pi running the traced application

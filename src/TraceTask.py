@@ -35,7 +35,7 @@ def inconsistent(name, ts, core, what):
     """
     where = "at " + formatTime(ts) + ("" if core is None else " on core " + str(core))
     if strict:
-        raise TraceInconsistency("Trace data inconsistent " + where + ": " + name + " " + what, ts, core)
+        raise TraceInconsistency(where[0].upper() + where[1:] + ": " + name + " " + what.split(" (")[0], ts, core)
     key = name + " " + what
     repairs[key] += 1
     repairExamples.setdefault(key, where)

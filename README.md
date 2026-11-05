@@ -153,7 +153,11 @@ irqName = SysTick,Tick,Bell,Timer,FIFO
 # Print a hexdump of each raw trace buffer and every event when loading a trace
 print_hexdump = False
 print_events = False
+# Stop at the first inconsistency in the trace data instead of repairing it
+strict = False
 ```
+
+Lost or corrupted events (for example when the RTT buffer was full) leave the trace data inconsistent: a task starts without being released, or an ISR has no exit. RT-Trace repairs such spots, loads the trace and prints how many it repaired, with the time and core of the first one. With `strict = True` it stops at the first one instead, which helps when debugging the target code. Errors while loading or recording show one line with a hint; the full details go to `parse_error.log` or `record_error.log` in the recording folder.
 
 Each target has a dedicated section in the configuration file. For example, the RP2350 target with the trace buffers in SRAM is configured as follows. The addresses and the size must match `TRACE_BUFFER_SIZE` in `target/trace.h`.
 ```
