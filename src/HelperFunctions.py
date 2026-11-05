@@ -10,6 +10,7 @@ import traceback
 import tkinter.font
 from threading import Thread
 from elftools.elf.elffile import ELFFile
+from elftools.common.exceptions import ELFError
 
 def getCwd():
     """
@@ -407,6 +408,22 @@ def elfHasSymbol(elfFilePath, name):
     with open(elfFilePath, "rb") as f:
         symtab = ELFFile(f).get_section_by_name(".symtab")
         return symtab is not None and bool(symtab.get_symbol_by_name(name))
+
+def getElfSymbol(elfFilePath, name):
+    """
+    Returns (address, size in bytes) of a symbol in an ELF file, or None if it is not there.
+    """
+    try:
+        with open(elfFilePath, "rb") as f:
+            symtab = ELFFile(f).get_section_by_name(".symtab")
+            if symtab is None:
+                return None
+            symbols = symtab.get_symbol_by_name(name)
+            if not symbols:
+                return None
+            return symbols[0]["st_value"], symbols[0]["st_size"]
+    except (OSError, ELFError):
+        return None
 
 def noTracingHint(elfFilePath):
     """

@@ -10,15 +10,30 @@
 #define TRACE_AVAILABLE
 
 /**
- * Size of the trace buffer for each core, in uint32_t.
+ * Size of the trace buffer for each core, in uint32_t. Can be set in traceConfig.h.
+ * RT-Trace reads the address and size of the SRAM buffers from the ELF file.
  */
-#ifndef PICO_USE_PSRAM
-/* Use 2KB of SRAM in scratchpad memory for each core. */
-#define TRACE_BUFFER_SIZE 500
-#else
-/* Use 2MB of PSRAM for each core. */
+#ifndef TRACE_BUFFER_SIZE
+#if defined(PICO_USE_PSRAM)
+/* 20 KB of PSRAM for each core. */
 #define TRACE_BUFFER_SIZE 5000
-#endif /* PICO_USE_PSRAM */
+#elif defined(TRACE_PICO2)
+/* 96 KB of SRAM for each core, about 2 s of six periodic tasks. Together with a 128 KB FreeRTOS heap
+ * this leaves about 190 KB of the 520 KB SRAM for the program. */
+#define TRACE_BUFFER_SIZE 24576
+#else
+/* 2 KB in RAM2 of the STM32L476. */
+#define TRACE_BUFFER_SIZE 500
+#endif
+#endif /* TRACE_BUFFER_SIZE */
+
+/**
+ * Size of the RTT buffer of each core in bytes. RT-Trace empties it about every millisecond,
+ * events that do not fit in between are lost (and reported). Can be set in traceConfig.h.
+ */
+#ifndef TRACE_RTT_BUFFER_SIZE
+#define TRACE_RTT_BUFFER_SIZE 8192
+#endif
 /****************************************************************************************************************
  * Defines and function declarations.
  ****************************************************************************************************************/

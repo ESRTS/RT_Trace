@@ -44,11 +44,11 @@ uint32_t __attribute__((section(".traceRAMsection"))) traceBuffer[TRACE_BUFFER_S
 #ifndef TRACE_RTT
 #ifndef PICO_USE_PSRAM
 /**
- * The trace buffer for each core is allocated in SRAM banks 8 and 9, respectively.
- * This way there is no access conflicts between the two cores.
+ * The trace buffer of each core in SRAM. The 4 KB scratch banks are too small for more than a few
+ * milliseconds of a trace. RT-Trace finds the buffers by their symbol names in the ELF file.
  */
-static uint32_t __scratch_x("traceBufferCore0") traceBuffer_core0[TRACE_BUFFER_SIZE];
-static uint32_t __scratch_y("traceBufferCore1") traceBuffer_core1[TRACE_BUFFER_SIZE];
+uint32_t traceBuffer_core0[TRACE_BUFFER_SIZE];
+uint32_t traceBuffer_core1[TRACE_BUFFER_SIZE];
 #else
 /**
  * If PSRAM is available, the buffer is stored in PSRAM. This way the latency to create
@@ -59,13 +59,10 @@ static uint32_t *traceBuffer_core1 = (uint32_t*)(0x15000000 + (TRACE_BUFFER_SIZE
 #endif /* PICO_USE_PSRAM */
 #else
 /**
- * The trace buffer for each core is allocated in SRAM banks 8 and 9, respectively.
- * This way there is no access conflicts between the two cores.
- *
- * 1970 bytes to fit in the SRAM bank, together with the event buffer and housekeeping per core.
+ * The RTT buffer of each core. RT-Trace empties them over SWD while the program runs.
  */
-static uint8_t __scratch_x("traceBufferCore0") rttBuffer_core0[1970];
-static uint8_t __scratch_y("traceBufferCore1") rttBuffer_core1[1970];
+static uint8_t rttBuffer_core0[TRACE_RTT_BUFFER_SIZE];
+static uint8_t rttBuffer_core1[TRACE_RTT_BUFFER_SIZE];
 
 /* The event buffer is used by the tracing facility to prepare the event before it is sent to the RTT channel. */
 static uint8_t __scratch_x("traceBufferCore0") eventBuffer_core0[50];

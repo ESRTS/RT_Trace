@@ -80,18 +80,25 @@ def record_data(configName, elf, probe, target, frequency, measure_seconds, file
     configName is the config.ini section with the buffer addresses and size (e.g. Pico2_FreeRTOS_SRAM).
     """
     config = HelperFunctions.readConfig()
-    
-    address_buffer0_str = config.get(configName,'buffer0', fallback = None)
-    address_buffer1_str = config.get(configName,'buffer1', fallback = None)
-    buffer_length_str = config.get(configName,'bufferSize', fallback = None)
-    
-    assert address_buffer0_str != None, "Could not read address_buffer0 from config file!"
-    assert address_buffer1_str != None, "Could not read address_buffer1 from config file!"
-    assert buffer_length_str != None, "Could not read buffer_length from config file!"
 
-    address_buffer0 = int(address_buffer0_str, 0)
-    address_buffer1 = int(address_buffer1_str, 0)
-    buffer_length = int(buffer_length_str, 0)
+    # SRAM buffers are arrays in the program: take their address and size from the ELF, so they always
+    # match the build. PSRAM buffers are fixed addresses behind pointers, they come from the config.
+    buffer0 = HelperFunctions.getElfSymbol(elf, "traceBuffer_core0") if os.path.exists(elf) else None
+    buffer1 = HelperFunctions.getElfSymbol(elf, "traceBuffer_core1") if os.path.exists(elf) else None
+    if buffer0 is not None and buffer1 is not None and buffer0[1] > 4 and buffer0[1] == buffer1[1]:
+        address_buffer0, buffer_length = buffer0
+        address_buffer1 = buffer1[0]
+    else:
+        address_buffer0_str = config.get(configName,'buffer0', fallback = None)
+        address_buffer1_str = config.get(configName,'buffer1', fallback = None)
+        buffer_length_str = config.get(configName,'bufferSize', fallback = None)
+        if None in (address_buffer0_str, address_buffer1_str, buffer_length_str):
+            HelperFunctions.printState("ERROR no trace buffers", info=os.path.basename(elf) + " has no traceBuffer_core0/1 and the config section "
+                                       + configName + " has no buffer0, buffer1 and bufferSize. Build the program for the SRAM or PSRAM mode.")
+            return 1
+        address_buffer0 = int(address_buffer0_str, 0)
+        address_buffer1 = int(address_buffer1_str, 0)
+        buffer_length = int(buffer_length_str, 0)
 
     session = ConnectHelper.session_with_chosen_probe(
         unique_id=probe,

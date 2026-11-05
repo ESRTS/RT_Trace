@@ -159,12 +159,14 @@ strict = False
 
 Lost or corrupted events (for example when the RTT buffer was full) leave the trace data inconsistent: a task starts without being released, or an ISR has no exit. RT-Trace repairs such spots, loads the trace and prints how many it repaired, with the time and core of the first one. With `strict = True` it stops at the first one instead, which helps when debugging the target code. Errors while loading or recording show one line with a hint; the full details go to `parse_error.log` or `record_error.log` in the recording folder.
 
-Each target has a dedicated section in the configuration file. For example, the RP2350 target with the trace buffers in SRAM is configured as follows. The addresses and the size must match `TRACE_BUFFER_SIZE` in `target/trace.h`.
+Each target has a dedicated section in the configuration file. For the RP2350 with the trace buffers in SRAM, RT-Trace reads the address and size of the buffers (`traceBuffer_core0`, `traceBuffer_core1`) from the ELF file, so they always match the build. The section is only used for programs without these symbols. The PSRAM buffers are at fixed addresses, and their section must match `TRACE_BUFFER_SIZE` in `target/trace.h`:
 ```
-[Pico2_FreeRTOS_SRAM]
+[Pico2_FreeRTOS_PSRAM]
 # Address of the trace buffers on the target
-buffer0 = 0x2008001c
-buffer1 = 0x2008100c
+buffer0 = 0x15000000
+buffer1 = 0x15004E20
 # Length of the trace buffers (each), in byte
-bufferSize = 2000
+bufferSize = 20000
 ```
+
+The SRAM buffers hold 96 KB per core (`TRACE_BUFFER_SIZE` 24576 words), about 2 s of a program with six periodic tasks; the RTT buffers 8 KB per core (`TRACE_RTT_BUFFER_SIZE`). Both can be set in `traceConfig.h` if a program needs the RAM.
