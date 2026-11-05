@@ -10,15 +10,30 @@
 #define TRACE_AVAILABLE
 
 /**
- * Size of the trace buffer for each core, in uint32_t.
+ * Size of the trace buffer for each core, in uint32_t. Can be set in traceConfig.h.
+ * RT-Trace reads the address and size of the SRAM buffers from the ELF file.
  */
-#ifndef PICO_USE_PSRAM
-/* Use 2KB of SRAM in scratchpad memory for each core. */
-#define TRACE_BUFFER_SIZE 500
-#else
-/* Use 2MB of PSRAM for each core. */
+#ifndef TRACE_BUFFER_SIZE
+#if defined(PICO_USE_PSRAM)
+/* 20 KB of PSRAM for each core. */
 #define TRACE_BUFFER_SIZE 5000
-#endif /* PICO_USE_PSRAM */
+#elif defined(TRACE_PICO2)
+/* 96 KB of SRAM for each core, about 2 s of six periodic tasks. Together with a 128 KB FreeRTOS heap
+ * this leaves about 190 KB of the 520 KB SRAM for the program. */
+#define TRACE_BUFFER_SIZE 24576
+#else
+/* 2 KB in RAM2 of the STM32L476. */
+#define TRACE_BUFFER_SIZE 500
+#endif
+#endif /* TRACE_BUFFER_SIZE */
+
+/**
+ * Size of the RTT buffer of each core in bytes. RT-Trace empties it about every millisecond,
+ * events that do not fit in between are lost (and reported). Can be set in traceConfig.h.
+ */
+#ifndef TRACE_RTT_BUFFER_SIZE
+#define TRACE_RTT_BUFFER_SIZE 8192
+#endif
 /****************************************************************************************************************
  * Defines and function declarations.
  ****************************************************************************************************************/
@@ -47,6 +62,14 @@
 #define TRACE_MUTEX_TAKE                (19u)
 #define TRACE_MUTEX_GIVE                (20u)
 #define TRACE_JLDJOB_FINISHED           (21u)
+#define TRACE_EVENTS_LOST               (22u)   /* RTT only: number of events dropped since the last written event */
+#define TRACE_TASK_BLOCK                (23u)   /* The task blocks on a queue, semaphore or task notification */
+#define TRACE_VERSION                   (24u)   /* Written by trace_init(): format version of the trace */
+
+/**
+ * Format version written at trace_init(). Version 2 reports lost events with TRACE_EVENTS_LOST.
+ */
+#define TRACE_FORMAT_VERSION            (2u)
 
 // Not yet supported
 /*
@@ -85,6 +108,9 @@ void trace_mutexCreate(uint32_t mutexId);
 void trace_mutexTake(uint32_t mutexId);
 void trace_mutexGive(uint32_t mutexId);
 void trace_jldJobFinished(uint32_t period_us);
+void trace_taskBlock(uint32_t taskId);
+void trace_eventGroupCreate(uint32_t eventGroup);
+int trace_isInternalEventGroup(uint32_t eventGroup);
 
 /****************************************************************************************************************
  * FreeRTOS trace defines to map to the trace infrastructure.
@@ -147,9 +173,29 @@ void trace_jldJobFinished(uint32_t period_us);
 
 #define traceTimeZero()                                 trace_timeZero()
 
-#define traceENTER_xEventGroupWaitBits( x ,y, z, u, i ) trace_eventGroupWait((uint32_t)xTaskGetCurrentTaskHandle())
+/* The Pico port waits on an internal event group for SDK locks (pico_sync interop, for example the stdio mutex
+ * inside printf). That group is created before main(), so before trace_init(). Waits on it are not traced, as
+ * they are not job boundaries. */
+#define traceEVENT_GROUP_CREATE( pxEventBits )          trace_eventGroupCreate((uint32_t)(pxEventBits))
 
-#define traceENTER_xEventGroupSync( x, y, z, u )        trace_eventGroupSync((uint32_t)xTaskGetCurrentTaskHandle())
+#define traceENTER_xEventGroupWaitBits( x ,y, z, u, i ) do { if (!trace_isInternalEventGroup((uint32_t)(x))) {           \
+                                                            trace_eventGroupWait((uint32_t)xTaskGetCurrentTaskHandle());     \
+                                                        } } while (0)
+
+#define traceENTER_xEventGroupSync( x, y, z, u )        do { if (!trace_isInternalEventGroup((uint32_t)(x))) {           \
+                                                            trace_eventGroupSync((uint32_t)xTaskGetCurrentTaskHandle());     \
+                                                        } } while (0)
+
+/* A task that blocks on a queue, a semaphore or a notification waits for its next release. A task that
+ * blocks on a mutex waits inside its job, so mutexes are left out. */
+#define traceBLOCKING_ON_QUEUE_RECEIVE( pxQueue )       do { if ( (pxQueue)->ucQueueType != queueQUEUE_TYPE_MUTEX &&                    \
+                                                              (pxQueue)->ucQueueType != queueQUEUE_TYPE_RECURSIVE_MUTEX ) {          \
+                                                            trace_taskBlock((uint32_t)xTaskGetCurrentTaskHandle());          \
+                                                        } } while (0)
+
+#define traceTASK_NOTIFY_TAKE_BLOCK( uxIndexToWait )    trace_taskBlock((uint32_t)xTaskGetCurrentTaskHandle())
+
+#define traceTASK_NOTIFY_WAIT_BLOCK( uxIndexToWait )    trace_taskBlock((uint32_t)xTaskGetCurrentTaskHandle())
 
 #define traceRETURN_xQueueCreateMutex( x )              if ( x->ucQueueType == queueQUEUE_TYPE_MUTEX ) trace_mutexCreate((uint32_t)x)
 

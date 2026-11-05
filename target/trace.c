@@ -44,11 +44,11 @@ uint32_t __attribute__((section(".traceRAMsection"))) traceBuffer[TRACE_BUFFER_S
 #ifndef TRACE_RTT
 #ifndef PICO_USE_PSRAM
 /**
- * The trace buffer for each core is allocated in SRAM banks 8 and 9, respectively.
- * This way there is no access conflicts between the two cores.
+ * The trace buffer of each core in SRAM. The 4 KB scratch banks are too small for more than a few
+ * milliseconds of a trace. RT-Trace finds the buffers by their symbol names in the ELF file.
  */
-static uint32_t __scratch_x("traceBufferCore0") traceBuffer_core0[TRACE_BUFFER_SIZE];
-static uint32_t __scratch_y("traceBufferCore1") traceBuffer_core1[TRACE_BUFFER_SIZE];
+uint32_t traceBuffer_core0[TRACE_BUFFER_SIZE];
+uint32_t traceBuffer_core1[TRACE_BUFFER_SIZE];
 #else
 /**
  * If PSRAM is available, the buffer is stored in PSRAM. This way the latency to create
@@ -59,17 +59,18 @@ static uint32_t *traceBuffer_core1 = (uint32_t*)(0x15000000 + (TRACE_BUFFER_SIZE
 #endif /* PICO_USE_PSRAM */
 #else
 /**
- * The trace buffer for each core is allocated in SRAM banks 8 and 9, respectively.
- * This way there is no access conflicts between the two cores.
- *
- * 1970 bytes to fit in the SRAM bank, together with the event buffer and housekeeping per core.
+ * The RTT buffer of each core. RT-Trace empties them over SWD while the program runs.
  */
-static uint8_t __scratch_x("traceBufferCore0") rttBuffer_core0[1970];
-static uint8_t __scratch_y("traceBufferCore1") rttBuffer_core1[1970];
+static uint8_t rttBuffer_core0[TRACE_RTT_BUFFER_SIZE];
+static uint8_t rttBuffer_core1[TRACE_RTT_BUFFER_SIZE];
 
 /* The event buffer is used by the tracing facility to prepare the event before it is sent to the RTT channel. */
 static uint8_t __scratch_x("traceBufferCore0") eventBuffer_core0[50];
 static uint8_t __scratch_y("traceBufferCore1") eventBuffer_core1[50];
+
+/* Number of events that did not fit into the RTT buffer since the last event that was written. */
+static uint32_t lostEvents_core0;
+static uint32_t lostEvents_core1;
 
 #endif /* TRACE_RTT */
 #endif /* TRACE_PICO2 */
@@ -109,6 +110,26 @@ static bool __scratch_x("traceBufferCore0") enableTrace_core0;
 static bool __scratch_x("traceBufferCore1") enableTrace_core1;
 #endif
 
+/**
+ * @brief Flags for each core that are set while the idle task runs, so TRACE_IDLE is only written when
+ * the core becomes idle. With preemption off, the idle task yields to itself in its loop, every few us.
+ */
+#ifdef TRACE_STM32L476RG
+static bool idleRunning;
+#define getIdleRunning() (&idleRunning)
+#endif
+#ifdef TRACE_PICO2
+static bool idleRunning_core0;
+static bool idleRunning_core1;
+#define getIdleRunning() ((sio_hw->cpuid == 0) ? &idleRunning_core0 : &idleRunning_core1)
+#endif
+
+/**
+ * @brief Set by trace_init(). Event groups created before it belong to the port (pico_sync interop).
+ */
+static bool traceInitialized;
+static uint32_t internalEventGroup;
+
 /****************************************************************************************************************
  * Platform specific makro definitions. For multiple cores, those should work on each core independently.
  ****************************************************************************************************************/
@@ -125,6 +146,7 @@ static bool enableTrace;
 #define getBuffer() (sio_hw->cpuid == 0) ? traceBuffer_core0 : traceBuffer_core1;
 #else
 #define getRttChannel() (sio_hw->cpuid == 0) ? 1 : 2
+#define getLostEvents() ((sio_hw->cpuid == 0) ? &lostEvents_core0 : &lostEvents_core1)
 #endif /* TRACE_RTT */
 #endif /* TRACE_PICO2 */
 
@@ -178,6 +200,8 @@ static bool enableTrace;
 #ifdef TRACE_PICO2
 #define getTimeUs() timer_time_us_64(timer0_hw)
 #endif /* TRACE_PICO2 */
+
+void trace_formatVersion(void);
 
 /****************************************************************************************************************
  * Platform specific functions.
@@ -239,6 +263,8 @@ void trace_init() {
     writeIndex = 0;
 
     enableTrace = true;
+    traceInitialized = true;
+    trace_formatVersion();
 }
 #endif
 
@@ -265,10 +291,14 @@ void trace_init() {
     /* NO_BLOCK_SKIP discards all data if there is not enough room in the buffer. */
     SEGGER_RTT_ConfigUpBuffer(1, "core0", rttBuffer_core0, sizeof(rttBuffer_core0), SEGGER_RTT_MODE_NO_BLOCK_SKIP);
     SEGGER_RTT_ConfigUpBuffer(2, "core1", rttBuffer_core1, sizeof(rttBuffer_core1), SEGGER_RTT_MODE_NO_BLOCK_SKIP);
+    lostEvents_core0 = 0;
+    lostEvents_core1 = 0;
 #endif /* TRACE_RTT */
 
     enableTrace_core0 = true;
     enableTrace_core1 = true;
+    traceInitialized = true;
+    trace_formatVersion();
 }
 #endif
 
@@ -341,6 +371,33 @@ uint32_t* trace_getEventBuffer(uint16_t length) {
 	return retval;
 }
 
+#ifdef TRACE_RTT
+/**
+ * @brief Writes an event to the RTT buffer of this core. Interrupts must be disabled.
+ * An event that does not fit is dropped (NO_BLOCK_SKIP). The timestamp of the last written event is
+ * kept, so the next delta still counts from it, and the next event that fits is preceded by
+ * TRACE_EVENTS_LOST with the number of dropped events.
+ */
+static void trace_rttWrite(uint32_t* buffer, uint32_t nBytes) {
+	unsigned channel = getRttChannel();
+	uint32_t* lost = getLostEvents();
+	uint64_t* lastTs = getLastTimestamp();
+
+	if (SEGGER_RTT_GetAvailWriteSpace(channel) < nBytes + ((*lost > 0) ? 8 : 0)) {
+		*lastTs -= (buffer[0] & 0xffffff);								/* Back to the time of the last written event */
+		(*lost)++;
+		return;
+	}
+	if (*lost > 0) {
+		uint32_t marker[2] = { (TRACE_EVENTS_LOST << 24) | (buffer[0] & 0xffffff), *lost };
+		SEGGER_RTT_Write(channel, marker, 8);
+		buffer[0] &= 0xff000000;										/* The marker carries the time delta */
+		*lost = 0;
+	}
+	SEGGER_RTT_Write(channel, buffer, nBytes);
+}
+#endif /* TRACE_RTT */
+
 /**
  * @brief Record the event that the CPU starts to be idle.
  *
@@ -348,19 +405,23 @@ uint32_t* trace_getEventBuffer(uint16_t length) {
 void trace_idle(void) {
 
     uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    bool* idle = getIdleRunning();
+    if (*idle == true) {                                            		/* Already idle: the idle task only yielded to itself */
+        restore_interrupts(irqState);
+        return;
+    }
+    *idle = true;
     uint32_t* buffer = trace_getEventBuffer(1);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_IDLE);             		/* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
     }
 
 #ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, 4);                           /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    trace_rttWrite(buffer, 4);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }
 
 /**
@@ -370,9 +431,9 @@ void trace_idle(void) {
 void trace_execStart(uint32_t taskId) {
 
     uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    *getIdleRunning() = false;
     uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_TASK_START_EXEC);  		/* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -380,10 +441,9 @@ void trace_execStart(uint32_t taskId) {
     }
 
 #ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, 8);                           /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }
 
 /**
@@ -395,7 +455,6 @@ void trace_execStop(uint32_t taskId) {
     uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
     uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_TASK_STOP_EXEC);   		/* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -403,10 +462,9 @@ void trace_execStop(uint32_t taskId) {
     }
 
 #ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, 8);                           /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }
 
 /**
@@ -418,7 +476,6 @@ void trace_readyStart(uint32_t taskId) {
     uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
     uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_TASK_START_READY); 		/* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -426,10 +483,9 @@ void trace_readyStart(uint32_t taskId) {
     }
 
 #ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, 8);                           /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }
 
 /**
@@ -441,7 +497,6 @@ void trace_readyStop(uint32_t taskId) {
     uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
     uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_TASK_STOP_READY);  		/* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -449,10 +504,9 @@ void trace_readyStop(uint32_t taskId) {
     }
 
 #ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, 8);                           /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }
 
 
@@ -471,7 +525,6 @@ void trace_taskCreate(uint32_t taskId, uint32_t priority, const char* name) {
 
     uint32_t* buffer = trace_getEventBuffer(4 + slen);              		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_TASK_CREATE);      		/* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -483,10 +536,9 @@ void trace_taskCreate(uint32_t taskId, uint32_t priority, const char* name) {
     }
 
 #ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, (4 + slen) * 4);              /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    trace_rttWrite(buffer, (4 + slen) * 4);                                 /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }
 
 
@@ -499,17 +551,15 @@ void trace_start(void) {
     uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
     uint32_t* buffer = trace_getEventBuffer(1);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_START);            		/* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
     }
 
 #ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, 4);                           /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    trace_rttWrite(buffer, 4);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }
 
 /**
@@ -521,17 +571,15 @@ void trace_stop(void) {
     uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
     uint32_t* buffer = trace_getEventBuffer(1);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_STOP);             		/* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
     }
 
 #ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, 4);                           /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    trace_rttWrite(buffer, 4);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }
 
 /**
@@ -543,11 +591,18 @@ void trace_delayUntil(uint32_t* prev, uint32_t timeInc, uint32_t tickCount) {
     uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
     uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_DELAY_UNTIL);      		/* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
-	uint32_t expiryTime = *prev + timeInc;															/* Compute the absolute expiry time of the delay. */
-	if (expiryTime < tickCount) {
-		expiryTime |= (0x01 << 31);																				/* We use bit 32 to indicate if the deadline was missed! (31 bits allow us to count for ~24 days, so no need to worry here about overflow etc.). */
+	uint32_t prevWake = *prev;
+	uint32_t expiryTime = prevWake + timeInc;															/* Compute the absolute expiry time of the delay. */
+	bool shouldDelay;														/* The same test as in xTaskDelayUntil(), which also works when the tick count wraps */
+	if (tickCount < prevWake) {
+		shouldDelay = (expiryTime < prevWake) && (expiryTime > tickCount);
+	} else {
+		shouldDelay = (expiryTime < prevWake) || (expiryTime > tickCount);
+	}
+	expiryTime &= 0x7fffffff;
+	if (!shouldDelay) {
+		expiryTime |= (0x01u << 31);										/* We use bit 32 to indicate if the deadline was missed! vTaskDelayUntil() does not block. */
 	}
 
     if (buffer != NULL) {
@@ -556,10 +611,9 @@ void trace_delayUntil(uint32_t* prev, uint32_t timeInc, uint32_t tickCount) {
     }
 
 #ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, 8);                           /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }
 
 /**
@@ -571,7 +625,6 @@ void trace_delay(uint32_t delayTime) {
     uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
     uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_DELAY);      		        /* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -579,10 +632,9 @@ void trace_delay(uint32_t delayTime) {
     }
 
 #ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, 8);                           /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }
 
 /**
@@ -600,7 +652,6 @@ void trace_isrEnter(void) {
 #endif
     uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_ISR_ENTER);        		/* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -608,10 +659,9 @@ void trace_isrEnter(void) {
     }
 
 #ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, 8);                           /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }
 
 /**
@@ -623,17 +673,15 @@ void trace_isrExit(void) {
     uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
     uint32_t* buffer = trace_getEventBuffer(1);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_ISR_EXIT);         		/* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
     }
 
 #ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, 4);                           /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    trace_rttWrite(buffer, 4);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }
 
 /**
@@ -643,19 +691,18 @@ void trace_isrExit(void) {
 void trace_isrExitToScheduler(void) {
 
     uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    *getIdleRunning() = false;                                      		/* The scheduler runs next, a switch back to idle is traced again */
     uint32_t* buffer = trace_getEventBuffer(1);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_ISR_EXIT_TO_SCHEDULER);	/* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
     }
 
 #ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, 4);                           /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    trace_rttWrite(buffer, 4);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }
 
 /**
@@ -667,17 +714,71 @@ void trace_timeZero(void) {
     uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
     uint32_t* buffer = trace_getEventBuffer(1);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_TIME_START);	/* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
     }
 
 #ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();                       		/* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, 4);                           /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    trace_rttWrite(buffer, 4);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+}
+
+/**
+ * @brief Record the format version of the trace. Called by trace_init().
+ *
+ */
+void trace_formatVersion(void) {
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_VERSION);          		/* Encodes the event ID and the timestamp delta */
+
+    if (buffer != NULL) {
+        buffer[0] = identifyer;
+        buffer[1] = TRACE_FORMAT_VERSION;
+    }
+
+#ifdef TRACE_RTT
+    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
+#endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+}
+
+/**
+ * @brief Record that a task blocks on a queue, semaphore or task notification.
+ *
+ */
+void trace_taskBlock(uint32_t taskId) {
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_TASK_BLOCK);       		/* Encodes the event ID and the timestamp delta */
+
+    if (buffer != NULL) {
+        buffer[0] = identifyer;
+        buffer[1] = taskId;
+    }
+
+#ifdef TRACE_RTT
+    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
+#endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+}
+
+/**
+ * @brief Remembers the event group the port creates before trace_init() for the SDK locks.
+ */
+void trace_eventGroupCreate(uint32_t eventGroup) {
+	if (!traceInitialized) {
+		internalEventGroup = eventGroup;
+	}
+}
+
+/**
+ * @brief True for the port's internal event group, whose waits are not traced.
+ */
+int trace_isInternalEventGroup(uint32_t eventGroup) {
+	return eventGroup != 0 && eventGroup == internalEventGroup;
 }
 
 /**
@@ -689,7 +790,6 @@ void trace_eventGroupWait(uint32_t taskId) {
     uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
     uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_TASK_EVT_GROUP_WAIT);  /* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -697,10 +797,9 @@ void trace_eventGroupWait(uint32_t taskId) {
     }
 
 #ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, 8);                           /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }
 
 /**
@@ -712,7 +811,6 @@ void trace_eventGroupSync(uint32_t taskId) {
     uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
     uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_TASK_EVT_GROUP_SYNC);  /* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -720,10 +818,9 @@ void trace_eventGroupSync(uint32_t taskId) {
     }
 
 #ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, 8);                           /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }
 
 /**
@@ -734,7 +831,6 @@ void trace_mutexCreate(uint32_t mutexId) {
     uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
     uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_MUTEX_CREATE);             /* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -742,10 +838,9 @@ void trace_mutexCreate(uint32_t mutexId) {
     }
 
 #ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, 8);                           /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }
 
 /**
@@ -756,7 +851,6 @@ void trace_mutexTake(uint32_t mutexId) {
     uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
     uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_MUTEX_TAKE);             /* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -764,10 +858,9 @@ void trace_mutexTake(uint32_t mutexId) {
     }
 
 #ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, 8);                           /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }
 
 /**
@@ -778,7 +871,6 @@ void trace_mutexGive(uint32_t mutexId) {
     uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
     uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_MUTEX_GIVE);             /* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -786,10 +878,9 @@ void trace_mutexGive(uint32_t mutexId) {
     }
 
 #ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, 8);                           /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }
 
 /**
@@ -800,7 +891,6 @@ void trace_jldJobFinished(uint32_t period_us) {
     uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
     uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
     uint32_t identifyer = trace_encodeTime(TRACE_JLDJOB_FINISHED);          /* Encodes the event ID and the timestamp delta */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 
     if (buffer != NULL) {
         buffer[0] = identifyer;
@@ -808,8 +898,7 @@ void trace_jldJobFinished(uint32_t period_us) {
     }
 
 #ifdef TRACE_RTT
-    irqState = save_and_disable_interrupts();              		            /* Disable interrupts on the current core */
-    SEGGER_RTT_Write(getRttChannel(), buffer, 8);                           /* Add the data to the RTT buffer of this core. */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
 #endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }

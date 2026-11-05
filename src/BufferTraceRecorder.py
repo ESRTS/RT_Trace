@@ -37,12 +37,16 @@ def recorder_thread(gui):
     frequency = int(config.get(configName,'frequency', fallback = '4_000_000'))
     measure_seconds = float(config.get(configName,'measure_seconds', fallback = '10.0'))
 
-    if elf is None:
-        HelperFunctions.printState("ERROR", info="No elf-file configured")
+    if elf is None or not os.path.exists(elf):
+        HelperFunctions.printState("ERROR ELF not found", info=str(elf) + " does not exist. Build the program first.")
         return 
     
     # Record the trace from the target platform
-    record_data(HelperFunctions.getTargetName(gui), elf, probe, target, frequency, measure_seconds, filename1, filename2)
+    try:
+        record_data(HelperFunctions.getTargetName(gui), elf, probe, target, frequency, measure_seconds, filename1, filename2)
+    except Exception as e:      # One line for the user, the traceback in record_error.log
+        HelperFunctions.reportError("Recording failed", e, folderName, "record_error.log",
+                                    HelperFunctions.recordHint(e), context=HelperFunctions.recordContext(gui, elf))
 
 def parse_int(value: str) -> int:
     return int(value, 0)
@@ -76,18 +80,25 @@ def record_data(configName, elf, probe, target, frequency, measure_seconds, file
     configName is the config.ini section with the buffer addresses and size (e.g. Pico2_FreeRTOS_SRAM).
     """
     config = HelperFunctions.readConfig()
-    
-    address_buffer0_str = config.get(configName,'buffer0', fallback = None)
-    address_buffer1_str = config.get(configName,'buffer1', fallback = None)
-    buffer_length_str = config.get(configName,'bufferSize', fallback = None)
-    
-    assert address_buffer0_str != None, "Could not read address_buffer0 from config file!"
-    assert address_buffer1_str != None, "Could not read address_buffer1 from config file!"
-    assert buffer_length_str != None, "Could not read buffer_length from config file!"
 
-    address_buffer0 = int(address_buffer0_str, 0)
-    address_buffer1 = int(address_buffer1_str, 0)
-    buffer_length = int(buffer_length_str, 0)
+    # SRAM buffers are arrays in the program: take their address and size from the ELF, so they always
+    # match the build. PSRAM buffers are fixed addresses behind pointers, they come from the config.
+    buffer0 = HelperFunctions.getElfSymbol(elf, "traceBuffer_core0") if os.path.exists(elf) else None
+    buffer1 = HelperFunctions.getElfSymbol(elf, "traceBuffer_core1") if os.path.exists(elf) else None
+    if buffer0 is not None and buffer1 is not None and buffer0[1] > 4 and buffer0[1] == buffer1[1]:
+        address_buffer0, buffer_length = buffer0
+        address_buffer1 = buffer1[0]
+    else:
+        address_buffer0_str = config.get(configName,'buffer0', fallback = None)
+        address_buffer1_str = config.get(configName,'buffer1', fallback = None)
+        buffer_length_str = config.get(configName,'bufferSize', fallback = None)
+        if None in (address_buffer0_str, address_buffer1_str, buffer_length_str):
+            HelperFunctions.printState("ERROR no trace buffers", info=os.path.basename(elf) + " has no traceBuffer_core0/1 and the config section "
+                                       + configName + " has no buffer0, buffer1 and bufferSize. Build the program for the SRAM or PSRAM mode.")
+            return 1
+        address_buffer0 = int(address_buffer0_str, 0)
+        address_buffer1 = int(address_buffer1_str, 0)
+        buffer_length = int(buffer_length_str, 0)
 
     session = ConnectHelper.session_with_chosen_probe(
         unique_id=probe,
@@ -100,7 +111,7 @@ def record_data(configName, elf, probe, target, frequency, measure_seconds, file
     )
 
     if session is None:
-        print("No debug probe found.", file=sys.stderr)
+        HelperFunctions.printState("ERROR no debug probe", info=HelperFunctions.NO_PROBE_HINT)
         return 1
 
     with session:
@@ -118,7 +129,7 @@ def record_data(configName, elf, probe, target, frequency, measure_seconds, file
         hook_addr = symbol_provider.get_symbol_value("trace_init")
 
         if main_addr is None:
-            print("Could not resolve symbol: main", file=sys.stderr)
+            HelperFunctions.printState("ERROR not a program", info=os.path.basename(elf) + " has no main(). Select the ELF of a program.")
             return 1
         if hook_addr is None:
             HelperFunctions.printState("ERROR no tracing", info=HelperFunctions.noTracingHint(elf))
@@ -139,7 +150,7 @@ def record_data(configName, elf, probe, target, frequency, measure_seconds, file
         core.resume()
 
         if not wait_for_pc(core, hook_addr, timeout=10.0):
-            print("Timed out before reaching trace_init()", file=sys.stderr)
+            HelperFunctions.printState("ERROR program did not start", info="The program did not reach trace_init() within 10 s. It crashes or waits before it (for example in BSP_Init()). Check it with the debugger.")
             return 1
         print("Hit trace_init().")
 

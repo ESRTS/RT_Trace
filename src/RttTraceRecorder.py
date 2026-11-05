@@ -43,12 +43,16 @@ def rtt_thread(gui):
     frequency = int(config.get(configName,'frequency', fallback = '4_000_000'))
     measure_seconds = float(config.get(configName,'measure_seconds', fallback = '10.0'))
 
-    if elf is None:
-        HelperFunctions.printState("ERROR", info="No elf-file configured")
+    if elf is None or not os.path.exists(elf):
+        HelperFunctions.printState("ERROR ELF not found", info=str(elf) + " does not exist. Build the program first.")
         return 
     
     # Record the trace from the target platform
-    record_data(elf, probe, target, frequency, measure_seconds, filename1, filename2)
+    try:
+        record_data(elf, probe, target, frequency, measure_seconds, filename1, filename2)
+    except Exception as e:      # One line for the user, the traceback in record_error.log
+        HelperFunctions.reportError("Recording failed", e, folderName, "record_error.log",
+                                    HelperFunctions.recordHint(e), context=HelperFunctions.recordContext(gui, elf))
 
 def parse_int(value: str) -> int:
     return int(value, 0)
@@ -89,7 +93,7 @@ def record_data(elf, probe, target, frequency, measure_seconds, filename1, filen
     )
 
     if session is None:
-        print("No debug probe found.", file=sys.stderr)
+        HelperFunctions.printState("ERROR no debug probe", info=HelperFunctions.NO_PROBE_HINT)
         return 1
 
     with session:
@@ -108,13 +112,13 @@ def record_data(elf, probe, target, frequency, measure_seconds, filename1, filen
         rtt_addr = symbol_provider.get_symbol_value("_SEGGER_RTT")
 
         if main_addr is None:
-            print("Could not resolve symbol: main", file=sys.stderr)
+            HelperFunctions.printState("ERROR not a program", info=os.path.basename(elf) + " has no main(). Select the ELF of a program.")
             return 1
         if hook_addr is None:
             HelperFunctions.printState("ERROR no tracing", info=HelperFunctions.noTracingHint(elf))
             return 1
         if rtt_addr is None:
-            print("Could not resolve symbol: _SEGGER_RTT", file=sys.stderr)
+            HelperFunctions.printState("ERROR no RTT", info=os.path.basename(elf) + " has no RTT control block (_SEGGER_RTT), so it was built for the SRAM or PSRAM mode. Enable TRACE_RTT in traceConfig.h and build again, or select the platform that matches the build.")
             return 1
         
         print(f"main() at 0x{main_addr:08X}")
@@ -132,7 +136,7 @@ def record_data(elf, probe, target, frequency, measure_seconds, filename1, filen
         core.resume()
 
         if not wait_for_pc(core, hook_addr, timeout=10.0):
-            print("Timed out before reaching trace_init()", file=sys.stderr)
+            HelperFunctions.printState("ERROR program did not start", info="The program did not reach trace_init() within 10 s. It crashes or waits before it (for example in BSP_Init()). Check it with the debugger.")
             return 1
         print("Hit trace_init().")
         
@@ -147,7 +151,7 @@ def record_data(elf, probe, target, frequency, measure_seconds, filename1, filen
         rtt.start()
 
         if len(rtt.up_channels) < 3:
-            print(f"Need at least 3 RTT up channels, found {len(rtt.up_channels)}", file=sys.stderr)
+            HelperFunctions.printState("ERROR RTT channels missing", info="The program has " + str(len(rtt.up_channels)) + " RTT up channels, the trace needs 3. Build it again with the current RT_Trace target code.")
             return 1
         print("Read information for RTT channel 1 and 2.")
         ch1 = rtt.up_channels[1]

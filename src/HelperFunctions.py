@@ -5,9 +5,12 @@ import platform
 from datetime import datetime
 import configparser
 import subprocess
+import tempfile
+import traceback
 import tkinter.font
 from threading import Thread
 from elftools.elf.elffile import ELFFile
+from elftools.common.exceptions import ELFError
 
 def getCwd():
     """
@@ -111,6 +114,8 @@ def startWorker(gui, worker, onFinished):
         result = None
         try:
             result = worker(gui)
+        except Exception as e:      # Last resort: the workers report their own errors, but no traceback may reach the GUI log
+            reportError("Unexpected error", e, None, "rt-trace_error.log", "Please report this together with the log file.")
         finally:
             if gui is not None:
                 gui.runInMainThread(lambda: onFinished(result))
@@ -121,6 +126,60 @@ def printState(state: str, info=""):
     
     print("=> " + state.upper(), end="")    # Separate writes, so the output box highlights only the state
     print(" " + info)
+
+def writeErrorLog(folder, fileName, exc, context=""):
+    """
+    Writes the traceback of exc to fileName in folder (or the temp folder) and returns the path, or None.
+    """
+    for base in ([folder] if folder else []) + [tempfile.gettempdir()]:
+        try:
+            os.makedirs(base, exist_ok=True)
+            path = os.path.join(base, fileName)
+            with open(path, "w") as f:
+                f.write(datetime.now().isoformat(timespec="seconds") + "\n")
+                if context:
+                    f.write(context.rstrip() + "\n")
+                f.write("\n" + "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+            return path
+        except OSError:
+            continue
+    return None
+
+def reportError(what, exc, folder, logName, hint="", context="", showType=True):
+    """
+    Prints one error line for exc with a hint, and writes the full traceback to a log file.
+    showType adds the exception type, for errors that are not meant for the user.
+    """
+    path = writeErrorLog(folder, logName, exc, context)
+    message = str(exc) if str(exc) else type(exc).__name__
+    if showType and type(exc).__name__ not in message:
+        message = type(exc).__name__ + ": " + message
+    info = message.rstrip(".") + "."
+    if hint:
+        info += " " + hint
+    if path:
+        info += " Details: " + path
+    printState("ERROR " + what, info=info)
+
+def recordHint(exc):
+    """
+    A hint for an error that the debug probe or pyOCD raised while recording.
+    """
+    text = (type(exc).__name__ + " " + str(exc)).lower()
+    if any(k in text for k in ("no probe", "usb", "libusb", "access denied", "permission", "busy", "unable to open")):
+        return ("Connect the debug probe, close other programs that use it (OpenOCD, the VS Code debugger, another RT-Trace) "
+                "and on Linux install the udev rules (see the ES-Lab-Kit README).")
+    if any(k in text for k in ("timeout", "transfer", "fault", "swd", "dap")):
+        return "The probe lost the connection to the RP2350. Check the SWD cable and the board power, or lower frequency in the config."
+    if "elf" in text:
+        return "Build the program first."
+    return "Check the probe connection and that the program runs (see the details)."
+
+def recordContext(gui, elf):
+    return "Program: " + str(elf) + "\nPlatform: " + getTargetName(gui) + "\nRecording: " + str(gui.recordingFolder)
+
+NO_PROBE_HINT = ("No debug probe found. Connect the debug probe to USB and to the SWD pins of the lab kit, "
+                 "close other programs that use it, and on Linux install the udev rules (see the ES-Lab-Kit README).")
 
 def printHeader(header:str):
     print("\n=== " + header.upper() + " ===")
@@ -349,6 +408,22 @@ def elfHasSymbol(elfFilePath, name):
     with open(elfFilePath, "rb") as f:
         symtab = ELFFile(f).get_section_by_name(".symtab")
         return symtab is not None and bool(symtab.get_symbol_by_name(name))
+
+def getElfSymbol(elfFilePath, name):
+    """
+    Returns (address, size in bytes) of a symbol in an ELF file, or None if it is not there.
+    """
+    try:
+        with open(elfFilePath, "rb") as f:
+            symtab = ELFFile(f).get_section_by_name(".symtab")
+            if symtab is None:
+                return None
+            symbols = symtab.get_symbol_by_name(name)
+            if not symbols:
+                return None
+            return symbols[0]["st_value"], symbols[0]["st_size"]
+    except (OSError, ELFError):
+        return None
 
 def noTracingHint(elfFilePath):
     """

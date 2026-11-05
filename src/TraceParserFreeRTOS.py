@@ -42,6 +42,9 @@ TRACE_MUTEX_CREATE              = 18
 TRACE_MUTEX_TAKE                = 19
 TRACE_MUTEX_GIVE                = 20 
 TRACE_JLDJOB_FINISHED           = 21
+TRACE_EVENTS_LOST               = 22    # Payload: number of events the target could not write since the last written event
+TRACE_TASK_BLOCK                = 23    # The task blocks on a queue, semaphore or task notification
+TRACE_VERSION                   = 24    # Written by trace_init(), payload: format version (2: lost events are reported)
 
 # Those events are not in the original trace and are created during parsing
 #TRACE_IDLE_START                = 23
@@ -67,8 +70,24 @@ eventMap = {
     TRACE_MUTEX_CREATE: "TRACE_MUTEX_CREATE",
     TRACE_MUTEX_TAKE: "TRACE_MUTEX_TAKE",
     TRACE_MUTEX_GIVE: "TRACE_MUTEX_GIVE",
-    TRACE_JLDJOB_FINISHED: "TRACE_JLDJOB_FINISHED"
+    TRACE_JLDJOB_FINISHED: "TRACE_JLDJOB_FINISHED",
+    TRACE_EVENTS_LOST: "TRACE_EVENTS_LOST",
+    TRACE_TASK_BLOCK: "TRACE_TASK_BLOCK",
+    TRACE_VERSION: "TRACE_VERSION"
 }
+
+"""
+Word after the last event in SRAM/PSRAM trace buffers.
+"""
+END_MARKER = 0xaabbccdd
+
+"""
+Limits used to detect corrupt words in the event stream. A time delta above MAX_DELTA_US is
+treated as corruption: with IRQ tracing the tick ISR alone gives an event every few ms.
+Task names are at most MAX_NAME_WORDS words (configMAX_TASK_NAME_LEN is 16 on the Pico).
+"""
+MAX_DELTA_US = 5000000
+MAX_NAME_WORDS = 16
 
 """
 Task ID we use for the scheduler
@@ -115,7 +134,38 @@ def parseTraceFiles(gui, numCores):
 def parser_thread(gui, numCores):
     """
     Thread to parse the trace buffers. The trace events are then converted to tasks, jobs and execution segments.
+    Errors are reported as one line in the output, with the traceback in parse_error.log in the recording folder.
     """
+    folder = gui.viewingFolder
+    mode = HelperFunctions.getTargetName(gui)
+    try:
+        return loadRecording(gui, numCores)
+    except TraceInconsistency as e:
+        HelperFunctions.reportError("Trace data inconsistent", e, folder, "parse_error.log",
+            "Events were probably lost or corrupted (" + mode + "). Set strict = False in the config to load the trace with repairs.",
+            context=describeRecording(folder, mode), showType=False)
+    except Exception as e:      # Any other parser failure: one line for the user, the traceback in the log
+        HelperFunctions.reportError("Parsing failed", e, folder, "parse_error.log",
+            "This is a bug in RT-Trace or a damaged recording (" + mode + "). Please report it with the recording folder.",
+            context=describeRecording(folder, mode))
+    return None
+
+def describeRecording(folder, mode):
+    """
+    Context for error logs: platform, files and what the parser found so far.
+    """
+    lines = ["Recording: " + str(folder), "Platform: " + str(mode)]
+    for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+        if name.startswith("raw_buffer"):
+            lines.append(name + ": " + str(os.path.getsize(os.path.join(folder, name))) + " bytes")
+    report = lastReport or {}
+    lines.append("Lost events: " + str(report.get('eventsLost', 0)) + ", corrupt stream positions: " + str(len(report.get('desyncs', [])))
+                 + ", repairs: " + str(sum(repairs.values())))
+    for w in report.get('warnings', []):
+        lines.append("Warning: " + w)
+    return "\n".join(lines)
+
+def loadRecording(gui, numCores):
     bufferPaths = []
     
     # Get the tick id for each core from the config file.
@@ -126,17 +176,19 @@ def parser_thread(gui, numCores):
         tickIds = [int(x) for x in config.get(configName,'tickId').split(",")]
         global enable_entry_print
         enable_entry_print = config.getboolean(configName, 'print_events', fallback=False)
+        strict = config.getboolean(configName, 'strict', fallback=False)
         fixedBuffers = not HelperFunctions.getTargetName(gui).endswith('RTT')    # RTT streams the events, so there is no fixed buffer that can fill up.
     else:
         tickIds = [15, 42]
         fixedBuffers = True
+        strict = False
 
     for c in range(0,numCores):
         filename = os.path.abspath(os.path.join(gui.viewingFolder, 'raw_buffer' + str(c)))
 
         bufferPaths.append(Path(filename + ".txt"))
         if not bufferPaths[-1].is_file():
-            print("Error: File " + str(bufferPaths[-1]) + " does not exist!", file=sys.stderr)
+            HelperFunctions.printState("ERROR missing file", info=str(bufferPaths[-1]) + " does not exist. Record the trace again or select another recording.")
             return None
 
     allBuffers = []
@@ -151,8 +203,13 @@ def parser_thread(gui, numCores):
             HelperFunctions.hexdump(traceBuffer, base_addr=int(config.get(configName, "buffer"+str(core), fallback="0x00000000"),16))
         core = core + 1
 
+    if sum(len(b) for b in allBuffers) == 0:
+        HelperFunctions.printState("ERROR empty recording", info="The trace buffers in " + str(gui.viewingFolder) + " are empty. The program does not call trace_init(), or it stopped before"
+            " writing events (a failed configASSERT, a fault). Check it with the debugger and record again.")
+        return None
+
     eventFilePath = os.path.abspath(os.path.join(gui.viewingFolder, 'events.txt'))
-    tasks = parser(allBuffers, eventFilePath, tickIds, numCores, fixedBuffers)    # Parse the content of the trace buffers
+    tasks = parser(allBuffers, eventFilePath, tickIds, numCores, fixedBuffers, strict)    # Parse the content of the trace buffers
 
     # If this was called from the GUI, enable the buttons and update the GUI
     if gui is not None:
@@ -160,32 +217,68 @@ def parser_thread(gui, numCores):
 
     return tasks
 
-def parser(buffers, eventFilePath, tickIds, numCores, fixedBuffers=True):
+"""
+What the last call of parser() found besides the tasks: repaired inconsistencies, lost events,
+skipped corrupt stream positions and warnings. Used by the tests and the summary in the output.
+"""
+lastReport = {}
+
+def newReport():
+    return {'repairs': {}, 'eventsLost': 0, 'lostGaps': 0, 'desyncs': [], 'warnings': []}
+
+def warn(report, text):
+    report['warnings'].append(text)
+    HelperFunctions.printState("Warning", info=text)
+
+def parser(buffers, eventFilePath, tickIds, numCores, fixedBuffers=True, strict=False):
     """
     Function parses a variable number of trace buffers.
     Trace events are then converted to tasks, jobs and execution segments.
     The function returns an array with all trace tasks.
     fixedBuffers is False for streamed traces (RTT), which are not cut where a buffer is full.
+    With strict, inconsistent trace data raises TraceInconsistency instead of being repaired.
     """
+    global lastReport
     HelperFunctions.printHeader("parsing files")
 
+    report = newReport()
+    lastReport = report
+    resetRepairs(strict)
+
     events = []
-    parseTraceEvents(events, buffers, fixedBuffers)       # Parse the raw events from the trace files of each core
+    parseTraceEvents(events, buffers, fixedBuffers, report)       # Parse the raw events from the trace files of each core
 
     allTasks = []
-    allTasks = extractTraceInfo(events, eventFilePath, tickIds, numCores)     # Parse all trace tasks from the event trace (afterwards we have trace tasks, jobs and execution segments). 
+    allTasks = extractTraceInfo(events, eventFilePath, tickIds, numCores, report)     # Parse all trace tasks from the event trace (afterwards we have trace tasks, jobs and execution segments). 
     tasks = []
     
     for task in allTasks:                   # Some tasks might be created in the trace but never execute. We exclue those here. 
         if len(task.jobs) != 0:
             tasks.append(task)
 
+    summariseRepairs(report)
     return tasks
 
-def extractTraceInfo(events, eventFilePath, tickIds, numCores):
+def summariseRepairs(report):
+    """
+    Prints one line per kind of repaired inconsistency, with its first occurrence.
+    """
+    report['repairs'] = dict(repairs)
+    total = sum(repairs.values())
+    if total == 0:
+        return
+    hint = "events were lost or corrupted" if report['eventsLost'] > 0 or len(report['desyncs']) > 0 or report.get('droppedSuspected') \
+        else "events were probably lost"
+    warn(report, "Repaired " + str(total) + " inconsistencies in the trace data (" + hint + "). The schedule around them may be inaccurate:")
+    for key, count in repairs.most_common():
+        HelperFunctions.printState("  " + str(count) + "x", info=key + " (first " + repairExamples[key] + ")")
+
+def extractTraceInfo(events, eventFilePath, tickIds, numCores, report=None):
     """ 
     Extract trace information from the raw trace events. So we have information on task-level.
     """
+    if report is None:
+        report = newReport()
     tasks = []
 
     traceStart = None
@@ -220,6 +313,8 @@ def extractTraceInfo(events, eventFilePath, tickIds, numCores):
     if traceStart is None:
         traceStart = getTickStart(events, tickIds[0])
 
+    checkTickIntervals(events, tickIds[0], report)
+
     # Create tasks to represent the scheduler, tick ISR for each core.
     if numCores == 1:
         # Exclude the core in the name if there is only one core
@@ -238,17 +333,26 @@ def extractTraceInfo(events, eventFilePath, tickIds, numCores):
             tasks.append(TraceTask(id, "IRQ_" + str(tickIds[irq]) + "_C" + str(i), None, getTaskColor(id)))
 
     # All other tasks are parsed from the trace events. 
+    names = set()
     for evt in events:
         if evt.get('type') is TRACE_TASK_CREATE:    # Parse all task create events and create trace tasks for each.
             id = evt.get('taskId')
             prio = evt.get('priority')
             #name = evt.get('name').split('\\')[0]
             name = evt.get('name').split('\x00', 1)[0]
-            tmpTask = TraceTask(id, name, prio, getTaskColor(id))
+            unique = name
+            n = 2
+            while unique in names:                  # Two tasks with the same name get different rows
+                unique = name + " #" + str(n)
+                n = n + 1
+            names.add(unique)
+            tmpTask = TraceTask(id, unique, prio, getTaskColor(id))
             tasks.append(tmpTask)
         if evt.get('type') is TRACE_TASK_START_READY:   # We set the trace time t=0 to the first task ready event (if no TRACE_TIME_ZERO event was found).
             if traceStart is None:
                 traceStart = evt.get('ts')  # By convention we set the start of the first task to t=0
+
+    addTasksWithoutCreate(events, tasks, report)
 
     # Parse all mutex create events to map each mutex ID to a letter (max. 26 mutexes).
     mutex_id_to_letter: dict[int, str] = {}
@@ -262,29 +366,43 @@ def extractTraceInfo(events, eventFilePath, tickIds, numCores):
     # Prepare all events sorted by time to be processed by the state machine parser.
     allEvents = []
 
-    # Generate ISR Enter events
+    # Add ISR enter events that were lost. An ISR_EXIT whose core has no open ISR lost its ISR_ENTER
+    # (or the trace started inside the ISR). The ISR is short, so the enter is placed right before the
+    # exit, after the previous event of that core. The IRQ is assumed to be the last one seen on the core.
+    # Nested ISRs are tracked as a stack of IRQ ids per core. An IRQ cannot interrupt itself, so an
+    # ISR_ENTER of an IRQ that is on the stack means its ISR_EXIT was lost (parseIrq repairs that).
+    lastEvtOnCore = {}
+    isrStack = {}
+    lastIrqOnCore = {}
     for evt in events:
-        if (evt.get('type') == TRACE_ISR_EXIT) or (evt.get('type') is TRACE_ISR_EXIT_TO_SCHEDULER):
-            #if prevIrqEvt in allEvents:  # Always belongs to the last ISR event on this core
-            if (prevIrqEvt.get('type') == TRACE_ISR_EXIT) or (prevIrqEvt.get('type') == TRACE_ISR_EXIT_TO_SCHEDULER):
-                    # in rare cases it seems the ISR_ENTER event is missing/not generated. In this case, we 
-                    # detect this here and create such an event with the timestamp of the previous task event 
-                allEvents.append({'type':TRACE_ISR_ENTER, 'ts':prevTaskEvt.get('ts')-1, 'core':prevTaskEvt.get('core'), 'irqId':tickIds[prevTaskEvt.get('core')]})#prevIrqEvt.get('irqId')})
-                            
+        type = evt.get('type')
+        core = evt.get('core')
+        stack = isrStack.setdefault(core, [])
+        if type == TRACE_ISR_EXIT or type == TRACE_ISR_EXIT_TO_SCHEDULER:
+            if len(stack) == 0:
+                prevTs = lastEvtOnCore[core].get('ts') if core in lastEvtOnCore else evt.get('ts') - 1
+                irqId = lastIrqOnCore.get(core, tickIds[0])
+                ts = max(prevTs, evt.get('ts') - 1)
+                inconsistent("IRQ_" + str(irqId) + "_C" + str(core), ts, core, "exit without enter (enter added)")
+                allEvents.append({'type':TRACE_ISR_ENTER, 'ts':ts, 'core':core, 'irqId':irqId, 'added':True})
+            else:
+                stack.pop()
+        elif type == TRACE_ISR_ENTER:
+            irqId = evt.get('irqId')
+            if irqId in stack:
+                del stack[stack.index(irqId):]
+            stack.append(irqId)
+            lastIrqOnCore[core] = irqId
+
         allEvents.append(evt)
-                    
-        # Remember the previous task or ISR events.
-        if (evt.get('type') is TRACE_TASK_START_EXEC)or (evt.get('type') is TRACE_TASK_START_READY):# or (evt.get('type') is TRACE_TASK_STOP_EXEC) or (evt.get('type') is TRACE_TASK_START_READY) or (evt.get('type') is TRACE_TASK_STOP_READY):
-            prevTaskEvt = evt
-        elif (evt.get('type') is TRACE_ISR_ENTER) or (evt.get('type') is TRACE_ISR_EXIT) or (evt.get('type') is TRACE_ISR_EXIT_TO_SCHEDULER):
-            prevIrqEvt = evt
+        lastEvtOnCore[core] = evt
 
     sortedEvents = sorted(allEvents, key=lambda d: d['ts'])    # Sort all events of this task by timestamp. Since timestamps on cores are synchronised this can be done. Attention, if the platform does not support this!
 
     for evt in sortedEvents:
         if traceStart is not None:
             evt['ts'] = evt['ts'] - traceStart
-        eventFile.write('\tts: ' + "%06.3f" % (evt.get('ts')/1000) + "ms\t" + eventMap.get(evt.get('type')) + ":  " + str(evt) + "\n")
+        eventFile.write('\tts: ' + "%06.3f" % (evt.get('ts')/1000) + "ms\t" + eventMap.get(evt.get('type'), str(evt.get('type'))) + ":  " + str(evt) + "\n")
 
     executionParser(sortedEvents, tasks, tickIds, mutex_id_to_letter, numCores)
    #->  smParser(traceStart, sortedEvents, tasks, len(tickIds))
@@ -293,6 +411,27 @@ def extractTraceInfo(events, eventFilePath, tickIds, numCores):
     HelperFunctions.printState("Wrote events to", info=eventFilePath)
 
     return tasks
+
+def addTasksWithoutCreate(events, tasks, report):
+    """
+    Tasks created before trace_init() have no TASK_CREATE event. Add a task for every id that starts to
+    run at least twice, named after its id. Ids outside the SRAM come from corrupted events.
+    """
+    known = {t.id for t in tasks}
+    starts = {}
+    for evt in events:
+        if evt.get('type') == TRACE_TASK_START_EXEC:
+            id = evt.get('taskId')
+            if id not in known and 0x20000000 <= id < 0x20082000:
+                starts[id] = starts.get(id, 0) + 1
+    added = [id for id, n in starts.items() if n >= 2]
+    for id in sorted(added):
+        task = TraceTask(id, "Task_0x%08X" % id, None, getTaskColor(id))
+        task.readyBeforeTrace = True        # Its first READY event was before trace_init() as well
+        tasks.append(task)
+    if len(added) > 0:
+        warn(report, str(len(added)) + " tasks run without a create event, they are shown by their id. "
+             "They were created before trace_init(): call trace_init() before creating tasks to see their names.")
 
 def map_mutex_id(mutex_map, mutex_id: int) -> str | None:
     """
@@ -318,6 +457,7 @@ def executionParser(sortedEvents, tasks, tickIds, mutex_id_to_letter, numCores):
 
     # This hardcodes that there are 2 cores, should be generalized!
     core1Flag = False
+    delayUntilTasks = tasksUsingDelayUntil(sortedEvents)
 
     for task in tasks:
 
@@ -328,7 +468,7 @@ def executionParser(sortedEvents, tasks, tickIds, mutex_id_to_letter, numCores):
         elif task.id <= len(tickIds) * numCores: #in tickIds:
             parseIrq(sortedEvents, task)
         else:
-            parseTask(sortedEvents, task, mutex_id_to_letter, tickIds[0])
+            parseTask(sortedEvents, task, mutex_id_to_letter, tickIds[0], delayUntilTasks)
             for job in task.jobs:
                 for execInterval in job.execIntervals:
                     if execInterval.core == 1:
@@ -357,8 +497,9 @@ def parseScheduler(sortedEvents, schedulerTask):
 
         if core == coreId:
             if type == TRACE_ISR_EXIT_TO_SCHEDULER:
-                schedulerTask.newJob(ts, None)
-                schedulerTask.startExec(ts, core, ExecutionType.EXECUTE)
+                if schedulerTask.currentJob is None:    # Otherwise the scheduler is already running
+                    schedulerTask.newJob(ts, None)
+                    schedulerTask.startExec(ts, core, ExecutionType.EXECUTE)
             elif type == TRACE_TASK_STOP_EXEC:
                 # Here we need to distinguish if this was triggered by a task that finished executing between ticks or not.
                 if schedulerTask.currentJob is not None:
@@ -383,9 +524,13 @@ def parseIdleTask(sortedEvents, task):
         ts = evt.get('ts')
 
         if type == TRACE_IDLE and coreId == core:
-            #print(f"IDLE started at t={ts}")
-            task.newJob(ts, None)
-            task.startExec(ts, core, ExecutionType.EXECUTE)
+            # IDLE is a state: it runs until another task starts or an ISR interrupts it. With preemption
+            # off, the idle task yields to itself and older firmware emits TRACE_IDLE on every yield.
+            if task.currentJob is None:
+                task.newJob(ts, None)
+                task.startExec(ts, core, ExecutionType.EXECUTE)
+            elif task.currentJob.activeInterval is None:
+                task.startExec(ts, core, ExecutionType.EXECUTE)
 
         if task.currentJob is not None:
             if type == TRACE_TASK_START_EXEC:
@@ -418,19 +563,59 @@ def parseIdleTask(sortedEvents, task):
         task.stopExec(ts)
         task.finishJob()
 
-def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
+def nextTaskEvent(sortedEvents, i, taskId):
+    """
+    Returns the type of the next START_READY or START_EXEC event of the task after index i, or None.
+    """
+    for j in range(i + 1, len(sortedEvents)):
+        followingEvent = sortedEvents[j]
+        if followingEvent.get('taskId') == taskId and followingEvent.get('type') in (TRACE_TASK_START_READY, TRACE_TASK_START_EXEC):
+            return followingEvent.get('type')
+    return None
+
+def releaseAtTick(tickTs, tick, ts):
+    """
+    Timestamp of the tick with the given tick count, as a release time for a job that starts at ts.
+    tickTs[n] is the tick ISR that increments the tick count to n. If that tick is not in the trace
+    (the trace starts late or ticks were lost), the last tick before ts is used.
+    """
+    if tick is not None and 0 <= tick < len(tickTs) and tickTs[tick] <= ts:
+        release = tickTs[tick]
+    else:
+        release = max([t for t in tickTs[-2:] if t <= ts], default=ts)
+    return max(release, 0)
+
+def tasksUsingDelayUntil(sortedEvents):
+    """
+    Ids of the tasks that call vTaskDelayUntil(). Their jobs end there, so a vTaskDelay() in such a task
+    is a pause inside the job. DELAY_UNTIL carries no task id, it belongs to the task running on its core.
+    """
+    running = {}
+    result = set()
+    for evt in sortedEvents:
+        type = evt.get('type')
+        if type == TRACE_TASK_START_EXEC:
+            running[evt.get('core')] = evt.get('taskId')
+        elif type == TRACE_DELAY_UNTIL and running.get(evt.get('core')) is not None:
+            result.add(running[evt.get('core')])
+    return result
+
+def parseTask(sortedEvents, task, mutex_id_to_letter, tickId, delayUntilTasks=frozenset()):
     """
     Parses the execution of a single task.
     """
     
     finishJob = False           # Flag to indicate that the job is about to finish.
     finishJobOnEventGroup = False   # The finish flag comes from an event group wait/sync, which is traced on entry, before the task blocks.
+    delayKind = None            # TRACE_DELAY_UNTIL or TRACE_DELAY if the finish flag comes from a delay
+    delayWake = None            # Tick count to wake up at of the last vTaskDelayUntil
     deadlineMiss = False        # Flag to indicate that a deadline was missed.
     startExecCore = None        # Task started to execute on this core.
     lastExecTask = None         # Keep track of the last task started on the core.
+    isrDepth = {}               # Nesting depth of ISRs on each core
+    pausedByIsr = False         # The task was running when the outermost ISR started
     jldJobNextRelDelta = None   # Used for JLD jobs only, indicates that the next job is released automatically relative to the previous release.
     tickTs = []                 # We keep track if tick timestamps to be able to handle deadline misses.
-    missedDeadlineAt = None     # Record the tick at which the release should have happened after a deadline miss.
     tickTs.append(0)            # By default the first tick appears at t=0
 
     for i, evt in enumerate(sortedEvents):
@@ -450,6 +635,7 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
                     task.newJob(ts, None)
 
         if type == TRACE_TASK_START_EXEC:
+            isrDepth[core] = 0      # Context switches run outside of ISRs
             #if task.currentJob is not None: # If there is an active job, and this event if from the same core, remember the task id
             if core == startExecCore:
                 lastExecTask = taskId
@@ -462,6 +648,9 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
                 #     if next_evt.get('type') == TRACE_DEADLINE_MISS and next_evt.get('taskId') == task.id: 
                 #         task.newJob(ts, None)
 
+                if task.currentJob is None and getattr(task, 'readyBeforeTrace', False):
+                    task.newJob(ts, None, core)
+                task.readyBeforeTrace = False
                 task.startExec(ts, core, ExecutionType.EXECUTE)
                 startExecCore = core
                 lastExecTask = taskId
@@ -473,23 +662,26 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
                     if task.currentJob.activeInterval is not None:
                         task.stopExec(ts)
                     startExecCore = None
+                    nextOwn = nextTaskEvent(sortedEvents, i, task.id) if finishJob else None
                     if finishJob and finishJobOnEventGroup:
                         # The task may be preempted (or not block at all) after the wait/sync. The job only ends
                         # if the task becomes ready again before it executes next.
-                        for followingEvent in sortedEvents[i + 1:]:
-                            if followingEvent.get('taskId') == task.id and followingEvent.get('type') in (TRACE_TASK_START_READY, TRACE_TASK_START_EXEC):
-                                finishJob = followingEvent.get('type') == TRACE_TASK_START_READY
-                                break
+                        if nextOwn is not None:
+                            finishJob = nextOwn == TRACE_TASK_START_READY
                         finishJobOnEventGroup = False
                     if finishJob == True:
                         finishJob = False
                         #print(f"Finish job at {ts}")
-                        task.finishJob()
+                        task.finishJob(ts, core)
 
-                        if deadlineMiss == True:
-                            deadlineMiss = False
-                            releaseTs = tickTs[missedDeadlineAt]    # Get the timestamp of the tick where the task should have been released.
-                            task.newJob(releaseTs, None)            # Release the job at the intended tick time.
+                        # A delay that does not block (the wake time has passed, or vTaskDelay(0)) only yields.
+                        # The task stays ready, so its next job starts without a READY event.
+                        if delayKind == TRACE_DELAY_UNTIL and (nextOwn == TRACE_TASK_START_EXEC or (nextOwn is None and deadlineMiss)):
+                            task.newJob(releaseAtTick(tickTs, delayWake, ts), None, core)     # Released at the tick it waited for
+                        elif delayKind == TRACE_DELAY and nextOwn == TRACE_TASK_START_EXEC:
+                            task.newJob(ts, None, core)
+                        deadlineMiss = False
+                        delayKind = None
 
                         if jldJobNextRelDelta != None:
                             """
@@ -499,24 +691,33 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
                             task.newJob(lastJob.releaseTime + jldJobNextRelDelta, None) 
                             jldJobNextRelDelta = None
 
-        if type == TRACE_EVT_GROUP_SYNC or type == TRACE_EVT_GROUP_WAIT:
+        if type == TRACE_EVT_GROUP_SYNC or type == TRACE_EVT_GROUP_WAIT or (type == TRACE_TASK_BLOCK and task.id not in delayUntilTasks):
+            # The job ends where the task blocks, if it becomes ready (released) before it runs again. A task that
+            # ends its jobs with vTaskDelayUntil() blocks on a queue or semaphore inside the job (a lock, a message).
             if task.id == taskId:
                 finishJob = True
                 finishJobOnEventGroup = True
+                delayKind = None
 
         elif type == TRACE_ISR_ENTER:
-            if startExecCore == core:
-                if lastExecTask == task.id:
+            # The task pauses for the outermost ISR on its core and resumes when that ISR returns to it.
+            # After an exit to the scheduler the task stays paused until the next context switch, also
+            # if another ISR runs before it.
+            depth = isrDepth.get(core, 0)
+            isrDepth[core] = depth + 1
+            if depth == 0 and startExecCore == core and lastExecTask == task.id:
+                pausedByIsr = task.currentJob is not None and task.currentJob.activeInterval is not None
+                if pausedByIsr:
                     #print(f"Stop execution due to ISR at {ts}")
                     task.stopExec(ts)
             irqId = evt.get('irqId')
             if irqId == tickId:
                 tickTs.append(ts)
-        elif type == TRACE_ISR_EXIT:
-            if startExecCore == core:
-                if lastExecTask == task.id:
-                    #print(f"Stop execution due to ISR at {ts}")
-                    task.startExec(ts, core, ExecutionType.EXECUTE)
+        elif type == TRACE_ISR_EXIT or type == TRACE_ISR_EXIT_TO_SCHEDULER:
+            isrDepth[core] = max(0, isrDepth.get(core, 0) - 1)
+            if type == TRACE_ISR_EXIT and isrDepth[core] == 0 and pausedByIsr and startExecCore == core and lastExecTask == task.id:
+                task.startExec(ts, core, ExecutionType.EXECUTE)
+                pausedByIsr = False
 
         elif type == TRACE_DELAY_UNTIL:
             if startExecCore == core:
@@ -524,16 +725,17 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
                     #print(f"Delay Until called at {ts}")
                     finishJob = True
                     finishJobOnEventGroup = False
-                    if evt.get('deadlineMiss') == True:
-                        missedDeadlineAt = evt.get('timeToWake')
-                        deadlineMiss = True
+                    delayKind = TRACE_DELAY_UNTIL
+                    delayWake = evt.get('timeToWake')
+                    deadlineMiss = evt.get('deadlineMiss') == True
         
         elif type == TRACE_DELAY:
-            if startExecCore == core:
+            if startExecCore == core and task.id not in delayUntilTasks:   # Otherwise vTaskDelay() only pauses the job
                 if lastExecTask == task.id:
                     #print(f"Delay called at {ts}")
                     finishJob = True
                     finishJobOnEventGroup = False
+                    delayKind = TRACE_DELAY
 
         elif type == TRACE_MUTEX_TAKE:
             if startExecCore == core:
@@ -568,6 +770,7 @@ def parseIrq(sortedEvents, irqTask):
     """
 
     enterCore = None
+    afterEnterTs = None     # Timestamp of the first event on the core after the open ISR_ENTER
 
     # For each IRQ, we have one task on each core. We need to get the core and the IRQ number from the task name. 
     irqTaskCore = int(irqTask.name.rsplit("_C", 1)[1])
@@ -575,26 +778,34 @@ def parseIrq(sortedEvents, irqTask):
 
     for evt in sortedEvents:
         type = evt.get('type')
+        core = evt.get('core')
+        if core != irqTaskCore:
+            continue
+        ts = evt.get('ts')
 
-        if type in [TRACE_ISR_EXIT, TRACE_ISR_EXIT_TO_SCHEDULER, TRACE_ISR_ENTER]:
-            core = evt.get('core')
-            ts = evt.get('ts')
-            irqId = evt.get('irqId')
+        if type == TRACE_ISR_ENTER and evt.get('irqId') == irq_number:
+            if irqTask.currentJob is not None:
+                # The ISR_EXIT of the previous run was lost. ISRs are short, so it ended before the next event on its core.
+                inconsistent(irqTask.name, ts, core, "entered again without exit (exit added)")
+                endTs = afterEnterTs if afterEnterTs is not None else ts
+                irqTask.stopExec(endTs)
+                irqTask.finishJob(endTs, core)
+            irqTask.newJob(ts, None, core)
+            irqTask.startExec(ts, core, ExecutionType.EXECUTE)
+            enterCore = core
+            afterEnterTs = None
+            continue
 
-            if irqId == irq_number and core == irqTaskCore:
+        if enterCore is not None and afterEnterTs is None:
+            afterEnterTs = ts
 
-                if type == TRACE_ISR_ENTER:
-                    irqTask.newJob(ts, None)
-                    irqTask.startExec(ts, core, ExecutionType.EXECUTE)
-                    enterCore = core
+        if type == TRACE_ISR_EXIT or type == TRACE_ISR_EXIT_TO_SCHEDULER:
+            if core == enterCore:
+                irqTask.stopExec(ts)
+                irqTask.finishJob(ts, core)
+                enterCore = None
 
-            if type == TRACE_ISR_EXIT or type == TRACE_ISR_EXIT_TO_SCHEDULER:
-                if core == enterCore:
-                    irqTask.stopExec(ts)
-                    irqTask.finishJob()
-                    enterCore = None
-    
-def parseTraceEvents(events, buffers, fixedBuffers=True):
+def parseTraceEvents(events, buffers, fixedBuffers=True, report=None):
     """
     This function converts the trace buffer of the traget into processable trace events.
     As buffers of different cores can contain events up to different timestamps, this function
@@ -602,6 +813,8 @@ def parseTraceEvents(events, buffers, fixedBuffers=True):
     any core. Otherwise, trace data can be inconsistent (for example under FreeRTOS new task instances 
     become ready on core 0, even if they are mapped to a different core.)
     """
+    if report is None:
+        report = newReport()
     coreId = 0
 
     bufferEvents = []
@@ -612,12 +825,29 @@ def parseTraceEvents(events, buffers, fixedBuffers=True):
 
         parser = EventParser(buffer)
 
+        lost = 0
+        lostGaps = 0
         while True:
             evt = parser.read_event(coreId)
             if evt is None:
                 break
+            if evt.get('type') == TRACE_EVENTS_LOST:
+                lost += evt.get('count')
+                lostGaps += 1
             bufferEvents[-1].append(evt)
         HelperFunctions.printState("Core " + str(coreId), info=str(len(bufferEvents[-1])) + " events")
+        for offset, words in parser.desyncs:
+            report['desyncs'].append((coreId, offset, words))
+        if len(parser.desyncs) > 0:
+            skipped = sum(w for _, w in parser.desyncs)
+            first = parser.desyncs[0][0]
+            warn(report, "Core " + str(coreId) + ": skipped " + str(skipped) + " corrupt words at " + str(len(parser.desyncs))
+                 + " positions in the event stream (first at byte " + str(first) + "). Events there are lost.")
+        if lost > 0:
+            report['eventsLost'] += lost
+            report['lostGaps'] += lostGaps
+            warn(report, "Core " + str(coreId) + ": the target lost " + str(lost) + " events in " + str(lostGaps)
+                 + " gaps because the RTT buffer was full. Fewer events (IDLE trace, printf, fast IRQs) or the SRAM mode avoid this.")
         if parser.isFull() and len(bufferEvents[-1]) > 0:
             fullBuffers.append(coreId)
         coreId = coreId + 1
@@ -661,9 +891,12 @@ class EventParser:
         The object gets a trace buffer in bytearray format as argument.
         """
         self.maxBytes = len(inBuffer)
+        self.raw = inBuffer
         self.buffer = file = io.BytesIO(inBuffer)
         self.time = 0
         self.bytesRead = 0   
+        self.ended = False      # The end marker of an SRAM/PSRAM buffer was read
+        self.desyncs = []       # [byte offset, number of skipped words] of each corrupt stretch
 
     def isFull(self):
         """
@@ -704,23 +937,56 @@ class EventParser:
         else:
             return None
 
+    def seek(self, pos):
+        self.buffer.seek(pos)
+        self.bytesRead = pos
+
+    def skipWord(self, pos):
+        """
+        Skips the corrupt word at byte pos and continues with the next word.
+        Consecutive skipped words count as one corrupt stretch.
+        """
+        if len(self.desyncs) > 0 and self.desyncs[-1][0] + 4 * self.desyncs[-1][1] == pos:
+            self.desyncs[-1][1] += 1
+        else:
+            self.desyncs.append([pos, 1])
+        self.seek(pos + 4)
+
     def read_event(self, coreId):
         """
-        Function reads the next event of the trace buffer.
+        Function reads the next event of the trace buffer. Returns None at the end of the data.
+        A word that is not a valid event header (corrupted or misaligned data) is skipped, and the
+        parser continues with the next word, so one damaged event does not cut the trace.
         """
-        b = self.readBytes(3)
-        if b is None:
-            return None
-        
-        #print("Time       ", "".join([f"\\x{byte:02x}" for byte in b]))
-        deltaTime = int.from_bytes(b, byteorder='little', signed=False)
-        
-        b = b = self.readBytes(1)
-        if b is None:
-            return None
-        
-        eventId = int.from_bytes(b, byteorder='little', signed=False)
-        #print("Identifyer ", "".join([f"\\x{byte:02x}" for byte in b]), " -> ", eventId)
+        while not self.ended:
+            start = self.bytesRead
+            b = self.readBytes(4)
+            if b is None:
+                return None
+            word = int.from_bytes(b, byteorder='little', signed=False)
+            if word == END_MARKER:
+                self.ended = True
+                return None
+            eventId = word >> 24
+            deltaTime = word & 0xffffff
+            if eventId in eventMap and deltaTime <= MAX_DELTA_US:
+                time = self.time
+                evt = self.decodeEvent(coreId, eventId, deltaTime)
+                if evt is not None and evt != "invalid":
+                    return evt
+                if evt is None:
+                    return None     # The data ends inside the event
+                self.time = time
+            elif word == 0 and not any(self.raw[start:]):
+                return None         # Zero padding up to the end of the buffer
+            self.skipWord(start)
+        return None
+
+    def decodeEvent(self, coreId, eventId, deltaTime):
+        """
+        Reads the payload of an event. Returns the event, None if the data ends inside it,
+        or "invalid" if the payload can't be valid.
+        """
         self.time = self.time + deltaTime # Compute the current timestamp in absolute time
         
         if eventId == TRACE_IDLE:
@@ -760,12 +1026,17 @@ class EventParser:
             if taskId is None:
                 return None
             strLen = self.readInteger()
+            if strLen is not None and strLen > MAX_NAME_WORDS:
+                return "invalid"
             if strLen is None:
                 return None
             priority = self.readInteger()
             if priority is None:
                 return None
-            name = self.readBytes(strLen * 4).decode('UTF-8')
+            name = self.readBytes(strLen * 4)
+            if name is None:
+                return None
+            name = name.decode('UTF-8', errors='replace')
             entryPrint("[t=" + str(self.time) + "us] TRACE_TASK_CREATE      -> Task: " + name + " ID: " + str(taskId) + " with priority: " + str(priority) + " Core: " + str(coreId))
             evt = {'type':TRACE_TASK_CREATE, 'ts':self.time, 'core':coreId, 'taskId':taskId, 'name':name, 'priority':priority}
 
@@ -843,6 +1114,24 @@ class EventParser:
                 return None
             entryPrint("[t=" + str(self.time) + "us] TRACE_MUTEX_GIVE -> mutexId: " + str(mutexId) + " Core: " + str(coreId)) 
             evt = {'type':TRACE_MUTEX_GIVE, 'ts':self.time, 'core':coreId, 'mutexId':mutexId}
+        elif eventId == TRACE_VERSION:
+            version = self.readInteger()
+            if version is None:
+                return None
+            entryPrint("[t=" + str(self.time) + "us] TRACE_VERSION -> " + str(version) + " Core: " + str(coreId))
+            evt = {'type':TRACE_VERSION, 'ts':self.time, 'core':coreId, 'version':version}
+        elif eventId == TRACE_TASK_BLOCK:
+            taskId = self.readInteger()
+            if taskId is None:
+                return None
+            entryPrint("[t=" + str(self.time) + "us] TRACE_TASK_BLOCK -> taskId: " + str(taskId) + " Core: " + str(coreId))
+            evt = {'type':TRACE_TASK_BLOCK, 'ts':self.time, 'core':coreId, 'taskId':taskId}
+        elif eventId == TRACE_EVENTS_LOST:
+            count = self.readInteger()
+            if count is None:
+                return None
+            entryPrint("[t=" + str(self.time) + "us] TRACE_EVENTS_LOST -> count: " + str(count) + " Core: " + str(coreId))
+            evt = {'type':TRACE_EVENTS_LOST, 'ts':self.time, 'core':coreId, 'count':count}
         elif eventId == TRACE_JLDJOB_FINISHED:
             period_us = self.readInteger()
             if period_us is None:
@@ -850,10 +1139,32 @@ class EventParser:
             entryPrint("[t=" + str(self.time) + "us] TRACE_JLDJOB_FINISHED.           -> period_us: " + str(period_us) + " us Core: " + str(coreId)) 
             evt = {'type':TRACE_JLDJOB_FINISHED, 'ts':self.time, 'core':coreId, 'period_us':period_us} 
         else:
-            #print("ERROR Unknown Event!")
-            evt = None
+            evt = "invalid"
 
         return evt
+
+def checkTickIntervals(events, irqCore0, report):
+    """
+    Warns if the tick ISR on core 0 is irregular. The firmware before the lost-events marker
+    (TRACE_EVENTS_LOST) dropped events silently when the RTT buffer was full. The time delta of a
+    dropped event is lost as well, so the trace gets shorter than the recording and ticks come
+    too early. Recordings with the marker report lost events in parseTraceEvents instead.
+    """
+    if report['eventsLost'] > 0 or any(e.get('type') == TRACE_VERSION for e in events):
+        return      # This firmware reports lost events itself. Irregular ticks then come from long critical sections.
+    ticks = [e.get('ts') for e in events if e.get('type') == TRACE_ISR_ENTER and e.get('irqId') == irqCore0 and e.get('core') == 0]
+    if len(ticks) < 10:
+        return
+    intervals = np.diff(np.asarray(ticks, dtype=np.int64))
+    nominal = float(np.median(intervals))
+    if nominal <= 0:
+        return
+    irregular = int(np.sum(np.abs(intervals - nominal) > 0.25 * nominal))
+    if irregular > max(3, 0.01 * len(intervals)):
+        report['droppedSuspected'] = True
+        warn(report, str(irregular) + " of " + str(len(intervals)) + " tick intervals on core 0 differ from " + "%.0f" % nominal
+             + " us by more than 25 %. Events were probably dropped or reordered by the target, so times in this trace are not reliable."
+             + " Target code before the lost-events marker does this when the RTT buffer is full or an ISR interrupts a trace hook. Rebuild the program with the current RT_Trace target code.")
 
 def getTickStart(events, irqCore0):
     startTime = 0   # Timestamp of the first tick
@@ -869,7 +1180,11 @@ def getTickStart(events, irqCore0):
                 ts = evt.get('ts')
                 tickTimes.append(ts)
 
-    ticks = np.asarray(tickTimes, dtype=np.int64)
+    if len(tickTimes) == 0:
+        return None     # No tick in the trace, the caller falls back to the first task release
+
+    # The phase is clear after a few ticks. Limit them, as the error matrix below has 1000 entries per tick.
+    ticks = np.asarray(tickTimes[:2000], dtype=np.int64)
 
     period_us = 1000 # We like to align ticks with a 1ms grid
     phases = np.arange(period_us)
