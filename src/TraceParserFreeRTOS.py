@@ -622,7 +622,7 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId):
 
                         # A delay that does not block (the wake time has passed, or vTaskDelay(0)) only yields.
                         # The task stays ready, so its next job starts without a READY event.
-                        if delayKind == TRACE_DELAY_UNTIL and (deadlineMiss or nextOwn == TRACE_TASK_START_EXEC):
+                        if delayKind == TRACE_DELAY_UNTIL and (nextOwn == TRACE_TASK_START_EXEC or (nextOwn is None and deadlineMiss)):
                             task.newJob(releaseAtTick(tickTs, delayWake, ts), None, core)     # Released at the tick it waited for
                         elif delayKind == TRACE_DELAY and nextOwn == TRACE_TASK_START_EXEC:
                             task.newJob(ts, None, core)
