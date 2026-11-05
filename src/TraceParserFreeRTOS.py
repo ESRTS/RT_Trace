@@ -43,6 +43,7 @@ TRACE_MUTEX_TAKE                = 19
 TRACE_MUTEX_GIVE                = 20 
 TRACE_JLDJOB_FINISHED           = 21
 TRACE_EVENTS_LOST               = 22    # Payload: number of events the target could not write since the last written event
+TRACE_TASK_BLOCK                = 23    # The task blocks on a queue, semaphore or task notification
 
 # Those events are not in the original trace and are created during parsing
 #TRACE_IDLE_START                = 23
@@ -69,7 +70,8 @@ eventMap = {
     TRACE_MUTEX_TAKE: "TRACE_MUTEX_TAKE",
     TRACE_MUTEX_GIVE: "TRACE_MUTEX_GIVE",
     TRACE_JLDJOB_FINISHED: "TRACE_JLDJOB_FINISHED",
-    TRACE_EVENTS_LOST: "TRACE_EVENTS_LOST"
+    TRACE_EVENTS_LOST: "TRACE_EVENTS_LOST",
+    TRACE_TASK_BLOCK: "TRACE_TASK_BLOCK"
 }
 
 """
@@ -686,7 +688,9 @@ def parseTask(sortedEvents, task, mutex_id_to_letter, tickId, delayUntilTasks=fr
                             task.newJob(lastJob.releaseTime + jldJobNextRelDelta, None) 
                             jldJobNextRelDelta = None
 
-        if type == TRACE_EVT_GROUP_SYNC or type == TRACE_EVT_GROUP_WAIT:
+        if type == TRACE_EVT_GROUP_SYNC or type == TRACE_EVT_GROUP_WAIT or (type == TRACE_TASK_BLOCK and task.id not in delayUntilTasks):
+            # The job ends where the task blocks, if it becomes ready (released) before it runs again. A task that
+            # ends its jobs with vTaskDelayUntil() blocks on a queue or semaphore inside the job (a lock, a message).
             if task.id == taskId:
                 finishJob = True
                 finishJobOnEventGroup = True
@@ -1107,6 +1111,12 @@ class EventParser:
                 return None
             entryPrint("[t=" + str(self.time) + "us] TRACE_MUTEX_GIVE -> mutexId: " + str(mutexId) + " Core: " + str(coreId)) 
             evt = {'type':TRACE_MUTEX_GIVE, 'ts':self.time, 'core':coreId, 'mutexId':mutexId}
+        elif eventId == TRACE_TASK_BLOCK:
+            taskId = self.readInteger()
+            if taskId is None:
+                return None
+            entryPrint("[t=" + str(self.time) + "us] TRACE_TASK_BLOCK -> taskId: " + str(taskId) + " Core: " + str(coreId))
+            evt = {'type':TRACE_TASK_BLOCK, 'ts':self.time, 'core':coreId, 'taskId':taskId}
         elif eventId == TRACE_EVENTS_LOST:
             count = self.readInteger()
             if count is None:

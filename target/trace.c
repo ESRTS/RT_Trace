@@ -714,6 +714,26 @@ void trace_timeZero(void) {
 }
 
 /**
+ * @brief Record that a task blocks on a queue, semaphore or task notification.
+ *
+ */
+void trace_taskBlock(uint32_t taskId) {
+    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
+    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
+    uint32_t identifyer = trace_encodeTime(TRACE_TASK_BLOCK);       		/* Encodes the event ID and the timestamp delta */
+
+    if (buffer != NULL) {
+        buffer[0] = identifyer;
+        buffer[1] = taskId;
+    }
+
+#ifdef TRACE_RTT
+    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
+#endif /* TRACE_RTT */
+    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+}
+
+/**
  * @brief Remembers the event group the port creates before trace_init() for the SDK locks.
  */
 void trace_eventGroupCreate(uint32_t eventGroup) {

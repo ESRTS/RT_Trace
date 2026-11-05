@@ -63,6 +63,7 @@
 #define TRACE_MUTEX_GIVE                (20u)
 #define TRACE_JLDJOB_FINISHED           (21u)
 #define TRACE_EVENTS_LOST               (22u)   /* RTT only: number of events dropped since the last written event */
+#define TRACE_TASK_BLOCK                (23u)   /* The task blocks on a queue, semaphore or task notification */
 
 // Not yet supported
 /*
@@ -101,6 +102,7 @@ void trace_mutexCreate(uint32_t mutexId);
 void trace_mutexTake(uint32_t mutexId);
 void trace_mutexGive(uint32_t mutexId);
 void trace_jldJobFinished(uint32_t period_us);
+void trace_taskBlock(uint32_t taskId);
 void trace_eventGroupCreate(uint32_t eventGroup);
 int trace_isInternalEventGroup(uint32_t eventGroup);
 
@@ -177,6 +179,17 @@ int trace_isInternalEventGroup(uint32_t eventGroup);
 #define traceENTER_xEventGroupSync( x, y, z, u )        do { if (!trace_isInternalEventGroup((uint32_t)(x))) {           \
                                                             trace_eventGroupSync((uint32_t)xTaskGetCurrentTaskHandle());     \
                                                         } } while (0)
+
+/* A task that blocks on a queue, a semaphore or a notification waits for its next release. A task that
+ * blocks on a mutex waits inside its job, so mutexes are left out. */
+#define traceBLOCKING_ON_QUEUE_RECEIVE( pxQueue )       do { if ( (pxQueue)->ucQueueType != queueQUEUE_TYPE_MUTEX &&                    \
+                                                              (pxQueue)->ucQueueType != queueQUEUE_TYPE_RECURSIVE_MUTEX ) {          \
+                                                            trace_taskBlock((uint32_t)xTaskGetCurrentTaskHandle());          \
+                                                        } } while (0)
+
+#define traceTASK_NOTIFY_TAKE_BLOCK( uxIndexToWait )    trace_taskBlock((uint32_t)xTaskGetCurrentTaskHandle())
+
+#define traceTASK_NOTIFY_WAIT_BLOCK( uxIndexToWait )    trace_taskBlock((uint32_t)xTaskGetCurrentTaskHandle())
 
 #define traceRETURN_xQueueCreateMutex( x )              if ( x->ucQueueType == queueQUEUE_TYPE_MUTEX ) trace_mutexCreate((uint32_t)x)
 
