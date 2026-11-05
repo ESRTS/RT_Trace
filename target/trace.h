@@ -47,6 +47,7 @@
 #define TRACE_MUTEX_TAKE                (19u)
 #define TRACE_MUTEX_GIVE                (20u)
 #define TRACE_JLDJOB_FINISHED           (21u)
+#define TRACE_EVENTS_LOST               (22u)   /* RTT only: number of events dropped since the last written event */
 
 // Not yet supported
 /*
