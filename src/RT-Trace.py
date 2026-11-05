@@ -271,7 +271,7 @@ class TraceApp(customtkinter.CTk):
         """
         self.btn_loadTrace.configure(state="normal", text="Load Trace")
         if tasks is not None and len(tasks) == 0:
-            HelperFunctions.printState("ERROR no tasks", info="no task executed in this trace")
+            HelperFunctions.printState("ERROR no tasks", info="No task executed in this trace. The program may have stopped before the scheduler ran (a failed configASSERT, a fault); check it with the debugger.")
         elif tasks is not None:
             self.traceView.setTasks(tasks)
             self.fitTracePane()

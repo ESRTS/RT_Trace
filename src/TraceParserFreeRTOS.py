@@ -204,7 +204,8 @@ def loadRecording(gui, numCores):
         core = core + 1
 
     if sum(len(b) for b in allBuffers) == 0:
-        HelperFunctions.printState("ERROR empty recording", info="The trace buffers in " + str(gui.viewingFolder) + " are empty. Check that the program calls trace_init() and record again.")
+        HelperFunctions.printState("ERROR empty recording", info="The trace buffers in " + str(gui.viewingFolder) + " are empty. The program does not call trace_init(), or it stopped before"
+            " writing events (a failed configASSERT, a fault). Check it with the debugger and record again.")
         return None
 
     eventFilePath = os.path.abspath(os.path.join(gui.viewingFolder, 'events.txt'))
