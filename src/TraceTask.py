@@ -1,4 +1,44 @@
 from enum import Enum
+import collections
+
+"""
+Lost or corrupted trace events leave the data inconsistent, for example a task that starts
+without being released. By default the parser repairs such spots and counts the repairs.
+With strict set (option "strict" in the config), it raises TraceInconsistency instead.
+"""
+strict = False
+repairs = collections.Counter()     # Repair description -> count
+repairExamples = {}                 # Repair description -> first occurrence (with time and core)
+
+class TraceInconsistency(AssertionError):
+    """
+    Raised in strict mode at the first inconsistency in the trace data.
+    """
+    def __init__(self, message, ts=None, core=None):
+        super().__init__(message)
+        self.ts = ts
+        self.core = core
+
+def resetRepairs(strictMode=False):
+    global strict
+    strict = strictMode
+    repairs.clear()
+    repairExamples.clear()
+
+def formatTime(ts):
+    return "-" if ts is None else "%.3f ms" % (ts / 1000)
+
+def inconsistent(name, ts, core, what):
+    """
+    Called where the trace data contradicts itself. Raises in strict mode, otherwise counts
+    the repair the caller makes.
+    """
+    where = "at " + formatTime(ts) + ("" if core is None else " on core " + str(core))
+    if strict:
+        raise TraceInconsistency("Trace data inconsistent " + where + ": " + name + " " + what, ts, core)
+    key = name + " " + what
+    repairs[key] += 1
+    repairExamples.setdefault(key, where)
 
 class MutexAccess():
     def __init__(self, startTime, mutexId, letter):
@@ -81,7 +121,9 @@ class TraceJob():
         """
         Start an execution interval for this job.
         """
-        assert self.activeInterval == None
+        if self.activeInterval is not None:
+            inconsistent(self.task.name, ts, core, "started while it was already running")
+            return
 
         self.activeInterval = TraceInterval(ts, core, type)
 
@@ -89,7 +131,9 @@ class TraceJob():
         """
         Stop an execution interval for this job.
         """
-        assert self.activeInterval != None
+        if self.activeInterval is None:
+            inconsistent(self.task.name, ts, None, "stopped while it was not running")
+            return
 
         self.activeInterval.stop(ts)
         self.execIntervals.append(self.activeInterval)
@@ -101,8 +145,9 @@ class TraceJob():
         """
 
         for access in self.mutexAccess:     # Make sure there is no ongoing access to this mutex
-            if access.mutexId == mutexId:
-                assert access.stop != None, "Trying to take mutex " + str(mutexId) + " while still holding the mutex."
+            if access.mutexId == mutexId and access.stop is None:
+                inconsistent(self.task.name, ts, None, "took mutex " + str(letterId) + " while still holding it")
+                access.stop = ts
 
         newAccess = MutexAccess(ts, mutexId, letterId)
         self.mutexAccess.append(newAccess)
@@ -162,11 +207,15 @@ class TraceTask():
         for job in self.jobs:
             job.printInfo()
 
-    def newJob(self, releaseTime, deadline):
+    def newJob(self, releaseTime, deadline, core=None):
         """
         Create a new job for this task. 
         """
-        assert self.currentJob == None
+        if self.currentJob is not None:
+            inconsistent(self.name, releaseTime, core, "was released while its previous job was not finished")
+            if self.currentJob.activeInterval is not None:
+                self.currentJob.stopExec(releaseTime)
+            self.finishJob()
 
         self.currentJob = TraceJob(self, len(self.jobs), releaseTime, deadline)
 
@@ -182,22 +231,28 @@ class TraceTask():
         """
         Task starts to execute at time ts.
         """
-        assert self.currentJob != None, "No current job! " + str(self)
+        if self.currentJob is None:
+            inconsistent(self.name, ts, core, "started without being released")
+            self.newJob(ts, None, core)
 
         self.currentJob.startExec(ts, core, type)
 
-    def stopExec(self, ts):
+    def stopExec(self, ts, core=None):
         """
         Task stops to execute at time ts.
         """
-        assert self.currentJob != None
+        if self.currentJob is None:
+            inconsistent(self.name, ts, core, "stopped without a job")
+            return
         self.currentJob.stopExec(ts)
 
-    def finishJob(self):
+    def finishJob(self, ts=None, core=None):
         """
         Finish this job.
         """
-        assert self.currentJob != None
+        if self.currentJob is None:
+            inconsistent(self.name, ts, core, "finished a job it did not have")
+            return
         self.jobs.append(self.currentJob)
         self.currentJob = None
 
@@ -254,14 +309,18 @@ class TraceTask():
         """
         Start a critical section.
         """
-        assert self.currentJob != None
+        if self.currentJob is None:
+            inconsistent(self.name, ts, None, "took a mutex without a job")
+            return
         self.currentJob.mutexTake(ts, mutexId, letterId)
 
     def mutexGive(self, ts, mutexId):
         """
         Finish a critical section.
         """
-        assert self.currentJob != None
+        if self.currentJob is None:
+            inconsistent(self.name, ts, None, "gave a mutex without a job")
+            return
         self.currentJob.mutexGive(ts, mutexId)
 
 def findTaskByName(tasks, name):
