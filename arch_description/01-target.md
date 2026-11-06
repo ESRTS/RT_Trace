@@ -11,9 +11,15 @@ Application annotation: `traceTimeZero()` once, from one core.
 FreeRTOS configuration, builds the SDK's RTT source, and disables SDK stdio RTT.
 Include `trace.h` last in `FreeRTOSConfig.h`. SDK preinitialization calls
 `trace_init()` on core 0 before `main()`/core 1. It configures both channels and
-publishes initialization with release/acquire atomics. Readers must wait for its
-return. Never reset RTT while tracing. `trace_stop()` stops only its calling core;
+publishes initialization with release/acquire atomics. The recorder stops at
+`main()`, checks RTT channels and opens its files before resuming the application.
+It removes the startup breakpoint on failure too. Never reset RTT while tracing.
+`trace_stop()` stops only its calling core;
 halt both producers and drain both channels to finish a capture.
+
+GUI validation checks defined ELF symbols: `trace_init`, `__pre_init_trace_init`,
+`trace_state_core0/1` and `_SEGGER_RTT`. Preserve these names and the symbol table;
+update [validation](../src/HelperFunctions.py) if exports change.
 
 **State/write path.**
 

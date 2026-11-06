@@ -118,34 +118,33 @@ def record_data(elf, probe, target, frequency, measure_seconds, filename1, filen
             HelperFunctions.printState("ERROR no tracing", info=HelperFunctions.noTracingHint(elf))
             return 1
         if rtt_addr is None:
-            HelperFunctions.printState("ERROR no RTT", info=os.path.basename(elf) + " has no RTT control block (_SEGGER_RTT), so it was built for the SRAM or PSRAM mode. Enable TRACE_RTT in traceConfig.h and build again, or select the platform that matches the build.")
+            HelperFunctions.printState("ERROR no RTT", info=os.path.basename(elf) + " has no RTT control block (_SEGGER_RTT). Build the firmware with the RT-Trace CMake integration (see target/README.md).")
             return 1
         
         print(f"main() at 0x{main_addr:08X}")
         print(f"trace_init() at 0x{hook_addr:08X}")
         print(f"_SEGGER_RTT at 0x{rtt_addr:08X}")
 
-        print("Setting breakpoint for trace_init()")
-        core.set_breakpoint(hook_addr)
-
-        # Get the target into a known state, then run.
         print("Reset and halt.")
         core.reset_and_halt()
-        
-        print("Resume and waiting for trace_init() ...")
-        core.resume()
-
-        if not wait_for_pc(core, hook_addr, timeout=10.0):
-            HelperFunctions.printState("ERROR program did not start", info="The program did not reach trace_init() within 10 s. It crashes or waits before it (for example in BSP_Init()). Check it with the debugger.")
+        # The SDK runs trace_init() before main. Breaking at the initializer's
+        # entry would stop it before it can configure the RTT control block.
+        print("Setting breakpoint for main()")
+        if not core.set_breakpoint(main_addr):
+            HelperFunctions.printState("ERROR breakpoint", info="Could not set a breakpoint at main(). Close other debugger sessions and try again.")
             return 1
-        print("Hit trace_init().")
-        
-        #while core.get_state() == Target.State.HALTED:
-        #    print("HALTED...")
-        #    pc = core.read_core_register("pc") & ~1
-        #    print(f"PC: 0x{pc:08X}")
-        #    time.sleep(0.5)
-
+        try:
+            print("Resume and waiting for main() ...")
+            core.resume()
+            if not wait_for_pc(core, main_addr, timeout=10.0):
+                HelperFunctions.printState("ERROR program did not start", info="The program did not reach main() within 10 s. Check pre-main initialization and faults with the debugger.")
+                return 1
+        finally:
+            # A timeout may leave the core running. Keep it stopped while
+            # inspecting RTT, and remove the temporary breakpoint on failure too.
+            core.halt()
+            core.remove_breakpoint(main_addr)
+        print("Hit main(); pre-main trace initialization has completed.")
 
         rtt = RTTControlBlock.from_target(target, address=rtt_addr)
         rtt.start()
@@ -156,17 +155,17 @@ def record_data(elf, probe, target, frequency, measure_seconds, filename1, filen
         print("Read information for RTT channel 1 and 2.")
         ch1 = rtt.up_channels[1]
         ch2 = rtt.up_channels[2]
-
-        time.sleep(1)
-        print("Remove breakpoint for trace_init().")
-        core.remove_breakpoint(hook_addr)
-        print(f"Resume and start Trace Record for {measure_seconds} seconds")
-        core.resume()
-
-        deadline = time.monotonic() + measure_seconds
+        if ch1.size <= 0 or ch2.size <= 0:
+            HelperFunctions.printState("ERROR RTT channels not initialized", info="Trace channels 1/2 are not configured at main(). Check the pre-main trace initializer and avoid resetting RTT from other code.")
+            return 1
 
         with open(filename1, "wb") as f1, open(filename2, "wb") as f2:
             try:
+                # Prepare the host files while main is still stopped so early
+                # application events can be read immediately after resuming.
+                print(f"Resume and start Trace Record for {measure_seconds} seconds")
+                core.resume()
+                deadline = time.monotonic() + measure_seconds
                 while time.monotonic() < deadline:
                     data1 = ch1.read()
                     if data1:
@@ -182,11 +181,17 @@ def record_data(elf, probe, target, frequency, measure_seconds, filename1, filen
 
                     time.sleep(0.001)
             finally:
-                print("Finished trace recording, halting the target now.")
-                target.halt()
+                print("Finished trace recording, halting both cores.")
+                for producer in target.cores.values():
+                    producer.halt()
+                # Once both producers are halted, read the bytes that arrived
+                # after the final polling read before closing the files.
+                f1.write(ch1.read())
+                f2.write(ch2.read())
 
         print(f"Wrote RTT channel 1 to {filename1}")
         print(f"Wrote RTT channel 2 to {filename2}")
+        return 0
 
 def main() -> int:
     ap = argparse.ArgumentParser()

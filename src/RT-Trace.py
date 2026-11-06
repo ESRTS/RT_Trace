@@ -39,7 +39,7 @@ class TraceApp(customtkinter.CTk):
         'recordTraceFunc' is a target specific function that loads the trace buffer
         """
         self.targets = [
-            {'name': 'Pico2 FreeRTOS', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2RttTraceBuffers, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': lambda gui, quiet=False: HelperFunctions.validatePicoTrace(gui, "RTT", quiet)},
+            {'name': 'Pico2 FreeRTOS', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2RttTraceBuffers, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': HelperFunctions.validatePicoTrace},
             {'name': 'RPI Linux', 'numCores': 4, 'implemented': True, 'requirement_str' : 'Experimental...', 'recordTraceFunc' : loadLinuxraceBuffers, 'loadTraceFunc': linuxParseTraceFiles, 'pathValidationFunc': None}
         ]
 
@@ -496,16 +496,6 @@ class TraceApp(customtkinter.CTk):
         else:
             HelperFunctions.printState("Program", info=selectedFolder)
             self.btn_recordTrace.configure(state="enable")
-
-        # Validate if the selected program is ok
-        # if HelperFunctions.validateProgramFolder(self, selectedFolder):
-        #     HelperFunctions.printState("Select Program", info=selectedFolder)
-        #     HelperFunctions.printState("ELF File", info=HelperFunctions.getElfFilePath(self))
-        #     self.btn_recordTrace.configure(state="enable")
-        # else:
-        #     HelperFunctions.printState("Select Program", info=selectedFolder)
-        #     HelperFunctions.printState("ERROR", info="ELF file not found!")
-        #     self.btn_recordTrace.configure(state="disabled")
 
     def selectTraceSource(self, traceSource: str):
         """

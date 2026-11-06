@@ -1,172 +1,100 @@
-# RT-Trace View
+# RT-Trace
 
-A tool to visualize scheduling traces. Several trace sources can be configured. If the trace source is a real target platform the trace can be loaded from the traget directly (if supported).
+Record and visualize task execution, inferred jobs, deadlines, mutex operations,
+IRQ activity and scheduling on a shared timeline. The main target is **Pico 2
+with FreeRTOS SMP**, using one SEGGER RTT channel per core. Linux tracing is
+experimental.
 
-## Supported Features
-* <b>Recording</b> the trace buffers from the target device (one for each core). RT-Trace flashes the program and reads the buffers through pyOCD, no other tools are needed.
-All measurements are stored in a ```data``` folder. Each supported platform has its own sub-folder with separate folders for each measurement (as some platforms generate several files for one measurement). The name of each measurement can be set in the GUI, a date/time string will be appended to be able to distinguish different measurements. 
-* <b>Loading</b> the trace. This parses the trace buffers to an internal, per task, data model. The trace is the visuallized in the GUI. A drop-down menu is used to select the measurement to be analyzed out of all measurements available for the selected target platform.
-* <b>Navigating</b> the trace. Ctrl+mouse wheel or the Up/Down keys zoom, the mouse wheel or dragging moves the view in time, and Shift+mouse wheel scrolls the tasks if they don't fit into the window.
-* <b>Save</b> the trace as PDF. The current view of the trace is exported to a PDF.
+## Run
 
-## Generate Application
-Use pyinstaller to generate the packaged application. Install the build requirements first with `pip install -r requirements-build.txt`. To generate the application for Windows this must be executed on under Windows.
-Executables for Linux and OSX can be created on OSX directly.
+Open the packaged application, or run from the repository root with Python 3.12
+and Tkinter:
 
-```$ ./createGui.sh ```
-
-## Supported Platforms
-
-### Raspberry Pi Pico2 with FreeRTOS SMP
-
-In our trace implementation on the Pico2, each core loggs trace events to its own trace buffer. The source for the timestamp on each core is the same, which allows for an easy combination of events from both trace buffers. 
-
-Three versions are supported. In the default configuration, the trace buffer of each core is stored in a dedicated SRAM bank. 
-
-If an external PSRAM is available, the trace buffer can be stored there as well, which allows for longer traces to be recoreded (at the expense of larger impact of tracing on the system).
-
-The third version streams the trace events over SEGGER RTT while the target runs, so the trace length is not limited by a buffer.
-
-RT-Trace reads `PICO_USE_PSRAM` and `TRACE_RTT` from the program's `traceConfig.h` and only records if the selected platform (SRAM, PSRAM or RTT) matches.
-
-### Nucleo-L476RG with FreeRTOS
-
-#### Required Source Code Modifications
-<b>File:</b> ```port.c```
-
-Tracing calls must be added to the tick handler.
-```
-void xPortSysTickHandler( void )
-{
-	/* The SysTick runs at the lowest interrupt priority, so when this interrupt
-	executes all interrupts must be unmasked.  There is therefore no need to
-	save and then restore the interrupt mask value as its value is already
-	known. */
-	portDISABLE_INTERRUPTS();
-	{
-		traceISR_ENTER();
-		/* Increment the RTOS tick. */
-		if( xTaskIncrementTick() != pdFALSE )
-		{
-			traceISR_EXIT_TO_SCHEDULER();
-			/* A context switch is required.  Context switching is performed in
-			the PendSV interrupt.  Pend the PendSV interrupt. */
-			portNVIC_INT_CTRL_REG = portNVIC_PENDSVSET_BIT;
-		} else {
-			traceISR_EXIT();
-		}
-	}
-	portENABLE_INTERRUPTS();
-}
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python src/RT-Trace.py
 ```
 
-<b>File:</b> ```portmacro.h```
-Substitute the definition of ```portEND_SWITCHING_ISR``` with:
-```
-#define portEND_SWITCHING_ISR( xSwitchRequired ) { if( xSwitchRequired != pdFALSE ) { traceISR_EXIT_TO_SCHEDULER(); portYIELD() } else { traceISR_EXIT(); } }
-```
+On Windows, activate with `.venv\Scripts\activate`.
 
-<b>File:</b> ```task.h```
+## Record a trace
 
-```traceENTER_xTaskDelayUntil``` is not called in the FreeRTOS-version supplied with STM32CubeIDE. This call needs to be added at the beginning of the function ```vTaskDelayUntil```.
+1. Integrate tracing using the [target setup guide](target/README.md). Call
+   `traceTimeZero()` once at the desired application origin, then build the
+   firmware. The GUI expects `<project>/build/<project>.elf`; the executable and
+   project-folder names must match. Trace support is checked in the ELF;
+   `traceConfig.h` is unnecessary.
+2. Power the Pico 2 and connect its SWD pins to a debug probe supported by pyOCD.
+   A USB serial connection alone cannot read RTT. Close other debugger sessions.
+3. Select **Pico2 FreeRTOS** under **Platform**. Click the folder button beside
+   **Program** and choose your project, or a directory containing projects.
+4. Select the program and enter a recording name under **Record Trace**.
+5. Click **Record Trace**. The recording workflow flashes the ELF, runs for the
+   configured duration, then halts the target and loads the captured trace.
+6. Keep the matching ELF as `firmware.elf` beside the recording and load again
+   to enable caller-based exclusion of internal SDK/kernel waits.
 
-```
-void vTaskDelayUntil( TickType_t * const pxPreviousWakeTime, const TickType_t xTimeIncrement )
-	{
-	TickType_t xTimeToWake;
-	BaseType_t xAlreadyYielded, xShouldDelay = pdFALSE;
+Recordings are stored in `data/Pico2_FreeRTOS/<name>_<timestamp>/`.
+`raw_buffer0.txt` and `raw_buffer1.txt` contain binary data despite their extension.
 
-		traceENTER_xTaskDelayUntil( pxPreviousWakeTime, xTimeIncrement );
+## Load and inspect
 
-		configASSERT( pxPreviousWakeTime );
-        ...
-```
+Select **Pico2 FreeRTOS**, choose a recording under **View Trace**, then click
+**Load Trace**. No connected hardware or selected program is needed for loading.
+Reselect the platform to refresh the recording list.
 
-## Instrumenting the Source Code
+To try the supplied example, copy the two `raw_buffer*.txt` files from
+[examples/freertos_smp](examples/freertos_smp/) into
+`data/Pico2_FreeRTOS/Example_format3/`, then select **Example_format3** and load it.
+It includes task migration, nested IRQs, mutex contention and a deadline miss.
+Only current format-3 FreeRTOS recordings are accepted.
 
-FreeRTOS provides a number of [Trace Hook Macros](https://freertos.org/Documentation/02-Kernel/02-Kernel-features/09-RTOS-trace-feature). 
-RT-Trace provides a definition for those macros needed to trace the execution of the tasks. 
-In order to include the RT-Trace macros and underlying trace buffering system, they need to be included in the build.
+| Action | Control |
+| --- | --- |
+| Zoom | Up/Down keys or Ctrl + mouse wheel |
+| Move through time | Mouse wheel, horizontal scrollbar or drag the plot |
+| Scroll task rows | Shift + mouse wheel or vertical scrollbar |
+| Save the current view | **Export View to PDF** |
 
-* Add the files in the folder ```target``` (i.e. ```trace.c``` and ```trace.h```) to your project.
-* Create a file ```traceConfig.h``` and add it to your project.
+Execution colors identify cores; arrows indicate inferred job releases. Red
+execution marks a deadline overrun. Mutex markers appear at take-call entry:
+black means success, red/crossed means failure, gray means unknown; white marks
+an actual give.
 
-The file ```traceConfig.h``` should have the following content and is adjusted based on the used platform and configuration:
+Job boundaries are inferred from syscalls; each next release defines the
+previous job's deadline. Review warnings in the output panel. Incomplete or
+uncertain jobs are excluded from completion statistics and CSV exports.
 
-```
-#ifndef TRACECONFIG
-#define TRACECONFIG
+Loading writes `events.txt` and per-task CSVs into the recording folder. CSV
+times are in microseconds. PDFs go to `output/<platform>/<recording>/`.
+Optional `job_policy.json` overrides inference; see the
+[task/job architecture](arch_description/03-task-builder.md).
 
-/**
- * Set the platform that is used.
- */
-//#define TRACE_STM32L476RG
-#define TRACE_PICO2
+## Settings and development
 
-/**
- * Enable if the board has PSRAM and this should be used
- */
-//#define PICO_USE_PSRAM
+Put overrides in `Resources/config.local.ini`; defaults are in
+[Resources/config.ini](Resources/config.ini). For example:
 
-/**
- * Enable to use Segger RTT channels for the trace data instead of the 
- * local buffers. 
- */
-//#define TRACE_RTT
-
-/**
- * Enable this to trace IRQ enter/exit
- */
-#define TRACE_ENABLE_IRQ_TRACE
-
-/** 
- * Enable this to trace idle events
- */
-#define TRACE_ENABLE_IDLE_TRACE
-
-#endif /* TRACECONFIG */
-```
-
-## RT-Trace Configuration File
-
-RT-Trace reads its settings from `Resources/config.ini`. If `Resources/config.local.ini` exists, its values override the ones in `config.ini`. It is not tracked by git, so machine-specific settings belong there. Copy `config.local.ini.example` to start, and only add the keys you want to change.
-
-The folder button next to the program selection opens a folder picker. Pick a single project or a folder with projects, and RT-Trace saves it as `project_path` in `config.local.ini`. Every subfolder with a `CMakeLists.txt` is listed as a project.
-
-To use a folder for one run only, without changing the config, start RT-Trace with `--project-path <folder>`. The folder can again be a single project or a folder with projects.
-
-The `[general]` section holds the settings for all targets:
-
-```
+```ini
 [general]
-# Path to the project folder. Absolute, or relative to the RT_Trace folder.
-project_path = ../../Software/Projects
-# Size of the user interface. auto follows the desktop scaling, or set a factor such as 1.5
-ui_scale = auto
-# SWD frequency
-frequency = 4_000_000
-# Duration of the trace collection in seconds. The target is halted afterwards
 measure_seconds = 2
-# ISR ID and name of the FreeRTOS tick ISR on each core
-tickId = 15,16,42,45,41
-irqName = SysTick,Tick,Bell,Timer,FIFO
-# Print a hexdump of each raw trace buffer and every event when loading a trace
-print_hexdump = False
-print_events = False
-# Stop at the first inconsistency in the trace data instead of repairing it
+frequency = 4000000
 strict = False
+ui_scale = auto
 ```
 
-Lost or corrupted events (for example when the RTT buffer was full) leave the trace data inconsistent: a task starts without being released, or an ISR has no exit. RT-Trace repairs such spots, loads the trace and prints how many it repaired, with the time and core of the first one. With `strict = True` it stops at the first one instead, which helps when debugging the target code. Errors while loading or recording show one line with a hint; the full details go to `parse_error.log` or `record_error.log` in the recording folder.
+`strict = True` rejects event loss and structural inconsistencies instead of
+loading recoverable data with warnings. Recording and parsing failures write
+`record_error.log` or `parse_error.log` beside the capture.
 
-Each target has a dedicated section in the configuration file. For the RP2350 with the trace buffers in SRAM, RT-Trace reads the address and size of the buffers (`traceBuffer_core0`, `traceBuffer_core1`) from the ELF file, so they always match the build. The section is only used for programs without these symbols. The PSRAM buffers are at fixed addresses, and their section must match `TRACE_BUFFER_SIZE` in `target/trace.h`:
-```
-[Pico2_FreeRTOS_PSRAM]
-# Address of the trace buffers on the target
-buffer0 = 0x15000000
-buffer1 = 0x15004E20
-# Length of the trace buffers (each), in byte
-bufferSize = 20000
+The folder button saves the project location. To override it for one run:
+
+```sh
+python src/RT-Trace.py --project-path /path/to/project
 ```
 
-The SRAM buffers hold 96 KB per core (`TRACE_BUFFER_SIZE` 24576 words), about 2 s of a program with six periodic tasks; the RTT buffers 8 KB per core (`TRACE_RTT_BUFFER_SIZE`). Both can be set in `traceConfig.h` if a program needs the RAM.
+For implementation context and validation commands, see
+[arch_description](arch_description/README.md). To package the GUI, install
+`requirements-build.txt` and run `bash createGui.sh` on the destination OS.

@@ -12,6 +12,10 @@ from threading import Thread
 from elftools.elf.elffile import ELFFile
 from elftools.common.exceptions import ELFError
 
+# Defined symbols exported by target/trace.c and the SDK's RTT implementation.
+_PICO_TRACE_SYMBOLS = ('trace_init', '__pre_init_trace_init',
+                       'trace_state_core0', 'trace_state_core1', '_SEGGER_RTT')
+
 def getCwd():
     """
     Get the folder of the RT-Trace sources. Config, data and output folders are located relative to it.
@@ -358,25 +362,6 @@ def setProjectPath(projectPath):
 
     Path(localConfig).write_text("\n".join(lines) + "\n")
 
-def validateProgramFolder(gui, selectedFolder) -> bool:
-
-    traceConfigFilePath = getTraceConfigPath(gui)
-    elfFilePath = getElfFilePath(gui)
-
-    file = Path(elfFilePath)
-
-    if not file.exists():
-        return False
-    else:
-        return True
-
-def getTraceConfigPath(gui):
-
-    programPath = getProjectPath()
-    traceConfigFilePath = os.path.abspath(os.path.join(programPath, gui.selectedProgram, "traceConfig.h"))
-
-    return traceConfigFilePath
-
 def getElfFilePath(gui):
 
     programPath = getProjectPath()
@@ -384,30 +369,13 @@ def getElfFilePath(gui):
 
     return elfFilePath
 
-def getTraceMode(traceConfigFilePath):
-    """
-    Returns the trace mode a project was built for ("RTT", "PSRAM" or "SRAM"), read from its traceConfig.h.
-    """
-    defines = set()
-    with open(traceConfigFilePath) as f:
-        for line in f:
-            parts = line.split()
-            if len(parts) >= 2 and parts[0] == "#define":
-                defines.add(parts[1])
-
-    if "TRACE_RTT" in defines:
-        return "RTT"
-    if "PICO_USE_PSRAM" in defines:
-        return "PSRAM"
-    return "SRAM"
-
-def elfHasSymbol(elfFilePath, name):
-    """
-    Returns True if the symbol table of the ELF file contains the symbol.
-    """
+def getMissingElfSymbols(elfFilePath, names):
+    """Return required symbols that have no definition in the built ELF."""
     with open(elfFilePath, "rb") as f:
         symtab = ELFFile(f).get_section_by_name(".symtab")
-        return symtab is not None and bool(symtab.get_symbol_by_name(name))
+        return [name for name in names if symtab is None or not any(
+            symbol['st_shndx'] != 'SHN_UNDEF'
+            for symbol in (symtab.get_symbol_by_name(name) or []))]
 
 def getElfSymbol(elfFilePath, name):
     """
@@ -425,40 +393,39 @@ def getElfSymbol(elfFilePath, name):
     except (OSError, ELFError):
         return None
 
-def noTracingHint(elfFilePath):
+def noTracingHint(elfFilePath, missing=('trace_init',)):
     """
     Explains what to do if a program was built without RT-Trace support.
     """
-    return (os.path.basename(elfFilePath) + " has no trace_init(), so it was built without RT-Trace support. "
-            "Make sure main() calls trace_init() and the project builds trace.c (see the README), then delete build/ and build again. "
-            "An old checkout or a stale build/ folder is the usual cause.")
+    return (os.path.basename(elfFilePath) + " is missing RT-Trace symbols: " + ", ".join(missing) + ". "
+            "Build with rt_trace_enable(firmware), include trace.h at the end of FreeRTOSConfig.h, "
+            "and preserve the ELF symbol table (see target/README.md).")
 
-def validatePicoTrace(gui, traceMode, quiet=False):
+def validatePicoTrace(gui, quiet=False):
     """
-    Checks that the selected program is built and that its traceConfig.h matches the trace mode of the platform.
-    Prints one line for the selected program, or nothing if quiet is set and the check passes.
+    Check the selected firmware for linked RT-Trace support before recording.
+    Source configuration/CMake text is not evidence of the contents of this ELF.
+    quiet suppresses success output; failures are always reported.
     """
-    traceConfigFilePath = getTraceConfigPath(gui)
+    if not gui.selectedProgram:
+        printState("ERROR no program", info="Select a program first")
+        return False
     elfFilePath = getElfFilePath(gui)
     programPath = os.path.join(getProjectPath(), gui.selectedProgram)
 
-    if not Path(elfFilePath).exists():
+    if not Path(elfFilePath).is_file():
         printState("ERROR ELF not found", info=os.path.relpath(elfFilePath, programPath) + " in " + programPath + ", build the program first")
         return False
 
-    if not Path(traceConfigFilePath).exists():
-        printState("ERROR trace config not found", info=traceConfigFilePath)
+    try:
+        missing = getMissingElfSymbols(elfFilePath, _PICO_TRACE_SYMBOLS)
+    except (OSError, ELFError) as error:
+        printState("ERROR invalid ELF", info=os.path.basename(elfFilePath) + ": " + str(error) + ". Rebuild the firmware.")
         return False
-
-    projectMode = getTraceMode(traceConfigFilePath)
-    if projectMode != traceMode:
-        printState("ERROR wrong platform", info=gui.selectedProgram + " is built for " + projectMode + " tracing, select Pico2 FreeRTOS " + projectMode)
-        return False
-
-    if not elfHasSymbol(elfFilePath, "trace_init"):     # Checked before flashing, the recorders need it to start the trace
-        printState("ERROR no tracing", info=noTracingHint(elfFilePath))
+    if missing:
+        printState("ERROR no tracing", info=noTracingHint(elfFilePath, missing))
         return False
 
     if not quiet:
-        printState("Program", info=gui.selectedProgram + " (" + projectMode + " tracing, " + os.path.relpath(elfFilePath, programPath) + ")")
+        printState("Program", info=gui.selectedProgram + " (RT-Trace RTT, " + os.path.relpath(elfFilePath, programPath) + ")")
     return True
