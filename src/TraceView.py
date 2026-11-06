@@ -1,5 +1,6 @@
 import customtkinter
 import math
+from bisect import bisect_left, bisect_right
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -34,6 +35,8 @@ class TraceView(customtkinter.CTkCanvas):
         self.maxTicks = 20                                      # Maximum number of tick marks plotted in view
         self.mutexAccessHeight = 15                             # Complete height of the symbol to denote access to a mutex
         self.mutexAccessDiameter = 10                           # Diameter of the circle used in the mutex access symbol
+        self.mutexFailureColor = '#C94C4C'
+        self.mutexUnknownColor = '#8A8A8A'
 
         # --> Internal variables. No manual configuration needed! <--
         self.sizeX_px = 0                                       # Width of the canvas
@@ -82,13 +85,13 @@ class TraceView(customtkinter.CTkCanvas):
             # Find the maximum time to display in ticks
             self.rightBound_tks = 0
             for task in self.tasks:
-                if task.id > 200:   # We are only interested in user tasks (all ISR task id < 100).
+                if getattr(task, 'traceFormat', None) == 3 or task.id > 200:
                    
                     lastExecution = self.findLastExecution(task)
 
                     if lastExecution != None:
                         if lastExecution > self.rightBound_tks:
-                            if task.name[:4] != 'IDLE':
+                            if getattr(task, 'traceFormat', None) == 3 or task.name[:4] != 'IDLE':
                                 self.rightBound_tks = lastExecution
 
                 # Get the width of the task name on the canvas. We need to make sure that the legend width is large enough to hold the task name.
@@ -237,134 +240,114 @@ class TraceView(customtkinter.CTkCanvas):
                 nextRelease = task.jobs[index+1].releaseTime
             
             deadlineMissAt = None
-            if nextRelease is not None:
-                if nextRelease < finishTime:
-                    deadlineMissAt = nextRelease
+            deadline = job.deadline if getattr(task, 'deadlinesExplicit', False) else nextRelease
+            if (deadline is not None and finishTime is not None and deadline < finishTime
+                    and not job.uncertain and not job.deadlineEstimated):
+                deadlineMissAt = deadline
 
             self.paintJob(task, job, y, deadlineMissAt)
+
+        if getattr(task, 'mutexAttemptsExplicit', False):
+            first = bisect_left(task.mutexAttemptTimes, self.leftBound_tks)
+            last = bisect_right(task.mutexAttemptTimes, self.rightBound_tks)
+            for attempt in task.mutexAttempts[first:last]:
+                self.drawMutex(self.tickToPixel(attempt.start), y, attempt.letter, True, attempt.success)
 
     def paintJob(self, task, job, y, deadlineMissAt):
         """
         Function prints the job to the canvas. 
         """
-        start_px = self.tickToPixel(job.getStartTime())
-        finish_px = self.tickToPixel(job.getFinishTime())
-
-        if start_px == None and finish_px == None:
-            start_px = 0
-            finish_px = 0
-
-        windowStart_px = self.tickToPixel(self.leftBound_tks)
-        windowStop_px = self.tickToPixel(self.rightBound_tks)
-
-        if start_px < windowStart_px:
-            start_px = windowStart_px
-        elif finish_px > windowStop_px:
-            finish_px = windowStop_px
-		
-        if finish_px - start_px >= 0:
+        start = job.getStartTime()
+        visible = self._visible_interval_pixels(job.releaseTime if start is None else start,
+                                                job.getFinishTime())
+        if visible is not None:
+            start_px, finish_px = visible
 
             # Plot the ready marking
-            if task.id > 100:   # the ISR and scheduler events have an ID < 100. For those we don't have jobs so we don't draw the grey background either.
+            if getattr(task, 'kind', None) in ('task', 'idle') or (not hasattr(task, 'kind') and task.id > 100):
                 #self.canvasItems.append(self.create_rectangle(start_px, y, start_px + (finish_px - start_px), y + self.taskHeight_px, fill='#DDDDDD'))
                 self.draw_rectangle(start_px, y, start_px + (finish_px - start_px), y + self.taskHeight_px, fill='#DDDDDD')
 
             # Plot the execution
-            self.drawJobsSection(task, job, y, start_px, finish_px, self.tickToPixel(job.releaseTime), self.tickToPixel(job.getFinishTime()), deadlineMissAt)
+            self.drawJobsSection(task, job, y, deadlineMissAt)
 
         if self.leftBound_tks <= job.releaseTime and self.rightBound_tks >= job.releaseTime:
             # Draw the release arrow if this is not an ISR
-            if task.id > 200:
-                if task.name[:4] != 'IDLE': # Idle tasks don't have jobs.
+            if getattr(task, 'kind', None) == 'task' or (not hasattr(task, 'kind') and task.id > 200):
+                if job.releaseKnown and (hasattr(task, 'kind') or task.name[:4] != 'IDLE'):
                     rel_px = self.tickToPixel(job.releaseTime)
                     #self.canvasItems.append(self.create_line(rel_px, y - 3, rel_px, y - self.releaseArrowLength_px - 3, arrow=customtkinter.LAST, arrowshape=(self.releaseArrowH_px, self.releaseArrowH_px, self.releaseArrowD_px / 2), width=self.releaseArrowWidth_px))
                     self.draw_arrow(rel_px, y - 3, rel_px, y - self.releaseArrowLength_px - 3)
 
         for access in job.mutexAccess:
             # Draw all mutex access events on the trace
-            if self.leftBound_tks <= access.start and self.rightBound_tks >= access.start:
+            if (not getattr(task, 'mutexAttemptsExplicit', False)
+                    and self.leftBound_tks <= access.start <= self.rightBound_tks):
                 evt_px = self.tickToPixel(access.start)
                 self.drawMutex(evt_px, y, access.letter, True)
-            if self.leftBound_tks <= access.stop and self.rightBound_tks >= access.stop:
+            if (access.released and access.stop is not None
+                    and self.leftBound_tks <= access.stop <= self.rightBound_tks):
                 evt_px = self.tickToPixel(access.stop)
                 self.drawMutex(evt_px, y, access.letter, False)
 
-    def drawJobsSection(self, task, job, y, start_px, stop_px, sectionStart_px, sectionStop_px, deadlineMissAt):
+    def _visible_interval_pixels(self, start, stop):
+        """Clip both time bounds; keep even a one-pixel bar inside the frame."""
+        if start is None or stop is None:
+            return None
+        start = max(start, self.leftBound_tks)
+        stop = min(stop, self.rightBound_tks)
+        left, right = self.plotXOffset(), self.sizeX_px - self.borderX_px
+        if stop <= start or right <= left:
+            return None
+        start_px = max(left, min(self.tickToPixel(start), right - 1))
+        stop_px = min(right, max(self.tickToPixel(stop), start_px + 1))
+        return start_px, stop_px
+
+    def drawJobsSection(self, task, job, y, deadlineMissAt):
         """
         Function draws all execution intervals of the job that are in the visible part of the plot.
         """
-        
-        if sectionStart_px > start_px:  # Job release is before the visible left boundary of the trace
-            start_px = sectionStart_px
-        if sectionStop_px < stop_px:    # Job finish time is after the visible right boundary of the trace
-            stop_px = sectionStop_px
-
         for interval in job.execIntervals:
-            startInterval_px = self.tickToPixel(interval.start)
-            stopInterval_px = self.tickToPixel(interval.stop)
+            visible = self._visible_interval_pixels(interval.start, interval.stop)
+            if visible is None:
+                continue
+            start_px, stop_px = visible
+            if self.cores == 1:
+                color = task.taskColor
+            else:
+                color = '#%02X%02X%02X' % tuple(self.coreColors[interval.core])
 
-            if startInterval_px < start_px: # The execution interval starts before the visible left boundary of the trace
-                startInterval_px = start_px
-            if stopInterval_px > stop_px:   # The execution interval finishes after the visible right boundary of the trace
-                stopInterval_px = stop_px
-
-            if stopInterval_px - startInterval_px >= 0:
-                execeWidth_px = stopInterval_px - startInterval_px
-                if execeWidth_px < 1:
-                    execeWidth_px = 1  # Minimum with of an execution segment on the trace is 1px
-                
-                # Draw the execution on the trace
-                if self.cores == 1:
-                    color = task.taskColor
-                else:
-                    color = '#%02X%02X%02X' % (self.coreColors[interval.core][0],self.coreColors[interval.core][1],self.coreColors[interval.core][2])
-
-                if deadlineMissAt != None:
-                    pass
-                    # This task missed its deadline. 
-                    deadlineAt_px = self.tickToPixel(deadlineMissAt)
-
-                    if deadlineAt_px <= startInterval_px:
-                        # The whole interval is a miss interval
-                        #self.canvasItems.append(self.create_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = self.deadlineMissColor))
-                        self.draw_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = self.deadlineMissColor)
-                    elif deadlineAt_px >= stopInterval_px:
-                        # The whole interval is valid
-                        #self.canvasItems.append(self.create_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = color))
-                        self.draw_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = color)
-                    else:
-                        # Part of the interval is valid and part is a miss interval
-                        # Interval: startInterval_px to deadlineAt_px
-                        #self.canvasItems.append(self.create_rectangle(startInterval_px, y, deadlineAt_px, y + self.taskHeight_px, fill = color))
-                        self.draw_rectangle(startInterval_px, y, deadlineAt_px, y + self.taskHeight_px, fill = color)
-                        # Interval: deadlineAt_px to startInterval_px
-                        #self.canvasItems.append(self.create_rectangle(deadlineAt_px, y, stopInterval_px, y + self.taskHeight_px, fill = color))
-                        self.draw_rectangle(deadlineAt_px, y, stopInterval_px, y + self.taskHeight_px, fill = color)
-                else:
-                    # This job is not suject top a deadline miss. 
-                    #self.canvasItems.append(self.create_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = color))
-                    self.draw_rectangle(startInterval_px, y, startInterval_px + execeWidth_px, y + self.taskHeight_px, fill = color)
+            split_px = stop_px if deadlineMissAt is None else max(start_px, min(stop_px, self.tickToPixel(deadlineMissAt)))
+            if split_px > start_px:
+                self.draw_rectangle(start_px, y, split_px, y + self.taskHeight_px, fill=color)
+            if split_px < stop_px:
+                self.draw_rectangle(split_px, y, stop_px, y + self.taskHeight_px, fill=self.deadlineMissColor)
     
-    def drawMutex(self, x, y, letter, accessType):
+    def drawMutex(self, x, y, letter, accessType, success=True):
         """
-        Function draws the mutex access symbols on the trace. The letter ID is used to visualize access to different mutexes (max 26).
-        The accessType indicates if the event is a mutex take (True) or a mutex give (False). 
+        Draw a take attempt (True) or give (False). Successful attempts are black,
+        failed attempts red with a cross, and unrecorded outcomes gray.
         """
-        #self.canvasItems.append(self.create_line(x, y, x, y - self.mutexAccessHeight + self.mutexAccessDiameter, width=2))
-        self.draw_line(x, y, x, y - self.mutexAccessHeight + self.mutexAccessDiameter, width=2)
-
         radius = self.mutexAccessDiameter / 2
         center_y = y - self.mutexAccessHeight + self.mutexAccessDiameter - radius
         
         if accessType == True:
-            fillColor = "#000000"
+            fillColor = (self.mutexFailureColor if success is False else
+                         self.mutexUnknownColor if success is None else '#000000')
             textColor = "#ffffff"
+            outlineColor = fillColor
         else:
             fillColor = "#ffffff"
             textColor = "#000000"
+            outlineColor = '#000000'
+
+        self.draw_line(x, y, x, center_y, width=2, fill=outlineColor)
+        if accessType and success is False:
+            self.draw_line(x - 2, y - 5, x + 2, y - 1, fill=outlineColor)
+            self.draw_line(x - 2, y - 1, x + 2, y - 5, fill=outlineColor)
 
         #self.canvasItems.append(self.create_oval(x - radius, center_y - radius, x + radius, center_y + radius, fill=fillColor, outline="black", width=1))
-        self.draw_oval(x - radius, center_y - radius, x + radius, center_y + radius, fill=fillColor, outline="#000000", width=1)
+        self.draw_oval(x - radius, center_y - radius, x + radius, center_y + radius, fill=fillColor, outline=outlineColor, width=1)
         #self.canvasItems.append(self.create_text(x+1, center_y, text=letter, fill=textColor, font=("Arial", 6), anchor="center"))
         self.draw_text(x+1, center_y, text=letter, fill=textColor, font=("Arial", 6), anchor="center")
 
@@ -876,5 +859,3 @@ class TraceView(customtkinter.CTkCanvas):
         self.draw()
         self.exportCanvas = None
         c.save()
-        
-        

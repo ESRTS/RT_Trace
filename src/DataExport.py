@@ -47,19 +47,19 @@ def createDataFile(taskDataFile, task):
 
         for job in task.jobs:
             jobData = [job.id, job.releaseTime, job.getStartTime(), job.getFinishTime(), job.getExecutionTime()]
-            if all(element is not None for element in jobData): # Only include complete jobs
+            if not job.incomplete and not job.uncertain and all(element is not None for element in jobData):
                 writer.writerow(jobData)
 
-def exportData(gui, tasks):
+def exportData(gui, tasks, overwrite=False):
 
     """
-    First export data for each task and job in task specific files. If the file already exists, this is skipped.
+    Export task-specific CSV files. Skip existing files unless explicitly regenerated.
     """
     destFolder = gui.viewingFolder
 
     for task in tasks:
         taskDataFile = os.path.join(destFolder, f"{task.name.replace(' ', '_')}.csv")
-        if not Path(taskDataFile).is_file():
+        if overwrite or not Path(taskDataFile).is_file():
             createDataFile(taskDataFile, task)
 
     """

@@ -46,9 +46,23 @@ class MutexAccess():
         self.stop = None
         self.mutexId = mutexId
         self.letter = letter
+        self.released = True
 
     def finish(self, stopTime):
         self.stop = stopTime
+
+class MutexAttempt():
+    """A take call, timestamped at entry; ownership still uses MutexAccess."""
+    def __init__(self, startTime, mutexId, letter, success, acquiredAt=None,
+                 resultTime=None, recursive=False, uncertain=False):
+        self.start = startTime
+        self.mutexId = mutexId
+        self.letter = letter
+        self.success = success  # True / False / None (outcome not recorded)
+        self.acquiredAt = acquiredAt
+        self.resultTime = resultTime
+        self.recursive = recursive
+        self.uncertain = uncertain
 
 class ExecutionType(Enum):
     """
@@ -85,6 +99,14 @@ class TraceJob():
         self.deadline = deadline            # Stores the deadline of the job
         self.activeInterval = None          # Stores the current execution interval (i.e. this interval is not complete)
         self.incomplete = False             # A flag to indicate if this job was stopped before completion (i.e. cut at the end of the trace)
+        self.completionTime = None          # Explicit inferred completion (format 3); legacy uses execution end
+        self.observedUntil = None           # Display extent when completion is unknown
+        self.uncertain = False              # Loss/estimated boundaries prevent trustworthy job statistics
+        self.releaseKnown = True
+        self.releaseEstimated = False
+        self.deadlineEstimated = False
+        self.boundary = None
+        self.trigger = None
         self.mutexAccess = []               # List of all MutexAccess of the job
 
     def __str__(self) -> str:
@@ -110,8 +132,12 @@ class TraceJob():
 
     def getFinishTime(self):
         """
-        Returns the finish time of the job or None if there was no execution.
+        Completion, observed extent for an incomplete job, or legacy execution end.
         """
+        if self.completionTime is not None:
+            return self.completionTime
+        if self.observedUntil is not None:
+            return self.observedUntil
         if len(self.execIntervals) > 0:
             return self.execIntervals[-1].stop
         else:
@@ -158,7 +184,7 @@ class TraceJob():
         """
 
         for access in self.mutexAccess:
-            if access.mutexId == mutexId:
+            if access.mutexId == mutexId and access.stop is None:
                 access.stop = ts
 
     def getExecutionTime(self):
@@ -179,6 +205,9 @@ class TraceTask():
         self.currentJob = None
         self.delayUntil = False     # Flag to indicate if delay until was called
         self.period = None          # Period of the task, if set by user-event
+        self.mutexAttempts = []
+        self.mutexAttemptTimes = [] # Sorted index for the visible markers
+        self.mutexAttemptsExplicit = False
 
         # Used for the visualization only
         self.taskColor = color      # Color of the task in the trace
@@ -273,6 +302,8 @@ class TraceTask():
         maxExec = 0
 
         for job in self.jobs:
+            if job.incomplete or job.uncertain:
+                continue
             tmpExec = job.getExecutionTime()
             if maxExec < tmpExec:
                 maxExec = tmpExec
@@ -284,6 +315,8 @@ class TraceTask():
         """
         maxRt = None
         for j in self.jobs:
+            if j.incomplete or j.uncertain:
+                continue
             if j.getFinishTime() != None:
                 rt = (j.getFinishTime() - j.releaseTime)
                 if maxRt == None or maxRt < rt:
@@ -303,7 +336,7 @@ class TraceTask():
                 elif interval.stop > 0:
                     accumulatedTime = accumulatedTime + (interval.stop) 
 
-        return accumulatedTime / intervalEnd
+        return accumulatedTime / intervalEnd if intervalEnd > 0 else 0
     
     def mutexTake(self, ts, mutexId, letterId):
         """
@@ -313,6 +346,13 @@ class TraceTask():
             inconsistent(self.name, ts, None, "took a mutex without a job")
             return
         self.currentJob.mutexTake(ts, mutexId, letterId)
+
+    def mutexAttempt(self, ts, mutexId, letter, success, **details):
+        """Append take calls in timestamp order, including failed/pending calls."""
+        attempt = MutexAttempt(ts, mutexId, letter, success, **details)
+        self.mutexAttempts.append(attempt)
+        self.mutexAttemptTimes.append(ts)
+        return attempt
 
     def mutexGive(self, ts, mutexId):
         """

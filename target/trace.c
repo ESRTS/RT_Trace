@@ -1,904 +1,235 @@
-#include <stdio.h>
-#include <string.h>
-#include <stdbool.h>
-#include <trace.h>
-
-#ifdef TRACE_STM32L476RG
-#include "stm32l4xx_hal.h"
-#include "core_cm4.h"
-#endif /* TRACE_STM32L476RG */
-#ifdef TRACE_PICO2
-#include "pico/stdlib.h"
-#include "pico/sync.h"
-#include "pico/multicore.h"
-#ifdef TRACE_RTT
+#include "FreeRTOS.h"
+#include "task.h"
+#include "trace.h"
+#include "pico/platform.h"
+#include "pico/runtime.h"
+#include "hardware/sync.h"
+#include "hardware/timer.h"
 #include "SEGGER_RTT.h"
-#endif /* TRACE_RTT */
-#endif /* TRACE_PICO2 */
+#include <string.h>
 
-/****************************************************************************************************************
- * Variable declarations. For multiple cores, each core has its own copies.
- ****************************************************************************************************************/
-
-/**
- * @brief Buffer used for trace information of each core.
- * We use two buffer and place them in separate memory banks. That way, the buffer
- * can be accessed by each core in isolation.
- */
-#ifdef TRACE_STM32L476RG
-/**
- * To store the trace buffer at a specific location, a dedicated section is created in the memory map.
- * The trace buffer is stored in RAM2 at location 0x10000000. To create the memory section add the following
- * to SECTIONS in STM32L476RGTX_FLASH.ld.
- *
- * .traceRAMBlock 0x10000000 :
- * {
- *   . = ALIGN(4);
- *   KEEP(*(.traceRAMsection))
- *   . = ALIGN(4);
- * } > RAM2
- */
-uint32_t __attribute__((section(".traceRAMsection"))) traceBuffer[TRACE_BUFFER_SIZE];
+#if !PICO_RP2350
+#error "RT-Trace target requires RP2350"
 #endif
-#ifdef TRACE_PICO2
-#ifndef TRACE_RTT
-#ifndef PICO_USE_PSRAM
-/**
- * The trace buffer of each core in SRAM. The 4 KB scratch banks are too small for more than a few
- * milliseconds of a trace. RT-Trace finds the buffers by their symbol names in the ELF file.
- */
-uint32_t traceBuffer_core0[TRACE_BUFFER_SIZE];
-uint32_t traceBuffer_core1[TRACE_BUFFER_SIZE];
-#else
-/**
- * If PSRAM is available, the buffer is stored in PSRAM. This way the latency to create
- * trace events is larger, but the buffer is significantly larger as well.
- */
-static uint32_t *traceBuffer_core0 = (uint32_t*)0x15000000; /* PSRAM access without cache! */
-static uint32_t *traceBuffer_core1 = (uint32_t*)(0x15000000 + (TRACE_BUFFER_SIZE * 4)); /* Start of the second buffer in PSRAM, access without cache. */
-#endif /* PICO_USE_PSRAM */
-#else
-/**
- * The RTT buffer of each core. RT-Trace empties them over SWD while the program runs.
- */
-static uint8_t rttBuffer_core0[TRACE_RTT_BUFFER_SIZE];
-static uint8_t rttBuffer_core1[TRACE_RTT_BUFFER_SIZE];
-
-/* The event buffer is used by the tracing facility to prepare the event before it is sent to the RTT channel. */
-static uint8_t __scratch_x("traceBufferCore0") eventBuffer_core0[50];
-static uint8_t __scratch_y("traceBufferCore1") eventBuffer_core1[50];
-
-/* Number of events that did not fit into the RTT buffer since the last event that was written. */
-static uint32_t lostEvents_core0;
-static uint32_t lostEvents_core1;
-
-#endif /* TRACE_RTT */
-#endif /* TRACE_PICO2 */
-
-/**
- * @brief Index to the next free element in the trace buffer for each core.
- *
- */
-#ifdef TRACE_STM32L476RG
-static uint32_t writeIndex;
+#if configNUMBER_OF_CORES != 2 || configUSE_TRACE_FACILITY != 1
+#error "Set configNUMBER_OF_CORES=2 and configUSE_TRACE_FACILITY=1"
 #endif
-#ifdef TRACE_PICO2
-static uint32_t __scratch_x("traceBufferCore0") writeIndex_core0;
-static uint32_t __scratch_y("traceBufferCore0") writeIndex_core1;
+#if SEGGER_RTT_MAX_NUM_UP_BUFFERS < 3
+#error "RT-Trace requires RTT up channels 1 and 2 (at least 3 channels total)"
 #endif
+_Static_assert(sizeof(TickType_t) <= 4, "target currently supports 16/32-bit ticks");
+_Static_assert(sizeof(uintptr_t) == 4, "target requires 32-bit pointers");
+_Static_assert(TRACE_NAME_MAX > 0 && TRACE_NAME_MAX <= 64, "TRACE_NAME_MAX must be 1..64");
+_Static_assert(TRACE_SYNC_INTERVAL_EVENTS > 0, "sync event interval must be positive");
+_Static_assert(TRACE_RTT_BUFFER_SIZE >= 256, "RTT buffer too small");
+_Static_assert(TRACE_RTT_BUFFER_SIZE % 4 == 0, "RTT buffer must preserve word alignment");
 
-/**
- * @brief Timestamp of the last logged event on each core.
- * This is needed since we record delta times between the individual timestamps (to save memory).
+#define TRACE_PACKET_WORDS 40u
+#define TRACE_NAME_PAYLOAD_WORDS (3u + (TRACE_NAME_MAX + 3u) / 4u)
+#define TRACE_MAX_PAYLOAD_WORDS (TRACE_NAME_PAYLOAD_WORDS < 6u ? 6u : TRACE_NAME_PAYLOAD_WORDS)
+#define TRACE_SYNC_WORDS 12u
+#define TRACE_EPOCH_UNSET UINT64_MAX
+
+/* One writer per core, serialized against normal IRQs by local PRIMASK.
+ * Neither NMI nor HardFault may call these functions. Buffer and workspace
+ * reside in that core's scratchpad. RTT's global descriptor must stay in the
+ * SEGGER implementation; never reinitialize RTT while tracing is active.
+ * These exported symbols also expose final sequence/drop counts to a debugger.
  */
-#ifdef TRACE_STM32L476RG
-static uint64_t lastTimestamp;
-#endif
-#ifdef TRACE_PICO2
-static uint64_t __scratch_x("traceBufferCore0") lastTimestamp_core0;
-static uint64_t __scratch_y("traceBufferCore0") lastTimestamp_core1;
-#endif
-/**
- * @brief Flags for each core to indicate that traceing is enabled.
- * This is set to TRUE at initialization and set to FALSE if an event can't be written to the buffer anymore.
- */
-#ifdef TRACE_STM32L476RG
-static bool enableTrace;
-#endif
-#ifdef TRACE_PICO2
-static bool __scratch_x("traceBufferCore0") enableTrace_core0;
-static bool __scratch_x("traceBufferCore1") enableTrace_core1;
-#endif
+struct trace_core_state {
+    uint64_t last_timestamp;
+    uint64_t last_sync;
+    uint64_t session;
+    uint64_t epoch;       /* core0 publication, read only when making a SYNC */
+    uint32_t epoch_valid; /* release/acquire publication of the immutable epoch */
+    uint32_t initialized;
+    uint32_t enabled;
+    uint32_t current_task;
+    uint32_t sequence;
+    uint32_t dropped;
+    uint32_t since_sync;
+    uint32_t need_sync;
+    uint32_t packet[TRACE_PACKET_WORDS];
+    uint8_t rtt[TRACE_RTT_BUFFER_SIZE];
+};
+/* Match the default SDK stacks: core0 in scratch Y, core1 in scratch X. */
+struct trace_core_state __scratch_y("rt_trace_core0") trace_state_core0;
+struct trace_core_state __scratch_x("rt_trace_core1") trace_state_core1;
+/* Trace state starts at the bottom; the same core's stack grows from the top.
+ * Reserve stack space; custom stacks/other scratch data need a link check. */
+_Static_assert(TRACE_SCRATCH_RESERVED_BYTES <= 4096, "invalid scratch reservation");
+_Static_assert(sizeof(struct trace_core_state) <= 4096 - TRACE_SCRATCH_RESERVED_BYTES,
+               "trace state exceeds scratch budget; reduce RTT buffer/name size");
+_Static_assert(TRACE_SYNC_WORDS + 2 + TRACE_MAX_PAYLOAD_WORDS <= TRACE_PACKET_WORDS,
+               "trace packet workspace too small");
 
-/**
- * @brief Flags for each core that are set while the idle task runs, so TRACE_IDLE is only written when
- * the core becomes idle. With preemption off, the idle task yields to itself in its loop, every few us.
- */
-#ifdef TRACE_STM32L476RG
-static bool idleRunning;
-#define getIdleRunning() (&idleRunning)
-#endif
-#ifdef TRACE_PICO2
-static bool idleRunning_core0;
-static bool idleRunning_core1;
-#define getIdleRunning() ((sio_hw->cpuid == 0) ? &idleRunning_core0 : &idleRunning_core1)
-#endif
-
-/**
- * @brief Set by trace_init(). Event groups created before it belong to the port (pico_sync interop).
- */
-static bool traceInitialized;
-static uint32_t internalEventGroup;
-
-/****************************************************************************************************************
- * Platform specific makro definitions. For multiple cores, those should work on each core independently.
- ****************************************************************************************************************/
-/**
- * @brief Makro that returns the correct trace buffer for each core.
- *
- */
-#ifdef TRACE_STM32L476RG
-#define getBuffer() traceBuffer
-static bool enableTrace;
-#endif  /* TRACE_STM32L476RG */
-#ifdef TRACE_PICO2
-#ifndef TRACE_RTT
-#define getBuffer() (sio_hw->cpuid == 0) ? traceBuffer_core0 : traceBuffer_core1;
-#else
-#define getRttChannel() (sio_hw->cpuid == 0) ? 1 : 2
-#define getLostEvents() ((sio_hw->cpuid == 0) ? &lostEvents_core0 : &lostEvents_core1)
-#endif /* TRACE_RTT */
-#endif /* TRACE_PICO2 */
-
-/**
- * @brief Makro that returns a pointer to the correct write index for each core.
- *
- */
-#ifdef TRACE_STM32L476RG
-#define getWriteIndex() &writeIndex
-static bool enableTrace;
-#endif /* TRACE_STM32L476RG */
-#ifdef TRACE_PICO2
-#ifndef TRACE_RTT
-#define getWriteIndex() (sio_hw->cpuid == 0) ? &writeIndex_core0 : &writeIndex_core1;
-#else
-/* Nothing needed with RTT */
-#endif /* TRACE_RTT */
-#endif /* TRACE_PICO2 */
-
-/**
- * @brief Makro that returns a pointer to the last event timestamp for each core.
- *
- */
-#ifdef TRACE_STM32L476RG
-#define getLastTimestamp() &lastTimestamp
-static bool enableTrace;
-#endif /* TRACE_STM32L476RG */
-#ifdef TRACE_PICO2
-#define getLastTimestamp() (sio_hw->cpuid == 0) ? &lastTimestamp_core0 : &lastTimestamp_core1;
-#endif /* TRACE_PICO2 */
-
-/**
- * @brief Makro that returns a pointer to the flag that indicates if traceing is enabled for each core.
- *
- */
-#ifdef TRACE_STM32L476RG
-#define getTraceState() &enableTrace
-static bool enableTrace;
-#endif /* TRACE_STM32L476RG */
-#ifdef TRACE_PICO2
-#define getTraceState() (sio_hw->cpuid == 0) ? &enableTrace_core0 : &enableTrace_core1;
-#endif /* TRACE_PICO2 */
-
-/**
- * @brief Makro to get the correct function that returns the current time in us.
- *
- */
-#ifdef TRACE_STM32L476RG
-#define getTimeUs() timer_time_us_64()
-#endif /* TRACE_STM32L476RG */
-#ifdef TRACE_PICO2
-#define getTimeUs() timer_time_us_64(timer0_hw)
-#endif /* TRACE_PICO2 */
-
-void trace_formatVersion(void);
-
-/****************************************************************************************************************
- * Platform specific functions.
- ****************************************************************************************************************/
-
-#ifdef TRACE_STM32L476RG
-/**
- * @brief Save the current interrupt state and disable interrupts.
- *
- */
-uint32_t save_and_disable_interrupts() {
-	uint32_t irqState = __get_PRIMASK();              						/* Save the current interrupt state */
-	__disable_irq();														/* Disable interrupts on the current core */
-	return irqState;
+static inline struct trace_core_state *trace_local(void) {
+    return get_core_num() == 0 ? &trace_state_core0 : &trace_state_core1;
 }
 
-/**
- * @brief Restore the interrupt state and enable interrupts.
- *
+/* Must be called with local interrupts masked. The entire packet is committed
+ * by one skip-or-write operation. In particular a lost SYNC never consumes a
+ * timestamp delta. SEGGER_RTT_WriteSkipNoLock returns BOOLEAN, not byte count.
  */
-void restore_interrupts(uint32_t irqState) {
-	__set_PRIMASK(irqState);												/* Restore the interrupt state */
-	__enable_irq();                                  						/* Enable interrupts */
-}
-
-/**
- * @brief Returns the current time in us. The assumption is that TIM1 is used as systick.
- *
- */
-uint64_t timer_time_us_64()
-{
-    uint32_t ms;
-    uint32_t st;
-
-    uint32_t uptimeMillis = HAL_GetTick();	/* Get the current time in ms, the HAL function is used since this starts counting before the FreeRTOS tick. */
-
-    do
-    {
-        ms = uptimeMillis;													/* Current time in ms. */
-        st = TIM1->CNT;														/* Current counter of TIM1, counts up to 999. */
-        uptimeMillis = HAL_GetTick();
-    } while (ms != uptimeMillis);											/* Make sure the timer didn't roll over during the measurement. */
-
-    uint64_t ts = (ms * 1000) + st;											/* TIM1 is used as systick, counts up until 999 */
-    return ts;
-
-}
-
-/**
- * @brief Initializes the trace mechanism.
- *
- */
-void trace_init() {
-
-    /* Set the complete trace buffer to 0x00 */
-    for (int i = 0; i < TRACE_BUFFER_SIZE; i++) {
-        traceBuffer[i] = 0x00;
+static void __not_in_flash_func(trace_write_locked)(struct trace_core_state *state,
+        uint32_t type, uint32_t task, const uint32_t *payload, uint32_t words,
+        uint64_t now) {
+    uint64_t delta = now - state->last_timestamp;
+    uint32_t *out = state->packet;
+    uint32_t sequence = state->sequence++;
+    uint32_t sync = state->need_sync || delta > UINT16_MAX ||
+                    state->since_sync >= TRACE_SYNC_INTERVAL_EVENTS ||
+                    now - state->last_sync >= TRACE_SYNC_INTERVAL_US ||
+                    type == TRACE_TIME_ZERO || type == TRACE_END;
+    if (task == TRACE_CURRENT_TASK) task = state->current_task;
+    if (sync) {
+        uint64_t epoch = TRACE_EPOCH_UNSET;
+        if (__atomic_load_n(&trace_state_core0.epoch_valid, __ATOMIC_ACQUIRE)) {
+            epoch = trace_state_core0.epoch;
+        }
+        *out++ = TRACE_SYNC_MAGIC;
+        *out++ = TRACE_FORMAT_VERSION | ((uint32_t)get_core_num() << 8) |
+                 (2u << 16) | (TRACE_ENABLE_IRQ_TRACE ? TRACE_SYNC_IRQ_ENABLED : 0u) |
+                 ((uint32_t)(8u * sizeof(TickType_t)) << 24);
+        *out++ = (uint32_t)now;
+        *out++ = (uint32_t)(now >> 32);
+        *out++ = sequence;
+        *out++ = state->dropped;
+        *out++ = (uint32_t)epoch;
+        *out++ = (uint32_t)(epoch >> 32);
+        *out++ = (uint32_t)state->session;
+        *out++ = (uint32_t)(state->session >> 32);
+        *out++ = state->current_task;
+        *out++ = (uint32_t)configTICK_RATE_HZ;
+        delta = 0;
     }
-    writeIndex = 0;
-
-    enableTrace = true;
-    traceInitialized = true;
-    trace_formatVersion();
-}
-#endif
-
-#ifdef TRACE_PICO2
-/**
- * @brief Initializes the trace mechanism.
- *
- */
-void trace_init() {
-    
-    multicore_reset_core1();    /* This is needed since the core gets stuck otherwise if we halt it from pyOCD. */
-
-#ifndef TRACE_RTT
-    /* Set the complete trace buffer to 0x00 */
-    for (int i = 0; i < TRACE_BUFFER_SIZE; i++) {
-        traceBuffer_core0[i] = 0x00;
-        traceBuffer_core1[i] = 0x00;
+    *out++ = (uint32_t)(delta << 16) | ((task < 255 ? task : 255u) << 8) | type;
+    if (task >= 255) *out++ = task;
+    /* words is bounded at the public entry point. Compiler uses a short
+     * memcpy; this is never a string scan or an unbounded queue operation. */
+    if (words) {
+        memcpy(out, payload, words * sizeof(uint32_t));
+        out += words;
     }
-
-    writeIndex_core0 = 0;
-    writeIndex_core1 = 0;
-#else
-    /* With RTT, we only need to register the buffers. */
-    /* NO_BLOCK_SKIP discards all data if there is not enough room in the buffer. */
-    SEGGER_RTT_ConfigUpBuffer(1, "core0", rttBuffer_core0, sizeof(rttBuffer_core0), SEGGER_RTT_MODE_NO_BLOCK_SKIP);
-    SEGGER_RTT_ConfigUpBuffer(2, "core1", rttBuffer_core1, sizeof(rttBuffer_core1), SEGGER_RTT_MODE_NO_BLOCK_SKIP);
-    lostEvents_core0 = 0;
-    lostEvents_core1 = 0;
-#endif /* TRACE_RTT */
-
-    enableTrace_core0 = true;
-    enableTrace_core1 = true;
-    traceInitialized = true;
-    trace_formatVersion();
-}
-#endif
-
-/****************************************************************************************************************
- * Platform independent functions
- ****************************************************************************************************************/
-
-/**
- * @brief Encodes the event ID as well as the timestamp delta into one byte.
- *
- * The event ID is encoded into the upper 16 bits.
- * The delta between the last timestamp and the current time is encoded into the lower byte.
- * With the 1us timer granularity, this allows to record timestamps that are up to 65,536 ms apart.
- * As the FreeRTOS ticks appear at 1ms granularity (if not changed), this is safe.
- *
- * Note: We assume interrupts are disabled when this function is called.
- * @param event
- * @return uint32_t
- */
-uint32_t trace_encodeTime(uint16_t event) {
-	bool* enabled = getTraceState();
-	if (*enabled == false) return 0;                    					/* Only increment the timestamps if tracing is still enabled. */
-
-	uint64_t* lastTs = getLastTimestamp();              					/* Get the timestamp of the last event that was written */
-#ifdef TRACE_STM32L476RG
-	uint64_t ts = timer_time_us_64();          								/* 1us timestamp, can be accessed from both cores */
-#endif
-#ifdef TRACE_PICO2
-	uint64_t ts = timer_time_us_64(timer0_hw);          					/* 1us timestamp, can be accessed from both cores */
-#endif
-	uint32_t delta = ((ts - *lastTs) & 0xffffff);
-	*lastTs = ts;
-
-	return (event << 24) | delta;
-}
-
-/**
- * @brief Returns a pointer to the correct buffer location, considering which core it is and
- * which event needs to be written.
- * Note: We assume interrupts are disabled when this function is called.
- *
- * @param length Length of the event data.
- * @return Pointer to the reserved event buffer.
- */
-uint32_t* trace_getEventBuffer(uint16_t length) {
-
-#ifndef TRACE_RTT
-	/* Get a core dependent pointer to buffer, write index and traceing state. */
-	uint32_t* buffer = getBuffer();
-	uint32_t* index = getWriteIndex();
-	bool* enabled = getTraceState();
-	uint32_t* retval = NULL;
-
-	if (*enabled == true) {                         						/* Check if traceing is enabled for this core */
-	    if (*index + length <= TRACE_BUFFER_SIZE) { 						/* Check if the buffer has sufficient space for the message */
-	        retval = &buffer[*index];               						/* Return the pointer to the buffer location the event should be written to. */
-	        *index += length;                       						/* Reserve space, i.e. increment the index. */
-	        if (*index < TRACE_BUFFER_SIZE) {
-	            buffer[*index] = 0xaabbccdd;                    				/* End marker, unless the buffer is full (it would overwrite the next buffer). */
-	        }
-	    } else {
-	    *enabled = false;                       							/* If this event can't be added to the buffer, tracing is disabled for this core. */
-	    }
-	}
-#else
-    /* With RTT tracing, only the fixed event buffer is returned. */
-    uint32_t* retval = (uint32_t*)((sio_hw->cpuid == 0) ? eventBuffer_core0 : eventBuffer_core1);
-#endif /* TRACE_RTT */
-
-	return retval;
-}
-
-#ifdef TRACE_RTT
-/**
- * @brief Writes an event to the RTT buffer of this core. Interrupts must be disabled.
- * An event that does not fit is dropped (NO_BLOCK_SKIP). The timestamp of the last written event is
- * kept, so the next delta still counts from it, and the next event that fits is preceded by
- * TRACE_EVENTS_LOST with the number of dropped events.
- */
-static void trace_rttWrite(uint32_t* buffer, uint32_t nBytes) {
-	unsigned channel = getRttChannel();
-	uint32_t* lost = getLostEvents();
-	uint64_t* lastTs = getLastTimestamp();
-
-	if (SEGGER_RTT_GetAvailWriteSpace(channel) < nBytes + ((*lost > 0) ? 8 : 0)) {
-		*lastTs -= (buffer[0] & 0xffffff);								/* Back to the time of the last written event */
-		(*lost)++;
-		return;
-	}
-	if (*lost > 0) {
-		uint32_t marker[2] = { (TRACE_EVENTS_LOST << 24) | (buffer[0] & 0xffffff), *lost };
-		SEGGER_RTT_Write(channel, marker, 8);
-		buffer[0] &= 0xff000000;										/* The marker carries the time delta */
-		*lost = 0;
-	}
-	SEGGER_RTT_Write(channel, buffer, nBytes);
-}
-#endif /* TRACE_RTT */
-
-/**
- * @brief Record the event that the CPU starts to be idle.
- *
- */
-void trace_idle(void) {
-
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    bool* idle = getIdleRunning();
-    if (*idle == true) {                                            		/* Already idle: the idle task only yielded to itself */
-        restore_interrupts(irqState);
-        return;
+    if (SEGGER_RTT_WriteSkipNoLock(get_core_num() + 1u, state->packet,
+                                   (unsigned)((out - state->packet) * 4u))) {
+        state->last_timestamp = now;
+        state->need_sync = 0;
+        if (sync) {
+            state->last_sync = now;
+            state->since_sync = 0;
+        }
+        ++state->since_sync;
+    } else {
+        ++state->dropped;
+        state->need_sync = 1;
     }
-    *idle = true;
-    uint32_t* buffer = trace_getEventBuffer(1);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_IDLE);             		/* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-    }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 4);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
 }
 
-/**
- * @brief Record the event that the task has started to execute.
- *
- */
-void trace_execStart(uint32_t taskId) {
+void trace_init(void) {
+    /* SDK preinit runs on core0, before constructors/main/core1. This is not a
+     * concurrent reset API. Calling again after initialization is a no-op. */
+    if (__atomic_load_n(&trace_state_core0.initialized, __ATOMIC_ACQUIRE)) return;
+    if (get_core_num() != 0) return;
+    memset(&trace_state_core0, 0, sizeof(trace_state_core0));
+    memset(&trace_state_core1, 0, sizeof(trace_state_core1));
+    if (SEGGER_RTT_ConfigUpBuffer(1, "RT-Trace core0", trace_state_core0.rtt,
+            sizeof(trace_state_core0.rtt), SEGGER_RTT_MODE_NO_BLOCK_SKIP) < 0 ||
+        SEGGER_RTT_ConfigUpBuffer(2, "RT-Trace core1", trace_state_core1.rtt,
+            sizeof(trace_state_core1.rtt), SEGGER_RTT_MODE_NO_BLOCK_SKIP) < 0) return;
+    uint64_t session = timer_time_us_64(timer0_hw);
+    trace_state_core0.session = trace_state_core1.session = session;
+    trace_state_core0.need_sync = trace_state_core1.need_sync = 1;
+    trace_state_core0.enabled = trace_state_core1.enabled = 1;
+    __atomic_store_n(&trace_state_core1.initialized, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&trace_state_core0.initialized, 1, __ATOMIC_RELEASE);
+}
+PICO_RUNTIME_INIT_FUNC(trace_init, "09999");
 
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    *getIdleRunning() = false;
-    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_TASK_START_EXEC);  		/* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-        buffer[1] = taskId;
+void __not_in_flash_func(trace_event)(uint32_t type, uint32_t task, const uint32_t *payload, uint32_t words) {
+    uint32_t irq = save_and_disable_interrupts();
+    struct trace_core_state *state = trace_local();
+    if (__atomic_load_n(&state->initialized, __ATOMIC_ACQUIRE) && state->enabled &&
+        type >= TRACE_SWITCH_IN && type <= TRACE_IDLE_TASK &&
+        words <= TRACE_MAX_PAYLOAD_WORDS && (words == 0 || payload != NULL)) {
+        trace_write_locked(state, type, task, payload, words, timer_time_us_64(timer0_hw));
     }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    restore_interrupts(irq);
 }
 
-/**
- * @brief Record the event that the task has stopped to execute.
- *
- */
-void trace_execStop(uint32_t taskId) {
-
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_TASK_STOP_EXEC);   		/* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-        buffer[1] = taskId;
+void __not_in_flash_func(trace_switch)(uint32_t task, uint32_t entering) {
+    uint32_t irq = save_and_disable_interrupts();
+    struct trace_core_state *state = trace_local();
+    if (__atomic_load_n(&state->initialized, __ATOMIC_ACQUIRE) && state->enabled) {
+        /* Update even if RTT is full, so later SYNC reflects actual execution. */
+        if (entering) state->current_task = task;
+        trace_write_locked(state, entering ? TRACE_SWITCH_IN : TRACE_SWITCH_OUT,
+                           task, NULL, 0, timer_time_us_64(timer0_hw));
+        if (!entering) state->current_task = 0;
     }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    restore_interrupts(irq);
 }
 
-/**
- * @brief Record the event that the task is in ready state.
- *
- */
-void trace_readyStart(uint32_t taskId) {
-
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_TASK_START_READY); 		/* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-        buffer[1] = taskId;
+void trace_task_create(uint32_t task, uintptr_t handle, uint32_t priority, const char *name) {
+    /* Creation is rare. Bounded transient stack copy; no strlen/strcpy or
+     * heap storage. The persistent serialization packet is in scratch. */
+    uint32_t irq = save_and_disable_interrupts();
+    struct trace_core_state *state = trace_local();
+    if (__atomic_load_n(&state->initialized, __ATOMIC_ACQUIRE) && state->enabled) {
+        uint32_t length = 0;
+        if (name) {
+            while (length < TRACE_NAME_MAX && length < configMAX_TASK_NAME_LEN && name[length]) ++length;
+        }
+        uint32_t name_words = (length + 3u) / 4u;
+        uint32_t data[3u + (TRACE_NAME_MAX + 3u) / 4u];
+        data[0] = (uint32_t)handle;
+        data[1] = priority;
+        data[2] = length;
+        if (name_words) {
+            memset(data + 3, 0, name_words * 4u);
+            memcpy(data + 3, name, length);
+        }
+        trace_write_locked(state, TRACE_TASK_CREATE, task, data, 3u + name_words,
+                           timer_time_us_64(timer0_hw));
     }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    restore_interrupts(irq);
 }
 
-/**
- * @brief Record the event that the task is not in ready state anymore.
- *
- */
-void trace_readyStop(uint32_t taskId) {
-
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_TASK_STOP_READY);  		/* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-        buffer[1] = taskId;
-    }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+void __not_in_flash_func(trace_syscall)(uint32_t kind, uintptr_t object, uint32_t timeout,
+                   uint32_t arg0, uint32_t arg1, uintptr_t caller) {
+    const uint32_t data[] = {kind, (uint32_t)object, timeout, arg0, arg1, (uint32_t)caller};
+    trace_event(TRACE_SYSCALL_ENTER, TRACE_CURRENT_TASK, data, 6);
 }
 
-
-/**
- * @brief Record the event that a new task was created.
- *
- */
-void trace_taskCreate(uint32_t taskId, uint32_t priority, const char* name) {
-
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-
-    /* Get the length of the string, with 4 byte alignment */
-    uint16_t len = strlen(name);
-    uint16_t slen = len / 4;
-    if ( len % 4 != 0) slen++;
-
-    uint32_t* buffer = trace_getEventBuffer(4 + slen);              		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_TASK_CREATE);      		/* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-        buffer[1] = taskId;
-        buffer[2] = slen;
-        buffer[3] = priority;
-
-        strcpy((char*)&buffer[4], name);  /* Copy the string to the trace buffer and increase the index. */
-    }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, (4 + slen) * 4);                                 /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
-}
-
-
-/**
- * @brief Record the event that the tracing started.
- *
- */
-void trace_start(void) {
-
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(1);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_START);            		/* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-    }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 4);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
-}
-
-/**
- * @brief Record the event that the tracing started.
- *
- */
-void trace_stop(void) {
-
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(1);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_STOP);             		/* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-    }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 4);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
-}
-
-/**
- * @brief Record the event that the tracing started.
- *
- */
-void trace_delayUntil(uint32_t* prev, uint32_t timeInc, uint32_t tickCount) {
-
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_DELAY_UNTIL);      		/* Encodes the event ID and the timestamp delta */
-
-	uint32_t prevWake = *prev;
-	uint32_t expiryTime = prevWake + timeInc;															/* Compute the absolute expiry time of the delay. */
-	bool shouldDelay;														/* The same test as in xTaskDelayUntil(), which also works when the tick count wraps */
-	if (tickCount < prevWake) {
-		shouldDelay = (expiryTime < prevWake) && (expiryTime > tickCount);
-	} else {
-		shouldDelay = (expiryTime < prevWake) || (expiryTime > tickCount);
-	}
-	expiryTime &= 0x7fffffff;
-	if (!shouldDelay) {
-		expiryTime |= (0x01u << 31);										/* We use bit 32 to indicate if the deadline was missed! vTaskDelayUntil() does not block. */
-	}
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-        buffer[1] = expiryTime;
-    }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
-}
-
-/**
- * @brief Record the delay event.
- *
- * @param delayTime OS ticks to delay.
- */
-void trace_delay(uint32_t delayTime) {
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_DELAY);      		        /* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-        buffer[1] = delayTime;
-    }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
-}
-
-/**
- * @brief Record the ISR enter event.
- *
- */
-void trace_isrEnter(void) {
-
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-#ifdef TRACE_STM32L476RG
-    uint32_t irqId = SCB->ICSR & 0x000001ff;								/* Read VECTACTIVE, he exception number of the current executing exception. */
-#endif
-#ifdef TRACE_PICO2
-    uint32_t irqId = m33_hw->icsr & 0x000001ff;                     		/* Read VECTACTIVE, he exception number of the current executing exception. */
-#endif
-    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_ISR_ENTER);        		/* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-        buffer[1] = irqId;
-    }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
-}
-
-/**
- * @brief Record the ISR exit event.
- *
- */
-void trace_isrExit(void) {
-
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(1);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_ISR_EXIT);         		/* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-    }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 4);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
-}
-
-/**
- * @brief Record the ISR exit to scheduler event.
- *
- */
-void trace_isrExitToScheduler(void) {
-
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    *getIdleRunning() = false;                                      		/* The scheduler runs next, a switch back to idle is traced again */
-    uint32_t* buffer = trace_getEventBuffer(1);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_ISR_EXIT_TO_SCHEDULER);	/* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-    }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 4);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
-}
-
-/**
- * @brief Record the t=0 event.
- *
- */
 void trace_timeZero(void) {
-
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(1);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_TIME_START);	/* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
+    uint32_t irq = save_and_disable_interrupts();
+    struct trace_core_state *state = trace_local();
+    if (__atomic_load_n(&state->initialized, __ATOMIC_ACQUIRE) && state->enabled &&
+        !__atomic_load_n(&trace_state_core0.epoch_valid, __ATOMIC_ACQUIRE)) {
+        /* Contract: one application caller, once. Publish even if RTT is full;
+         * subsequent SYNCs on either core repeat the epoch. */
+        uint64_t now = timer_time_us_64(timer0_hw);
+        trace_state_core0.epoch = now;
+        __atomic_store_n(&trace_state_core0.epoch_valid, 1, __ATOMIC_RELEASE);
+        const uint32_t data[] = {(uint32_t)now, (uint32_t)(now >> 32)};
+        trace_write_locked(state, TRACE_TIME_ZERO, TRACE_CURRENT_TASK, data, 2, now);
     }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 4);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    restore_interrupts(irq);
 }
 
-/**
- * @brief Record the format version of the trace. Called by trace_init().
- *
- */
-void trace_formatVersion(void) {
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_VERSION);          		/* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-        buffer[1] = TRACE_FORMAT_VERSION;
+void trace_stop(void) {
+    uint32_t irq = save_and_disable_interrupts();
+    struct trace_core_state *state = trace_local();
+    if (__atomic_load_n(&state->initialized, __ATOMIC_ACQUIRE) && state->enabled) {
+        trace_write_locked(state, TRACE_END, TRACE_CURRENT_TASK, NULL, 0,
+                           timer_time_us_64(timer0_hw));
+        state->enabled = 0;
+        /* A dropped END is visible in the exported state. Host must drain and
+         * inspect final counters if no END record arrived, not assume clean EOF. */
     }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+    restore_interrupts(irq);
 }
 
-/**
- * @brief Record that a task blocks on a queue, semaphore or task notification.
- *
- */
-void trace_taskBlock(uint32_t taskId) {
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_TASK_BLOCK);       		/* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-        buffer[1] = taskId;
-    }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
-}
-
-/**
- * @brief Remembers the event group the port creates before trace_init() for the SDK locks.
- */
-void trace_eventGroupCreate(uint32_t eventGroup) {
-	if (!traceInitialized) {
-		internalEventGroup = eventGroup;
-	}
-}
-
-/**
- * @brief True for the port's internal event group, whose waits are not traced.
- */
-int trace_isInternalEventGroup(uint32_t eventGroup) {
-	return eventGroup != 0 && eventGroup == internalEventGroup;
-}
-
-/**
- * @brief Record the event that the task waits for events.
- *
- */
-void trace_eventGroupWait(uint32_t taskId) {
-
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_TASK_EVT_GROUP_WAIT);  /* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-        buffer[1] = taskId;
-    }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
-}
-
-/**
- * @brief Record the event that the task sets and waits (synd) for events.
- *
- */
-void trace_eventGroupSync(uint32_t taskId) {
-
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_TASK_EVT_GROUP_SYNC);  /* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-        buffer[1] = taskId;
-    }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
-}
-
-/**
- * @brief Record the mutex create event.
- *
- */
-void trace_mutexCreate(uint32_t mutexId) {
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_MUTEX_CREATE);             /* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-        buffer[1] = mutexId;
-    }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
-}
-
-/**
- * @brief Record the mutex take event.
- *
- */
-void trace_mutexTake(uint32_t mutexId) {
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_MUTEX_TAKE);             /* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-        buffer[1] = mutexId;
-    }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
-}
-
-/**
- * @brief Record the mutex give event.
- *
- */
-void trace_mutexGive(uint32_t mutexId) {
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_MUTEX_GIVE);             /* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-        buffer[1] = mutexId;
-    }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
-}
-
-/**
- * @brief Record the end of a job in the JLD execution framework
- *
- */
-void trace_jldJobFinished(uint32_t period_us) {
-    uint32_t irqState = save_and_disable_interrupts();              		/* Disable interrupts on the current core */
-    uint32_t* buffer = trace_getEventBuffer(2);                     		/* Request a buffer */
-    uint32_t identifyer = trace_encodeTime(TRACE_JLDJOB_FINISHED);          /* Encodes the event ID and the timestamp delta */
-
-    if (buffer != NULL) {
-        buffer[0] = identifyer;
-        buffer[1] = period_us;
-    }
-
-#ifdef TRACE_RTT
-    trace_rttWrite(buffer, 8);                                              /* Add the data to the RTT buffer of this core. */
-#endif /* TRACE_RTT */
-    restore_interrupts(irqState);                                   		/* Enable and restore interrupts */
+void trace_irq_enter(void) {
+    trace_e1(TRACE_IRQ_ENTER, 0, __get_current_exception());
 }

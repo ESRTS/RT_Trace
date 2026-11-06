@@ -23,9 +23,14 @@ class TraceApp(customtkinter.CTk):
     Main class of the RT-Trace app. 
     """
     def __init__(self, *args, **kwargs):
+        # Scaling an existing CTk root pins its current size for one second.
+        # Apply the global widget scale before registering this window.
+        uiScale = HelperFunctions.getUiScale()
+        customtkinter.set_widget_scaling(uiScale)
         super().__init__(*args, **kwargs)
-        self.uiScale = HelperFunctions.getUiScale()
-        customtkinter.set_widget_scaling(self.uiScale)
+        self.withdraw()
+        self.attributes('-alpha', 0)
+        self.uiScale = uiScale
         HelperFunctions.scaleTkFonts(self, self.uiScale)
 
         """
@@ -34,11 +39,7 @@ class TraceApp(customtkinter.CTk):
         'recordTraceFunc' is a target specific function that loads the trace buffer
         """
         self.targets = [
-            {'name': 'Pico2 FreeRTOS RTT', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2RttTraceBuffers, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': lambda gui, quiet=False: HelperFunctions.validatePicoTrace(gui, "RTT", quiet)},
-            {'name': 'Pico2 FreeRTOS SRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2BufferTraceRecorder, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': lambda gui, quiet=False: HelperFunctions.validatePicoTrace(gui, "SRAM", quiet)},
-            {'name': 'Pico2 FreeRTOS PSRAM', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2BufferTraceRecorder, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': lambda gui, quiet=False: HelperFunctions.validatePicoTrace(gui, "PSRAM", quiet)},
-            #{'name': 'STM FreeRTOS', 'numCores': 1, 'implemented': True, 'requirement_str' : 'To load the trace buffer, openocd and telnet needs to be on the path.', 'recordTraceFunc' : loadSTM32L476TraceBuffers},
-            #{'name': 'RPI QNX', 'numCores': 4, 'implemented': False, 'requirement_str' : 'To load the trace buffer, telnet needs to be on the path.', 'recordTraceFunc' : None},
+            {'name': 'Pico2 FreeRTOS', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2RttTraceBuffers, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': lambda gui, quiet=False: HelperFunctions.validatePicoTrace(gui, "RTT", quiet)},
             {'name': 'RPI Linux', 'numCores': 4, 'implemented': True, 'requirement_str' : 'Experimental...', 'recordTraceFunc' : loadLinuxraceBuffers, 'loadTraceFunc': linuxParseTraceFiles, 'pathValidationFunc': None}
         ]
 
@@ -199,7 +200,6 @@ class TraceApp(customtkinter.CTk):
         self.traceView.xScrollbar.grid(row=1, column=0, sticky="ew")
         self.paned.add(self.trace_frame, minsize=150, stretch="always")
         self.paned.add(self.textbox, minsize=80, stretch="always")
-        self.after(100, self.initialPaneSizes)
 
         ''' Print Events Switch '''
        #self.printEvents_var = customtkinter.BooleanVar(value=False)
@@ -235,6 +235,18 @@ class TraceApp(customtkinter.CTk):
             self.enableTraceView()
         else:
             self.disableTraceView()
+
+        self.after_idle(self.showInitialWindow)
+
+    def showInitialWindow(self):
+        """Settle window and pane geometry before the first visible frame."""
+        self.update_idletasks()
+        self.deiconify()  # Map transparently so Tk can measure the final pane sizes.
+        try:
+            self.initialPaneSizes()
+            self.update_idletasks()
+        finally:
+            self.attributes('-alpha', 1)
 
     def runInMainThread(self, func):
         """
@@ -279,7 +291,7 @@ class TraceApp(customtkinter.CTk):
 
     def initialPaneSizes(self):
         """
-        Sets the initial separators once the window is shown: the sidebar fits its widgets, the trace view takes 60% of the height.
+        Sets the initial separators: the sidebar fits its widgets, the trace view takes 60% of the height.
         """
         self.update_idletasks()
         self.hpaned.sash_place(0, max(200, self.sidebar_frame.winfo_reqwidth()), 0)
