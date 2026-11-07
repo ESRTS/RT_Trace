@@ -168,7 +168,7 @@ class TraceView(customtkinter.CTkCanvas):
             self.draw_text(self.sizeX_px // 2, 30, anchor=customtkinter.N,
                            text="No rows selected. Check rows under Show in trace.")
         else: 
-            self.fitRows()
+            #self.fitRows()
             self.traceHeight = len(self.tasks) * self.taskTimelineHeight_px + self.scaledBorderY()
             
             # Add a white background to the trace
