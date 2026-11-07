@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
@@ -177,6 +177,81 @@ class ViewClippingTests(unittest.TestCase):
                 self.assertEqual(ovals[0]['fill'], color)
                 self.assertEqual(len(lines), line_count)
                 self.assertEqual(labels, ['A'])
+
+
+class RowVisibilityTests(unittest.TestCase):
+    def setUp(self):
+        self.tasks = events_to_tasks(read_recording(ROOT / 'examples/freertos_smp', 2, strict=True), strict=True)
+        self.items = {}
+        self.next_id = 0
+        view = View.__new__(View)
+        self.view = view
+        attributes = dict(
+            sizeX_px=1000, borderX_px=40, borderY_px=30, legend_px=90,
+            leftBound_tks=0, rightBound_tks=43000, oldLeftBound_tks=0,
+            oldRightBound_tks=0, zoomFactor=1.2, zoomMax=50, zoomMin=43000,
+            maxTimelineHeight_px=45, minTimelineHeight_px=30, maxTicks=20,
+            releaseArrowLength_px=10, releaseArrowWidth_px=2,
+            releaseArrowH_px=4, releaseArrowD_px=3, mutexAccessHeight=15,
+            mutexAccessDiameter=10, mutexFailureColor='#C94C4C',
+            mutexUnknownColor='#8A8A8A', deadlineMissColor='#f5697c',
+            coreColors=[(98, 152, 210), (51, 156, 156)], canvasItems=[],
+            gui=types.SimpleNamespace(uiScale=1), exportCanvas=None,
+        )
+        for name, value in attributes.items():
+            setattr(view, name, value)
+        view.winfo_width = lambda: 1000
+        view.winfo_height = lambda: 400
+        view.xScrollbar = Mock()
+        view.ctk_textbox_scrollbar = Mock()
+        view.ctk_textbox_scrollbar.winfo_ismapped.return_value = False
+        view.configure = Mock()
+        view.yview_moveto = Mock()
+        for kind in ('text', 'rectangle', 'line', 'oval'):
+            setattr(view, 'create_' + kind, lambda *args, kind=kind, **kwargs: self.create(kind, args, kwargs))
+        view.delete = lambda ident: self.items.pop(ident, None)
+        view.bbox = lambda ident: (0, 0, len(self.items[ident][2].get('text', '')) * 7, 15)
+        view.setTasks(self.tasks)
+        view.draw()
+
+    def create(self, kind, args, kwargs):
+        self.next_id += 1
+        self.items[self.next_id] = kind, args, kwargs
+        return self.next_id
+
+    def labels(self):
+        return {kwargs['text'] for kind, _, kwargs in self.items.values() if kind == 'text'}
+
+    def test_hidden_task_irq_and_scheduler_rows_leave_no_labels(self):
+        for kind in ('task', 'irq', 'scheduler'):
+            with self.subTest(kind=kind):
+                hidden = [task for task in self.tasks if task.kind == kind]
+                self.assertTrue(hidden)
+                visible = [task for task in self.tasks if task.kind != kind]
+                self.view.setVisibleTasks(visible)
+                self.assertTrue({task.name for task in visible} <= self.labels())
+                self.assertFalse({task.name for task in hidden} & self.labels())
+
+    def test_hide_all_then_restore_without_stale_canvas_items(self):
+        for _ in range(3):
+            self.view.setVisibleTasks([])
+            self.assertEqual(len(self.items), 1)
+            self.assertTrue(any('No rows selected' in label for label in self.labels()))
+            self.assertEqual(set(self.view.canvasItems), set(self.items))
+            self.view.setVisibleTasks(self.tasks)
+            self.assertTrue({task.name for task in self.tasks} <= self.labels())
+            self.assertEqual(set(self.view.canvasItems), set(self.items))
+
+    def test_filter_preserves_zoom_full_duration_and_core_colors(self):
+        self.view.zoom(1)
+        before = self.view.leftBound_tks, self.view.rightBound_tks, self.view.zoomMin
+        control = next(task for task in self.tasks if task.name == 'Control')
+        self.view.setVisibleTasks([control])
+        self.assertEqual(before, (self.view.leftBound_tks, self.view.rightBound_tks, self.view.zoomMin))
+        self.assertEqual(self.view.cores, 2)
+        fills = {kwargs.get('fill') for kind, _, kwargs in self.items.values() if kind == 'rectangle'}
+        self.assertIn('#6298D2', fills)
+        self.assertNotIn(control.taskColor, fills)
 
 
 if __name__ == '__main__':

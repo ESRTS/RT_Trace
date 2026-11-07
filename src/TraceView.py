@@ -119,18 +119,25 @@ class TraceView(customtkinter.CTkCanvas):
                         if exec.core not in coresFound:
                             coresFound.append(exec.core)
             
-            self.cores = len(coresFound)
+            self.cores = max(1, len(coresFound))
 
             # Make sure that enough core colors are specified
-            assert max(coresFound) <= len(self.coreColors) - 1
+            assert max(coresFound, default=0) <= len(self.coreColors) - 1
 
         else:
             # If there is no task, reset bounds and legend width to default values.
             self.leftBound_tks = 0
             self.rightBound_tks = 50000
             self.legend_px = 90
-            self.core = 1
+            self.cores = 1
+            self.zoomMin = 0
             self.clearTrace()
+
+    def setVisibleTasks(self, tasks):
+        """Change displayed rows while retaining the loaded trace's time/core scale."""
+        self.tasks = list(tasks)
+        self.yview_moveto(0)
+        self.draw()
 
     def clearTrace(self):
         """
@@ -139,6 +146,7 @@ class TraceView(customtkinter.CTkCanvas):
         
         for item in self.canvasItems:
             self.delete(item)
+        self.canvasItems.clear()
 
     def draw(self):
         """
@@ -147,6 +155,7 @@ class TraceView(customtkinter.CTkCanvas):
         #print("Draw...")
 
         self.sizeX_px  = int(self.winfo_width())
+        self.clearTrace()
 
         # Display a standard text if no task is set yet
         if self.tasks is None:
@@ -154,12 +163,13 @@ class TraceView(customtkinter.CTkCanvas):
             #self.draw_rectangle(0, 0, self.sizeX_px-20, self.traceHeight)
             self.traceHeight = 0
             self.draw_text(200, 100, anchor=customtkinter.NW, text="No trace loaded.\n\nChoose a platform and a program, then press Record Trace.\nOr pick an earlier recording under View Trace and press Load Trace.")
+        elif not self.tasks:
+            self.traceHeight = 100
+            self.draw_text(self.sizeX_px // 2, 30, anchor=customtkinter.N,
+                           text="No rows selected. Check rows under Show in trace.")
         else: 
             self.fitRows()
             self.traceHeight = len(self.tasks) * self.taskTimelineHeight_px + self.scaledBorderY()
-            
-            # In case the view was updated, make sure to delete all canvas items first
-            self.clearTrace()
             
             # Add a white background to the trace
             #self.canvasItems.append(self.create_rectangle(self.borderX_px + self.legend_px, 0, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (len(self.tasks)) - 1), fill="#FFFFFF"))

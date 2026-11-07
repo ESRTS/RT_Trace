@@ -4,6 +4,7 @@ import tkinter.font
 import sys
 import platform
 from TraceView import TraceView
+from TraceRowSelector import TraceRowSelector
 from BufferTraceRecorder import loadPico2BufferTraceRecorder
 from RttTraceRecorder import loadPico2RttTraceBuffers
 from LinuxTraceRecorder import loadLinuxraceBuffers
@@ -159,6 +160,12 @@ class TraceApp(customtkinter.CTk):
         ''' Button to save the current trace. '''
         self.btn_saveTrace = customtkinter.CTkButton(self.sidebar_frame, text="Export View to PDF", command=self.save_image_function, corner_radius=default_corner_radius)
         self.btn_saveTrace.grid(row=10, column=0, padx=20, pady=5, sticky="ew")
+
+        self.taskSelector = TraceRowSelector(
+            self.sidebar_frame, command=self.updateTaskVisibility,
+            width=150, height=100, corner_radius=default_corner_radius,
+            label_font=customtkinter.CTkFont(size=15, weight="bold"))
+        self.taskSelector.grid(row=11, column=0, padx=10, pady=(10, 15), sticky="nswe")
         
         ''' Textbox to display stdout. '''
         monospaceFamily = tkinter.font.nametofont("TkFixedFont").actual("family")   # The platform's default monospace font
@@ -200,18 +207,6 @@ class TraceApp(customtkinter.CTk):
         self.traceView.xScrollbar.grid(row=1, column=0, sticky="ew")
         self.paned.add(self.trace_frame, minsize=150, stretch="always")
         self.paned.add(self.textbox, minsize=80, stretch="always")
-
-        ''' Print Events Switch '''
-       #self.printEvents_var = customtkinter.BooleanVar(value=False)
-       # self.switch = customtkinter.CTkSwitch(self.sidebar_frame, text="Print Events", command=self.printEventsSwitch_event,
-       #                          variable=self.printEvents_var, onvalue=True, offvalue=False)
-       # self.switch.grid(row=4, column=0, padx=20, pady=5, sticky="ew")
-
-        ''' Show System Tasks Switch '''
-       # self.showSysTasks_var = customtkinter.BooleanVar(value=True)
-       # self.switch = customtkinter.CTkSwitch(self.sidebar_frame, text="Show System Tasks", command=self.showSystemTasks_event,
-       #                          variable=self.showSysTasks_var, onvalue=True, offvalue=False)
-       # self.switch.grid(row=5, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Bind the key handler function. '''
         self.bind("<Key>", self.keyHandler)
@@ -282,12 +277,18 @@ class TraceApp(customtkinter.CTk):
         Called in the GUI thread once a trace is parsed.
         """
         self.btn_loadTrace.configure(state="normal", text="Load Trace")
-        if tasks is not None and len(tasks) == 0:
+        if tasks is None:
+            return
+        self.traceView.setTasks(tasks)
+        self.taskSelector.setTasks(tasks)
+        if not tasks:
             HelperFunctions.printState("ERROR no tasks", info="No task executed in this trace. The program may have stopped before the scheduler ran (a failed configASSERT, a fault); check it with the debugger.")
-        elif tasks is not None:
-            self.traceView.setTasks(tasks)
+        else:
             self.fitTracePane()
-            self.traceView.draw()
+        self.traceView.draw()
+
+    def updateTaskVisibility(self, tasks):
+        self.traceView.setVisibleTasks(tasks)
 
     def initialPaneSizes(self):
         """
@@ -340,12 +341,6 @@ class TraceApp(customtkinter.CTk):
         self.textbox.configure(state="normal")
         self.textbox.delete("1.0", "end")
         self.textbox.configure(state="disabled")
-
-    def printEventsSwitch_event(self):
-        pass
-
-    def showSystemTasks_event(self):
-        pass
 
     def resize_window_function(self, event):
         """
@@ -511,6 +506,7 @@ class TraceApp(customtkinter.CTk):
         self.textbox.configure(state=customtkinter.DISABLED)
 
         # Reset the trace view
+        self.taskSelector.setTasks(None)
         self.traceView.setTasks(None)
         self.traceView.draw()
 
@@ -552,6 +548,7 @@ class TraceApp(customtkinter.CTk):
         self.textbox.configure(state=customtkinter.DISABLED)
 
         # Reset the trace view
+        self.taskSelector.setTasks(None)
         self.traceView.setTasks(None)
         self.traceView.draw()
 

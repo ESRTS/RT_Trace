@@ -45,6 +45,11 @@ Select **Pico2 FreeRTOS**, choose a recording under **View Trace**, then click
 **Load Trace**. No connected hardware or selected program is needed for loading.
 Reselect the platform to refresh the recording list.
 
+Use the scrollable **Show in trace** checkboxes below the buttons to show or hide
+tasks, interrupts and scheduler rows. Changes redraw immediately and preserve
+the time view. All rows start checked when a trace loads. PDF export follows
+this selection; CSV exports retain all tasks.
+
 To try the supplied example, copy the two `raw_buffer*.txt` files from
 [examples/freertos_smp](examples/freertos_smp/) into
 `data/Pico2_FreeRTOS/Example_format3/`, then select **Example_format3** and load it.
