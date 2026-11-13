@@ -133,7 +133,7 @@ Uses the kernel at `/Users/mabecker/Code/ES-Lab-Kit/Software/FreeRTOS-Kernel`
    ```
 
    Tracing initializes before `main()`. `traceTimeZero()` is the only added
-   application annotation; put it at your chosen origin, once. Jobs are inferred
+   optional application annotation; put it at your chosen origin, once. Jobs are inferred
    from syscalls such as `xTaskDelayUntil()`. FreeRTOS launches core 1: remove any
    existing `multicore_launch_core1()` call.
 
@@ -157,8 +157,9 @@ Uses the kernel at `/Users/mabecker/Code/ES-Lab-Kit/Software/FreeRTOS-Kernel`
    the channels. Save binary bytes as `raw_buffer0.txt` and
    `raw_buffer1.txt` in one recording folder. Preserve each stream's order;
    do not decode it as text.
-   Copy the matching ELF there as `firmware.elf`. A USB serial connection alone
-   does not read RTT. Continue with the host parser instructions below.
+   Keep the matching ELF there as `firmware.elf`. The GUI/RTT recorder saves and
+   flashes this copy automatically. A USB serial connection alone does not read
+   RTT. Continue with the host parser instructions below.
 
 The supplied Pico FreeRTOS port compiles kernel sources in the firmware target.
 If your kernel is a separate compiled target, give it this header's include path too.
@@ -177,9 +178,12 @@ allow source and binary redistribution.
 This integration uses the installed SDK copy without vendoring SEGGER files.
 
 Tracing initializes automatically before `main()`; no application `trace_init()`
-call is needed. Call `traceTimeZero()` once, from one core. It records the exact
+call is needed. Optionally call `traceTimeZero()` once, from one core. It records the exact
 shared timer value. Repeated calls do nothing. Ordinary IRQs may trace; NMI and
 HardFault must not.
+Without an explicit epoch, the host estimates SysTick start from a complete
+startup trace with `TRACE_ENABLE_IRQ_TRACE=1`; insufficient evidence falls back
+to the first event. Estimates carry warnings; see [origin rules](../arch_description/03-task-builder.md).
 
 Defaults allocate 1,536-byte RTT rings plus management/workspace: 1,760 bytes
 in scratch Y for core 0 and scratch X for core 1, matching the default SDK
@@ -234,8 +238,9 @@ gray for unknown outcomes. Ownership intervals retain actual grant timestamps.
 
 Optional `job_policy.json` in the recording folder overrides syscall assumptions;
 for example `{"task_boundaries": {"Control": ["DELAY_UNTIL"]}}`.
-Save the matching ELF as `firmware.elf` beside the recording, or pass `elf_path`
-to `events_to_tasks`, for automatic SDK/internal caller exclusions. Without it,
+The GUI/RTT recorder saves the matching ELF as `firmware.elf` automatically.
+For external captures, save it beside the recording or pass `elf_path`
+to `events_to_tasks` for automatic SDK/internal caller exclusions. Without it,
 use policy overrides for internal waits. No application job annotations are needed.
 
 Parser checks: `python3 -B -m unittest discover -s tests -p 'test_parser_freertos.py'`.

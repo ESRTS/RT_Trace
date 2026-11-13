@@ -288,6 +288,9 @@ class TraceApp(customtkinter.CTk):
         self.btn_recordTrace.configure(state="normal", text="Record Trace")
         self.updateTraceViewOptions()
 
+        # A failed RTT capture can still contain firmware.elf or an error log.
+        if result not in (None, 0):
+            return
         newRecording = os.path.basename(self.recordingFolder)
         if newRecording in self.selectTrace and any(Path(self.recordingFolder).iterdir()):
             self.opt_selectTrace.set(newRecording)

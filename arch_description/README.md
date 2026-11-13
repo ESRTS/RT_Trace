@@ -9,7 +9,8 @@ when contracts or assumptions change.
 
 **Goals and rationale.**
 
-- Only `traceTimeZero()` annotates the application. Infer job boundaries from
+- Only optional `traceTimeZero()` annotates the application. Without it, estimate
+  SysTick start on the host when startup evidence permits. Infer job boundaries from
   syscalls on the host, where policies can change without rebuilding firmware.
   A boundary completes the current job; the next release defines its deadline.
 - Keep target overhead bounded and nonblocking: immediate whole-record writes,

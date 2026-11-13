@@ -21,8 +21,8 @@ On Windows, activate with `.venv\Scripts\activate`.
 
 ## Record a trace
 
-1. Integrate tracing using the [target setup guide](target/README.md). Call
-   `traceTimeZero()` once at the desired application origin, then build the
+1. Integrate tracing using the [target setup guide](target/README.md). Optionally
+   call `traceTimeZero()` once at the desired application origin, then build the
    firmware. The GUI expects `<project>/build/<project>.elf`; the executable and
    project-folder names must match. Trace support is checked in the ELF;
    `traceConfig.h` is unnecessary.
@@ -33,10 +33,10 @@ On Windows, activate with `.venv\Scripts\activate`.
 4. Select the program, enter a recording name and set **Duration (s)** above
    **Record Trace**. Positive fractional seconds are supported. Valid edits are
    saved automatically to `Resources/config.local.ini` for subsequent runs.
-5. Click **Record Trace**. The recording workflow flashes the ELF, runs for the
-   configured duration, then halts the target and loads the captured trace.
-6. Keep the matching ELF as `firmware.elf` beside the recording and load again
-   to enable caller-based exclusion of internal SDK/kernel waits.
+5. Click **Record Trace**. The recorder saves `firmware.elf` in the recording
+   folder, flashes that copy, runs for the configured duration, then halts the
+   target and loads the trace. The saved ELF enables internal caller exclusions
+   automatically and keeps symbols matched to the capture after rebuilding.
 
 Recordings are stored in `data/Pico2_FreeRTOS/<name>_<timestamp>/`.
 `raw_buffer0.txt` and `raw_buffer1.txt` contain binary data despite their extension.
@@ -73,6 +73,9 @@ an actual give.
 Job boundaries are inferred from syscalls; each next release defines the
 previous job's deadline. Review warnings in the output panel. Incomplete or
 uncertain jobs are excluded from completion statistics and CSV exports.
+Without an explicit time zero, the parser estimates SysTick start from an intact
+startup trace with IRQ tracing enabled; otherwise it uses the first event.
+Both fallback origins are reported as estimates.
 
 Loading writes `events.txt` and per-task CSVs into the recording folder. CSV
 times are in microseconds. PDFs go to `output/<platform>/<recording>/`.

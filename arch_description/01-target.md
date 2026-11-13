@@ -11,7 +11,10 @@ Application annotation: `traceTimeZero()` once, from one core.
 FreeRTOS configuration, builds the SDK's RTT source, and disables SDK stdio RTT.
 Include `trace.h` last in `FreeRTOSConfig.h`. SDK preinitialization calls
 `trace_init()` on core 0 before `main()`/core 1. It configures both channels and
-publishes initialization with release/acquire atomics. The recorder explicitly
+publishes initialization with release/acquire atomics. Before connecting, the
+recorder saves `firmware.elf` beside channel 1's output; flashing and symbol reads
+use that copy, independent of subsequent project rebuilds. A failed capture does
+not auto-load its ELF-only folder. The recorder explicitly
 warm-resets both cores (`SYSRESETREQ`, core 1 first); resetting core 0 alone leaves
 core 1's old state intact. It resumes both to reach `main()`, halts both, checks RTT channels
 and opens its files. It resumes core 1 before core 0 for startup and capture:

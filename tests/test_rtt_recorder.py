@@ -139,6 +139,9 @@ class RecorderTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.files = [Path(temp.name) / f'raw_buffer{core}.txt' for core in (0, 1)]
+        self.elf = Path(temp.name) / 'build' / 'Trace2Test.elf'
+        self.elf.parent.mkdir()
+        self.elf.write_bytes(b'firmware with caller symbols')
         self.events = []
         self.core = Core(self.events, self.files)
         self.core1 = SecondaryCore(self.events)
@@ -189,7 +192,7 @@ class RecorderTests(unittest.TestCase):
 
     def record(self):
         with redirect_stdout(io.StringIO()):
-            return recorder.record_data('firmware.elf', None, 'rp2350', 4000000, 0.002,
+            return recorder.record_data(str(self.elf), None, 'rp2350', 4000000, 0.002,
                                         *(str(path) for path in self.files))
 
     def assert_startup_failed(self):
@@ -219,6 +222,37 @@ class RecorderTests(unittest.TestCase):
         self.assertEqual(self.core.state, recorder.Target.State.HALTED)
         self.assertEqual(self.core1.state, recorder.Target.State.HALTED)
         self.assertEqual(self.events.count('halt1'), 3)
+
+    def test_saved_elf_is_used_for_flashing_and_symbols_after_project_rebuild(self):
+        expected = self.elf.read_bytes()
+        saved = self.files[0].resolve().parent / 'firmware.elf'
+
+        def program(filename):
+            self.elf.write_bytes(b'rebuilt firmware with different addresses')
+            self.assertEqual(Path(filename), saved)
+            self.assertEqual(Path(filename).read_bytes(), expected)
+
+        self.mocks[1].return_value.program.side_effect = program
+        self.assertEqual(self.record(), 0)
+        self.assertEqual(saved.read_bytes(), expected)
+        self.assertEqual(self.target.elf, str(saved))
+        self.mocks[2].assert_called_once_with(str(saved))
+        self.assertNotEqual(self.elf.read_bytes(), expected)
+
+    def test_input_already_in_recording_folder_is_preserved(self):
+        saved = self.files[0].parent / 'firmware.elf'
+        self.elf.rename(saved)
+        self.elf = saved
+        self.assertEqual(self.record(), 0)
+        self.assertEqual(saved.read_bytes(), b'firmware with caller symbols')
+
+    def test_copy_failure_does_not_connect_or_flash(self):
+        with patch.object(recorder.shutil, 'copyfile', side_effect=OSError('disk full')):
+            with self.assertRaisesRegex(OSError, 'disk full'):
+                self.record()
+        self.mocks[0].assert_not_called()
+        self.mocks[1].assert_not_called()
+        self.assertFalse(any(path.exists() for path in self.files))
 
     def test_missing_secondary_core_does_not_program(self):
         del self.target.cores[1]
@@ -286,9 +320,26 @@ class RecorderTests(unittest.TestCase):
                             getCwd=Mock(return_value=str(elf.parent)), makeFolder=Mock(),
                             readConfig=Mock(return_value=config),
                             getElfFilePath=Mock(return_value=str(elf))), \
-                patch.object(recorder, 'record_data') as record:
-            recorder.rtt_thread(gui)
+                patch.object(recorder, 'record_data', return_value=0) as record:
+            self.assertEqual(recorder.rtt_thread(gui), 0)
         self.assertEqual(record.call_args.args[4], 0.125)
+
+    def test_failed_capture_with_saved_elf_does_not_auto_load(self):
+        # Load the real callback without constructing any Tk widgets.
+        spec = importlib.util.spec_from_file_location('gui_under_test', ROOT / 'src/RT-Trace.py')
+        gui_module = importlib.util.module_from_spec(spec)
+        with patch.object(sys, 'path', [str(ROOT / 'src'), *sys.path]):
+            spec.loader.exec_module(gui_module)
+        saved = self.files[0].parent / 'firmware.elf'
+        saved.write_bytes(b'firmware')
+        gui = types.SimpleNamespace(recordingFolder=str(saved.parent),
+                                    btn_recordTrace=Mock(), updateTraceViewOptions=Mock(),
+                                    selectTrace=[saved.parent.name], opt_selectTrace=Mock(),
+                                    load_function=Mock())
+        gui_module.TraceApp.recordingFinished(gui, 1)
+        gui.btn_recordTrace.configure.assert_called_once_with(state='normal', text='Record Trace')
+        gui.updateTraceViewOptions.assert_called_once()
+        gui.load_function.assert_not_called()
 
 
 if __name__ == '__main__':

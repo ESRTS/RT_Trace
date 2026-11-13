@@ -110,6 +110,88 @@ class _Call:
         return self.returned is not None or bool(self.blocks or self.wakes) or self.operation is not None
 
 
+def _estimate_systick_origin(recording):
+    """Use the first actual SysTick IRQ, never a replayed kernel tick.
+
+    Format 3 starts tracing before scheduler startup. Sequence zero and no
+    preceding gap therefore establish that this is the first traced IRQ.
+    Inspect at most eight complete IRQ/tick pairs per core; later timer changes
+    do not determine the initial origin. No assumption about initial tick count.
+    """
+    candidates = []
+    reason = 'no complete SysTick IRQ/tick pair'
+    for stream in recording.streams:
+        if not stream.irq_enabled or not stream.events:
+            continue
+        first = stream.events[0]
+        if first.kind != E.SYNC or first.sequence != 0 or first.offset != 0:
+            reason = 'the start of the tick stream is missing'
+            continue
+        stack, pairs = [], []
+        invalid = None
+        for event in stream.events:
+            if event.kind in (E.GAP, E.TICK_JUMP):
+                if not pairs:
+                    reason = 'loss or a tick jump precedes the first complete SysTick'
+                break
+            if event.kind == E.IRQ_ENTER:
+                stack.append([event, None])
+            elif event.kind == E.TICK:
+                if event.data['suspended']:
+                    reason = 'the scheduler is suspended at the first SysTick'
+                    break
+                if not stack or stack[-1][0].data['irq'] != 15:
+                    if not pairs:
+                        reason = 'a kernel tick precedes a matched SysTick IRQ'
+                    break
+                if stack[-1][1] is not None:
+                    invalid = 'multiple kernel ticks within one SysTick IRQ'
+                    break
+                stack[-1][1] = event
+            elif event.kind in (E.IRQ_EXIT, E.IRQ_EXIT_SCHEDULE):
+                if not stack:
+                    if not pairs:
+                        reason = 'IRQ entry is missing before the first SysTick'
+                    break
+                entry, tick = stack.pop()
+                if entry.data['irq'] == 15:
+                    if tick is None:
+                        invalid = 'the first SysTick IRQ has no matching kernel tick'
+                        break
+                    pairs.append((entry, tick))
+                    if len(pairs) == 8:
+                        break
+        if invalid:
+            reason = invalid
+            continue
+        if not pairs:
+            continue
+        period = 1000000 / stream.tick_hz
+        modulus = 1 << stream.tick_bits
+        # Allow IRQ-entry jitter up to a quarter period (at least 2 us for
+        # timestamp quantization). This validates cadence, not an error bound.
+        for (previous, before), (current, after) in zip(pairs, pairs[1:]):
+            if ((after.data['tick'] - before.data['tick']) % modulus != 1 or
+                    abs(current.timestamp - previous.timestamp - period) > max(2, period / 4)):
+                invalid = 'initial SysTick counts or IRQ spacing are inconsistent'
+                break
+        if invalid:
+            reason = invalid
+            continue
+        entry, tick = pairs[0]
+        # Subtract the rounded period separately to preserve full 64-bit clocks.
+        origin = entry.timestamp - round(period)
+        if origin < 0:
+            reason = 'estimated SysTick start precedes the shared timer origin'
+            continue
+        candidates.append((origin, dict(core=stream.core, irq=15,
+            irqTimestamp=entry.timestamp, tickBeforeIncrement=tick.data['tick'],
+            tickHz=stream.tick_hz, periodUs=period, validationSamples=len(pairs))))
+    if len(candidates) == 1:
+        return candidates[0]
+    return None, 'SysTick advances kernel ticks on multiple cores' if candidates else reason
+
+
 class _TickClock:
     def __init__(self, recording, origin):
         stream = next(s for s in recording.streams if s.session is not None)
@@ -170,13 +252,27 @@ class _Core:
 class _Converter:
     def __init__(self, recording, policy, strict, elf_path):
         self.recording, self.policy, self.strict = recording, policy, strict
-        self.origin = recording.epoch if recording.epoch is not None else recording.events[0].timestamp
+        self.origin = recording.epoch
+        origin_source, details, warning = 'explicit', {}, None
+        if self.origin is None:
+            self.origin, evidence = _estimate_systick_origin(recording)
+            if self.origin is not None:
+                origin_source, details = 'systick', evidence
+                warning = ('No traceTimeZero(): estimating SysTick start from the first IRQ minus '
+                           'one tick period; interrupt/tracing latency is unknown')
+            else:
+                self.origin, origin_source = recording.events[0].timestamp, 'first-event'
+                details = {'reason': evidence}
+                warning = ('No traceTimeZero(): using the first decoded event as a provisional '
+                           f'origin; SysTick estimate unavailable: {evidence}')
         self.end = max(e.timestamp for e in recording.events) - self.origin
         self.report = {'warnings': list(recording.warnings), 'eventsLost': sum(s.dropped for s in recording.streams),
                        'gaps': [], 'origin': self.origin, 'epochKnown': recording.epoch is not None,
+                       'originSource': origin_source, 'originEstimated': origin_source != 'explicit',
+                       'originDetails': details, 'originUncertaintyUs': None if origin_source != 'explicit' else 0,
                        'policy': 'syscall-default-v1'}
-        if recording.epoch is None:
-            self.report['warnings'].append('No traceTimeZero(): using the first decoded event as a provisional origin')
+        if warning:
+            self.report['warnings'].append(warning)
         self.symbols = _Symbols(elf_path, policy.caller_names)
         self.tasks, self.windows, self.window_starts = {}, {}, {}
         self.calls, self.synthetic, self.held, self.mutex_spans = {}, {}, {}, []
@@ -630,6 +726,9 @@ def loadRecording(gui, numCores):
                    strict=config.getboolean('general', 'strict', fallback=False),
                    policy=policy, elf_path=elf)
     for warning in lastReport.get('warnings', []):
+        # Debugger-stopped captures normally omit the optional target END event.
+        if warning.endswith(': no END marker; coverage ends at its last decoded event'):
+            continue
         HelperFunctions.printState('Warning', info=warning)
     DataExport.exportData(gui, tasks, overwrite=True)
     return tasks

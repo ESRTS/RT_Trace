@@ -171,6 +171,161 @@ class DecoderTests(unittest.TestCase):
         self.assertFalse(parser_module.lastReport['epochKnown'])
 
 
+class OriginTests(unittest.TestCase):
+    @staticmethod
+    def tick(wire, timestamp, count, suspended=0, irq=15):
+        return (wire.add(E.IRQ_ENTER, timestamp, 0, irq)
+                .add(E.TICK, timestamp + 20, 0, count, suspended)
+                .add(E.IRQ_EXIT, timestamp + 25))
+
+    def convert(self, *wires, strict=True):
+        decoded = recording(*wires, strict=strict)
+        tasks = events_to_tasks(decoded, strict=strict)
+        return decoded, tasks, parser_module.lastReport
+
+    def assert_provisional(self, wire, strict=True):
+        decoded, _, report = self.convert(wire, strict=strict)
+        self.assertEqual(report['origin'], decoded.events[0].timestamp)
+        self.assertEqual(report['originSource'], 'first-event')
+        self.assertTrue(report['originEstimated'])
+        self.assertFalse(report['epochKnown'])
+        self.assertIn('reason', report['originDetails'])
+
+    def test_estimate_uses_irq_entry_and_preserves_durations_and_negative_times(self):
+        wire = Wire(epoch=None).boot()
+        self.tick(wire, 1257, 0)
+        self.tick(wire, 2259, 1)
+        wire.end(2400)
+        decoded, tasks, report = self.convert(wire)
+        self.assertIsNone(decoded.epoch, 'estimated origins must not change raw metadata')
+        self.assertEqual(report['origin'], 1000257)
+        self.assertEqual(report['originSource'], 'systick')
+        self.assertTrue(report['originEstimated'])
+        self.assertFalse(report['epochKnown'])
+        self.assertIsNone(report['originUncertaintyUs'])
+        self.assertEqual(report['originDetails']['validationSamples'], 2)
+        self.assertEqual(report['originDetails']['irqTimestamp'], 1001257)
+        self.assertEqual(task_named(tasks).jobs[0].releaseTime, -257)
+        self.assertEqual(intervals(task_named(tasks)),
+                         [(-257, 1000, 0), (1025, 2002, 0), (2027, 2143, 0)])
+        # The same absolute origin supplied explicitly must produce identical
+        # job/CPU geometry, while carrying different provenance.
+        decoded.epoch = report['origin']
+        explicit = events_to_tasks(decoded, strict=True)
+        self.assertEqual(intervals(task_named(explicit)), intervals(task_named(tasks)))
+
+    def test_explicit_sync_epoch_wins_over_systick_estimate(self):
+        wire = Wire(epoch=1000037).boot()
+        self.tick(wire, 1257, 0)
+        _, tasks, report = self.convert(wire.end(1300))
+        self.assertEqual(report['origin'], 1000037)
+        self.assertEqual(report['originSource'], 'explicit')
+        self.assertFalse(report['originEstimated'])
+        self.assertTrue(report['epochKnown'])
+        self.assertEqual(report['originUncertaintyUs'], 0)
+        self.assertEqual(task_named(tasks).jobs[0].releaseTime, -37)
+        self.assertFalse(any('No traceTimeZero' in w for w in report['warnings']))
+
+    def test_lost_time_zero_recovered_from_sync_still_wins(self):
+        wire = Wire().boot()
+        wire.sync(1000100, 7, missing=2).add(E.SWITCH_IN, 100, 7)
+        self.tick(wire, 1257, 0)
+        _, _, report = self.convert(wire.end(1300), strict=False)
+        self.assertEqual(report['originSource'], 'explicit')
+        self.assertEqual(report['origin'], 1000000)
+
+    def test_single_complete_irq_is_enough_when_period_is_known(self):
+        wire = Wire(epoch=None).boot()
+        self.tick(wire, 1257, 0)
+        _, _, report = self.convert(wire.end(1300))
+        self.assertEqual(report['origin'], 1000257)
+        self.assertEqual(report['originDetails']['validationSamples'], 1)
+
+    def test_nested_irq_does_not_replace_systick_entry_timestamp(self):
+        wire = Wire(epoch=None).boot().add(E.IRQ_ENTER, 1257, 0, 15)
+        wire.add(E.IRQ_ENTER, 1260, 0, 16).add(E.IRQ_EXIT, 1270)
+        wire.add(E.TICK, 1280, 0, 0, 0).add(E.IRQ_EXIT_SCHEDULE, 1290).end(1300)
+        _, _, report = self.convert(wire)
+        self.assertEqual(report['origin'], 1000257)
+
+    def test_tick_core_one_sets_shared_origin_for_both_cores(self):
+        core0 = Wire(0, 2, epoch=None).boot().end(2500)
+        core1 = Wire(1, 2, epoch=None)
+        self.tick(core1, 1257, 0)
+        self.tick(core1, 2257, 1)
+        _, tasks, report = self.convert(core0, core1.end(2500))
+        self.assertEqual(report['origin'], 1000257)
+        self.assertEqual(report['originDetails']['core'], 1)
+        self.assertEqual(task_named(tasks).jobs[0].releaseTime, -257)
+
+    def test_initial_tick_value_and_wrap_do_not_change_first_irq_rule(self):
+        wire = Wire(epoch=None, bits=16, hz=100).boot()
+        self.tick(wire, 10257, 65535)
+        self.tick(wire, 20257, 0)
+        _, _, report = self.convert(wire.end(20300))
+        self.assertEqual(report['origin'], 1000257)
+        self.assertEqual(report['originDetails']['periodUs'], 10000)
+
+    def test_full_64_bit_timestamp_with_fractional_period(self):
+        start = (1 << 60) + 123
+        relative = start - 1000000
+        wire = Wire(epoch=None, hz=1024).create(relative, 7)
+        wire.add(E.SWITCH_IN, relative, 7)
+        self.tick(wire, relative + 10000, 0)
+        _, _, report = self.convert(wire.end(relative + 10100))
+        self.assertEqual(report['origin'], start + 10000 - 977)
+
+    def test_missing_prefix_or_first_irq_loss_does_not_backdate_origin(self):
+        wire = Wire(epoch=None)
+        wire.sequence = 7
+        wire.boot()
+        self.tick(wire, 1257, 7)
+        self.assert_provisional(wire.end(1300), strict=False)
+        wire = Wire(epoch=None).boot()
+        wire.sync(1001257, running=7, missing=3)
+        self.tick(wire, 1257, 1)
+        self.assert_provisional(wire.end(1300), strict=False)
+
+    def test_replayed_suspended_or_jumped_ticks_do_not_establish_origin(self):
+        for mode in ('replay', 'suspended', 'jump'):
+            with self.subTest(mode=mode):
+                wire = Wire(epoch=None).boot()
+                if mode == 'replay':
+                    wire.add(E.TICK, 1000, 0, 0, 0)
+                elif mode == 'jump':
+                    wire.add(E.TICK_JUMP, 1000, 0, 20, 20)
+                self.tick(wire, 1257, 0, suspended=int(mode == 'suspended'))
+                self.assert_provisional(wire.end(1300))
+
+    def test_inconsistent_initial_counts_or_period_reject_estimate(self):
+        for time, count in ((2257, 2), (3257, 1)):
+            with self.subTest(time=time, count=count):
+                wire = Wire(epoch=None).boot()
+                self.tick(wire, 1257, 0)
+                self.tick(wire, time, count)
+                self.assert_provisional(wire.end(time + 30))
+
+    def test_irq_instrumentation_and_matching_tick_are_required(self):
+        wire = Wire(epoch=None, irq=False).boot().add(E.TICK, 1257, 0, 0, 0)
+        self.assert_provisional(wire.end(1300))
+        wire = Wire(epoch=None).boot()
+        self.tick(wire, 1257, 0, irq=16)
+        self.assert_provisional(wire.end(1300))
+        wire = Wire(epoch=None).boot().add(E.IRQ_ENTER, 1257, 0, 15)
+        wire.add(E.IRQ_EXIT, 1260)
+        self.tick(wire, 2257, 1)
+        self.assert_provisional(wire.end(2300))
+
+    def test_multiple_tick_cores_are_ambiguous(self):
+        wires = [Wire(core, 2, epoch=None) for core in (0, 1)]
+        for wire in wires:
+            self.tick(wire, 1257, 0)
+            wire.end(1300)
+        decoded, _, report = self.convert(*wires)
+        self.assertEqual(report['origin'], decoded.events[0].timestamp)
+        self.assertEqual(report['originSource'], 'first-event')
+
+
 class ConversionTests(unittest.TestCase):
     def test_periodic_delay_and_explicit_deadline(self):
         wire = Wire().boot()
@@ -445,18 +600,26 @@ class ConversionTests(unittest.TestCase):
         config = configparser.ConfigParser()
         config.read_dict({'general': {'strict': 'True'}})
         helper.readConfig = lambda: config
-        helper.printState = lambda *args, **kwargs: None
+        messages = []
+        helper.printState = lambda *args, **kwargs: messages.append(kwargs.get('info', ''))
         exported = []
         export = types.ModuleType('DataExport')
         export.exportData = lambda gui, tasks, **kwargs: exported.extend(tasks)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / 'raw_buffer0.txt').write_bytes(Wire().boot().end(20).data)
+            # A debugger-stopped capture has no END; retain its diagnostics
+            # without cluttering GUI output or hiding unrelated warnings.
+            wire = Wire(irq=False).boot().add(E.PRIORITY, 20, 7, 4)
+            (root / 'raw_buffer0.txt').write_bytes(wire.data)
             gui = types.SimpleNamespace(viewingFolder=directory)
             with patch.dict(sys.modules, {'HelperFunctions': helper, 'DataExport': export}):
                 tasks = parser_module.loadRecording(gui, 1)
             self.assertEqual(tasks, exported)
             self.assertTrue((root / 'events.txt').exists())
+            self.assertTrue(task_named(tasks).jobs[-1].incomplete)
+            self.assertTrue(any('no END marker' in w for w in parser_module.lastReport['warnings']))
+            self.assertFalse(any('no END marker' in message for message in messages))
+            self.assertTrue(any('IRQ tracing was disabled' in message for message in messages))
 
     def test_completion_statistics_exclude_incomplete_jobs(self):
         wire = Wire().boot().enter(10, 7, S.QUEUE_RECEIVE)

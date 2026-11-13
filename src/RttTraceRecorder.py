@@ -5,6 +5,8 @@ import argparse
 import sys
 import time
 import os
+from pathlib import Path
+import shutil
 from threading import Thread
 import HelperFunctions
 import configparser
@@ -48,14 +50,15 @@ def rtt_thread(gui):
 
     if elf is None or not os.path.exists(elf):
         HelperFunctions.printState("ERROR ELF not found", info=str(elf) + " does not exist. Build the program first.")
-        return 
+        return 1
     
     # Record the trace from the target platform
     try:
-        record_data(elf, probe, target, frequency, measure_seconds, filename1, filename2)
+        return record_data(elf, probe, target, frequency, measure_seconds, filename1, filename2)
     except Exception as e:      # One line for the user, the traceback in record_error.log
         HelperFunctions.reportError("Recording failed", e, folderName, "record_error.log",
                                     HelperFunctions.recordHint(e), context=HelperFunctions.recordContext(gui, elf))
+        return 1
 
 def parse_int(value: str) -> int:
     return int(value, 0)
@@ -102,6 +105,14 @@ def resume_cores(cores):
 
 
 def record_data(elf, probe, target, frequency, measure_seconds, filename1, filename2):
+    # Archive before connecting/flashing, then use these exact bytes for both
+    # programming and symbols, even if the project is rebuilt during capture.
+    saved_elf = Path(filename1).resolve().parent / 'firmware.elf'
+    saved_elf.parent.mkdir(parents=True, exist_ok=True)
+    if not saved_elf.exists() or not os.path.samefile(elf, saved_elf):
+        shutil.copyfile(elf, saved_elf)
+    elf = str(saved_elf)
+
     session = ConnectHelper.session_with_chosen_probe(
         unique_id=probe,
         options={
