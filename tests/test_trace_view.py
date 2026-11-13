@@ -190,6 +190,7 @@ class RowVisibilityTests(unittest.TestCase):
             sizeX_px=1000, borderX_px=40, borderY_px=30, legend_px=90,
             leftBound_tks=0, rightBound_tks=43000, oldLeftBound_tks=0,
             oldRightBound_tks=0, zoomFactor=1.2, zoomMax=50, zoomMin=43000,
+            taskTimelineHeight_px=45, taskHeight_px=25,
             maxTimelineHeight_px=45, minTimelineHeight_px=30, maxTicks=20,
             releaseArrowLength_px=10, releaseArrowWidth_px=2,
             releaseArrowH_px=4, releaseArrowD_px=3, mutexAccessHeight=15,
@@ -202,7 +203,6 @@ class RowVisibilityTests(unittest.TestCase):
             setattr(view, name, value)
         view.winfo_width = lambda: 1000
         view.winfo_height = lambda: 400
-        view.xScrollbar = Mock()
         view.ctk_textbox_scrollbar = Mock()
         view.ctk_textbox_scrollbar.winfo_ismapped.return_value = False
         view.configure = Mock()

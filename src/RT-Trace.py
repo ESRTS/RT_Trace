@@ -40,7 +40,7 @@ class TraceApp(customtkinter.CTk):
         'recordTraceFunc' is a target specific function that loads the trace buffer
         """
         self.targets = [
-            {'name': 'Pico2 FreeRTOS', 'numCores': 2, 'implemented': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2RttTraceBuffers, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': HelperFunctions.validatePicoTrace},
+            {'name': 'Pico2 FreeRTOS', 'numCores': 2, 'implemented': True, 'usesDuration': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2RttTraceBuffers, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': HelperFunctions.validatePicoTrace},
             {'name': 'RPI Linux', 'numCores': 4, 'implemented': True, 'requirement_str' : 'Experimental...', 'recordTraceFunc' : loadLinuxraceBuffers, 'loadTraceFunc': linuxParseTraceFiles, 'pathValidationFunc': None}
         ]
 
@@ -80,7 +80,7 @@ class TraceApp(customtkinter.CTk):
 
         ''' Create a frame for each main GUI area. '''
         self.sidebar_frame = customtkinter.CTkFrame(self.hpaned, width=140, corner_radius=10)
-        self.sidebar_frame.grid_rowconfigure(11, weight=1)
+        self.sidebar_frame.grid_rowconfigure(12, weight=1)
         self.sidebar_frame.grid_columnconfigure(0, weight=1)    # The widgets follow the sidebar width
 
         ''' Split the right side into the trace view and the output box. The separator can be dragged. '''
@@ -111,13 +111,35 @@ class TraceApp(customtkinter.CTk):
 
         ''' Button to start recording a new trace from a target. '''
         self.btn_recordTrace = customtkinter.CTkButton(self.sidebar_frame, text="Record Trace", command=self.button_record_function, corner_radius=default_corner_radius)
-        self.btn_recordTrace.grid(row=6, column=0, padx=20, pady=5, sticky="ew")
+        self.btn_recordTrace.grid(row=7, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Entry to specify the trace name. '''
         self.recordTraceName = tk.StringVar(value="Record")     # Replaced by the program name once a program is selected
         self.autoTraceName = "Record"                           # Last name filled in automatically, replaced again unless the user typed another name
         self.txt_traceName = customtkinter.CTkEntry(self.sidebar_frame, textvariable=self.recordTraceName, placeholder_text="Recording name", corner_radius=default_corner_radius)
         self.txt_traceName.grid(row=5, column=0, padx=20, pady=5, sticky="ew")
+
+        duration = HelperFunctions.readConfig().get('general', 'measure_seconds', fallback='2')
+        self.recordDurationVar = tk.StringVar(value=duration)
+        self.recordingSeconds = None  # Snapshot of the duration for the active recording.
+        try:
+            self.savedRecordingSeconds = HelperFunctions.parseRecordingDuration(duration)
+        except ValueError:
+            self.savedRecordingSeconds = None
+        self.duration_frame = customtkinter.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        self.duration_frame.grid(row=6, column=0, padx=20, pady=(4, 0), sticky="ew")
+        self.duration_frame.grid_columnconfigure(1, weight=1)
+        customtkinter.CTkLabel(self.duration_frame, text="Duration (s)").grid(row=0, column=0, padx=(0, 8))
+        self.txt_duration = customtkinter.CTkEntry(
+            self.duration_frame, textvariable=self.recordDurationVar, width=75,
+            corner_radius=default_corner_radius)
+        self.txt_duration.grid(row=0, column=1, sticky="ew")
+        self.durationBorderColor = self.txt_duration.cget('border_color')
+        if self.savedRecordingSeconds is None:
+            self.txt_duration.configure(border_color="#C94C4C")
+        self.recordDurationVar.trace_add('write', lambda *_: self.saveRecordingDuration(reportErrors=False))
+        self.txt_duration.bind('<Return>', self.saveRecordingDuration)
+        self.txt_duration.bind('<FocusOut>', self.saveRecordingDuration)
 
         ''' Label for the target program section. '''
         self.lbl_progSelect = customtkinter.CTkLabel(self.sidebar_frame, text="Program", font=customtkinter.CTkFont(size=15, weight="bold"), anchor="w")
@@ -140,7 +162,7 @@ class TraceApp(customtkinter.CTk):
 
         ''' Label for the trace visualization section. '''
         self.lbl_view = customtkinter.CTkLabel(self.sidebar_frame, text="View Trace", font=customtkinter.CTkFont(size=15, weight="bold"), anchor="w")
-        self.lbl_view.grid(row=7, column=0, padx=(0, 0), pady=(10, 0))
+        self.lbl_view.grid(row=8, column=0, padx=(0, 0), pady=(10, 0))
 
         ''' Option to select which of the recorded traces to display. '''
         self.selectTrace = []
@@ -151,21 +173,21 @@ class TraceApp(customtkinter.CTk):
             self.selectTrace.append('None')
 
         self.opt_selectTrace = customtkinter.CTkOptionMenu(self.sidebar_frame, values=self.selectTrace, command=self.selectRecordedTrace, corner_radius=default_corner_radius)
-        self.opt_selectTrace.grid(row=8, column=0, padx=20, pady=(0, 5), sticky="ew")
+        self.opt_selectTrace.grid(row=9, column=0, padx=20, pady=(0, 5), sticky="ew")
 
         ''' Button to load an existing trace. '''
         self.btn_loadTrace = customtkinter.CTkButton(self.sidebar_frame, text="Load Trace", command=self.load_function, corner_radius=default_corner_radius)
-        self.btn_loadTrace.grid(row=9, column=0, padx=20, pady=5, sticky="ew")
+        self.btn_loadTrace.grid(row=10, column=0, padx=20, pady=5, sticky="ew")
 
         ''' Button to save the current trace. '''
         self.btn_saveTrace = customtkinter.CTkButton(self.sidebar_frame, text="Export View to PDF", command=self.save_image_function, corner_radius=default_corner_radius)
-        self.btn_saveTrace.grid(row=10, column=0, padx=20, pady=5, sticky="ew")
+        self.btn_saveTrace.grid(row=11, column=0, padx=20, pady=5, sticky="ew")
 
         self.taskSelector = TraceRowSelector(
             self.sidebar_frame, command=self.updateTaskVisibility,
             width=150, height=100, corner_radius=default_corner_radius,
             label_font=customtkinter.CTkFont(size=15, weight="bold"))
-        self.taskSelector.grid(row=11, column=0, padx=10, pady=(10, 15), sticky="nswe")
+        self.taskSelector.grid(row=12, column=0, padx=10, pady=(10, 15), sticky="nswe")
         
         ''' Textbox to display stdout. '''
         monospaceFamily = tkinter.font.nametofont("TkFixedFont").actual("family")   # The platform's default monospace font
@@ -204,7 +226,6 @@ class TraceApp(customtkinter.CTk):
         ''' Execution Trace Widget. '''
         self.traceView = TraceView(self.trace_frame, gui=self)
         self.traceView.grid(row=0, column=0, sticky="nswe")
-        self.traceView.xScrollbar.grid(row=1, column=0, sticky="ew")
         self.paned.add(self.trace_frame, minsize=150, stretch="always")
         self.paned.add(self.textbox, minsize=80, stretch="always")
 
@@ -290,6 +311,21 @@ class TraceApp(customtkinter.CTk):
     def updateTaskVisibility(self, tasks):
         self.traceView.setVisibleTasks(tasks)
 
+    def saveRecordingDuration(self, event=None, reportErrors=True):
+        """Persist valid edits; invalid input stays visible and prevents recording."""
+        try:
+            seconds = HelperFunctions.parseRecordingDuration(self.recordDurationVar.get())
+            if seconds != self.savedRecordingSeconds:
+                HelperFunctions.setLocalConfigValue('general', 'measure_seconds', seconds)
+                self.savedRecordingSeconds = seconds
+        except (ValueError, OSError) as error:
+            self.txt_duration.configure(border_color="#C94C4C")
+            if reportErrors:
+                HelperFunctions.printState("ERROR duration", info=str(error))
+            return None
+        self.txt_duration.configure(border_color=self.durationBorderColor)
+        return seconds
+
     def initialPaneSizes(self):
         """
         Sets the initial separators: the sidebar fits its widgets, the trace view takes 60% of the height.
@@ -303,7 +339,7 @@ class TraceApp(customtkinter.CTk):
         Moves the separator so that the trace view is as high as the loaded trace, at most 70% of the window.
         The user can drag it afterwards.
         """
-        height = self.traceView.fittedHeight() + self.traceView.xScrollbar.winfo_reqheight()
+        height = self.traceView.fittedHeight()
         self.paned.sash_place(0, 0, min(height, int(self.paned.winfo_height() * 0.7)))
         self.update_idletasks()
 
@@ -398,6 +434,12 @@ class TraceApp(customtkinter.CTk):
         """
         Callback that ius called if the button "Record Trace" is clicked.
         """
+
+        if self.targets[self.selectedTarget].get('usesDuration', False):
+            duration = self.saveRecordingDuration()
+            if duration is None:
+                return
+            self.recordingSeconds = duration
 
         self.btn_recordTrace.configure(state="disabled")
         self.update()
@@ -499,6 +541,9 @@ class TraceApp(customtkinter.CTk):
         for target in self.targets:
             if target.get('name') == traceSource:
                 self.selectedTarget = self.targets.index(target)
+
+        self.txt_duration.configure(
+            state="normal" if self.targets[self.selectedTarget].get('usesDuration', False) else "disabled")
 
         # Reset the textbox if a different target is selected
         self.textbox.configure(state=customtkinter.NORMAL)  

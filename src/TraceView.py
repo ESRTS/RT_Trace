@@ -66,7 +66,6 @@ class TraceView(customtkinter.CTkCanvas):
         self.configure(yscrollcommand=self.ctk_textbox_scrollbar.set)
         self.ctk_textbox_scrollbar.configure(height=330)
 
-        self.xScrollbar = customtkinter.CTkScrollbar(master, orientation="horizontal", command=self.xScrollHandler)   # Shows which part of the trace is visible, placed by the GUI
         self.tasks = None
 
         self.canvasItems = []           # Used to store all canvas items that are updated with a new view, so we can delete those easily
@@ -199,12 +198,6 @@ class TraceView(customtkinter.CTkCanvas):
             self.paintLegend()
         
         self.configure(scrollregion = (0,0,100,self.traceHeight))
-
-        # Show the visible part of the trace in the horizontal scrollbar
-        if self.tasks is not None and self.zoomMin > 0:
-            self.xScrollbar.set(self.leftBound_tks / self.zoomMin, self.rightBound_tks / self.zoomMin)
-        else:
-            self.xScrollbar.set(0, 1)
 
         # Show the scrollbar only if the rows don't fit into the view
         if self.traceHeight > self.winfo_height():
@@ -505,19 +498,6 @@ class TraceView(customtkinter.CTkCanvas):
         if self.tasks is None:
             return 0
         return len(self.tasks) * round(self.maxTimelineHeight_px * getattr(self.gui, "uiScale", 1)) + self.scaledBorderY()
-
-    def xScrollHandler(self, *args):
-        """
-        Moves the view when the horizontal scrollbar is used.
-        """
-        if self.tasks is None or self.zoomMin <= 0:
-            return
-        width = self.rightBound_tks - self.leftBound_tks
-        if args[0] == "moveto":
-            self.setView(float(args[1]) * self.zoomMin, width)
-        elif args[0] == "scroll":
-            step = width if args[2] == "pages" else width / 10
-            self.setView(self.leftBound_tks + int(args[1]) * step, width)
 
     def plotXOffset(self):
         """

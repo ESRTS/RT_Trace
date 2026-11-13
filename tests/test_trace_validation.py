@@ -1,5 +1,6 @@
 """Validate real ELF symbol tables without opening a GUI or using a toolchain."""
 import importlib.util
+import configparser
 from pathlib import Path
 import struct
 import sys
@@ -138,6 +139,55 @@ class TraceValidationTests(unittest.TestCase):
         self.gui.selectedProgram = None
         self.assertFalse(helper.validatePicoTrace(self.gui))
         self.assertEqual(self.report.call_args.args[0], 'ERROR no program')
+
+
+class LocalSettingsTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.defaults = Path(temp.name) / 'config.ini'
+        self.local = Path(temp.name) / 'config.local.ini'
+        self.defaults.write_text('[general]\nmeasure_seconds = 2\nproject_path = /original\n')
+        for name, value in (('getConfigFilePath', str(self.defaults)),
+                            ('getLocalConfigFilePath', str(self.local))):
+            override = patch.object(helper, name, return_value=value)
+            override.start()
+            self.addCleanup(override.stop)
+
+    def test_duration_initializes_from_defaults_then_local_override(self):
+        self.assertEqual(helper.readConfig().getfloat('general', 'measure_seconds'), 2)
+        helper.setLocalConfigValue('general', 'measure_seconds', 0.125)
+        self.assertEqual(helper.readConfig().getfloat('general', 'measure_seconds'), 0.125)
+        self.assertIn('measure_seconds = 2\n', self.defaults.read_text())
+
+    def test_duration_update_preserves_comments_and_other_settings(self):
+        self.local.write_text('# Keep this comment\n[general]\nMEASURE_SECONDS: 3\n'
+                              'project_path = /projects\n[RPI_Linux]\ntarget = test-host\n')
+        helper.setLocalConfigValue('general', 'measure_seconds', 1.5)
+        source = self.local.read_text()
+        self.assertIn('# Keep this comment', source)
+        config = configparser.ConfigParser()
+        config.read_string(source)
+        self.assertEqual(config.getfloat('general', 'measure_seconds'), 1.5)
+        self.assertEqual(config.get('general', 'project_path'), '/projects')
+        self.assertEqual(config.get('RPI_Linux', 'target'), 'test-host')
+
+    def test_project_and_duration_overrides_coexist(self):
+        self.local.write_text('[RPI_Linux]\ntarget = test-host\n')
+        helper.setLocalConfigValue('general', 'measure_seconds', 5)
+        with patch.object(helper, 'projectPathOverride', '/temporary'):
+            helper.setProjectPath('/new-projects')
+            self.assertIsNone(helper.projectPathOverride)
+        config = helper.readConfig()
+        self.assertEqual(config.getfloat('general', 'measure_seconds'), 5)
+        self.assertEqual(config.get('general', 'project_path'), '/new-projects')
+        self.assertEqual(config.get('RPI_Linux', 'target'), 'test-host')
+
+    def test_duration_rejects_invalid_and_unbounded_values(self):
+        for value in ('', 'abc', '0', '-1', 'nan', 'inf', '-inf', '1e999'):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                helper.parseRecordingDuration(value)
+        self.assertEqual(helper.parseRecordingDuration('0.125'), 0.125)
 
 
 if __name__ == '__main__':

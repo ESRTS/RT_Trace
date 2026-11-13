@@ -4,6 +4,7 @@ from pathlib import Path
 import platform
 from datetime import datetime
 import configparser
+import math
 import subprocess
 import tempfile
 import traceback
@@ -339,26 +340,40 @@ def setProjectPath(projectPath):
     """
     global projectPathOverride
     projectPathOverride = None      # A folder picked in the GUI replaces the --project-path option
+    setLocalConfigValue('general', 'project_path', projectPath)
+
+def parseRecordingDuration(value):
+    """Recording durations are finite, positive seconds (fractions allowed)."""
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("Enter a number of seconds greater than zero.") from None
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise ValueError("Enter a finite number of seconds greater than zero.")
+    return seconds
+
+def setLocalConfigValue(sectionName, option, value):
+    """Update one local override, preserving unrelated settings and comments."""
     localConfig = getLocalConfigFilePath()
     lines = Path(localConfig).read_text().splitlines() if Path(localConfig).exists() else []
-    entry = "project_path = " + projectPath
+    entry = option + " = " + str(value)
 
     section = None
-    general = None
+    sectionIndex = None
     for i, line in enumerate(lines):
         stripped = line.strip()
         if stripped.startswith("[") and stripped.endswith("]"):
             section = stripped[1:-1].strip()
-            if section == "general" and general is None:
-                general = i
-        elif section == "general" and stripped.split("=")[0].strip() == "project_path":
+            if section == sectionName and sectionIndex is None:
+                sectionIndex = i
+        elif section == sectionName and stripped.split("=", 1)[0].split(":", 1)[0].strip().lower() == option.lower():
             lines[i] = entry
             break
     else:
-        if general is None:
-            lines += ([""] if lines else []) + ["[general]", entry]
+        if sectionIndex is None:
+            lines += ([""] if lines else []) + ["[" + sectionName + "]", entry]
         else:
-            lines.insert(general + 1, entry)
+            lines.insert(sectionIndex + 1, entry)
 
     Path(localConfig).write_text("\n".join(lines) + "\n")
 

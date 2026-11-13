@@ -1,5 +1,6 @@
 """Exercise the recorder's real control flow with a simulated target and clock."""
 from contextlib import redirect_stdout
+import configparser
 import importlib.util
 import io
 from pathlib import Path
@@ -50,9 +51,12 @@ class Core:
         self.breakpoint_ok = True
         self.resumes = 0
         self.pc = 0
+        self.secondary = None
+        self.reset_type = None
 
-    def reset_and_halt(self):
+    def reset_and_halt(self, reset_type=None):
         self.events.append('reset')
+        self.reset_type = reset_type
         self.initialized = False
         self.state = recorder.Target.State.HALTED
 
@@ -70,6 +74,10 @@ class Core:
         self.resumes += 1
         self.events.append(('resume', self.resumes))
         self.state = recorder.Target.State.RUNNING
+        # Model RP2350 timer-dependent startup: a debug-halted peer prevents
+        # main from being reached, even though core 0 itself is running.
+        if self.secondary.state == recorder.Target.State.HALTED:
+            return
         if self.resumes == 1:
             if INIT in self.breakpoints:
                 # The previous recorder stopped here before any RTT setup ran.
@@ -96,6 +104,36 @@ class Core:
         return self.pc
 
 
+class SecondaryCore:
+    def __init__(self, events):
+        self.events = events
+        self.state = recorder.Target.State.HALTED
+        self.resumes = 0
+        self.fail_resume = None
+        self.reset_type = None
+
+    def reset_and_halt(self, reset_type=None):
+        self.events.append('reset1')
+        self.reset_type = reset_type
+        self.state = recorder.Target.State.HALTED
+
+    def resume(self):
+        assert self.reset_type == recorder.Target.ResetType.SYSRESETREQ, \
+            'secondary core resumed stale firmware without a warm reset'
+        self.resumes += 1
+        self.events.append(('resume1', self.resumes))
+        if self.resumes == self.fail_resume:
+            raise RuntimeError('secondary resume failed')
+        self.state = recorder.Target.State.RUNNING
+
+    def halt(self):
+        self.events.append('halt1')
+        self.state = recorder.Target.State.HALTED
+
+    def get_state(self):
+        return self.state
+
+
 class RecorderTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
@@ -103,8 +141,8 @@ class RecorderTests(unittest.TestCase):
         self.files = [Path(temp.name) / f'raw_buffer{core}.txt' for core in (0, 1)]
         self.events = []
         self.core = Core(self.events, self.files)
-        self.core1 = Mock()
-        self.core1.halt.side_effect = lambda: self.events.append('halt1')
+        self.core1 = SecondaryCore(self.events)
+        self.core.secondary = self.core1
         self.target = types.SimpleNamespace(cores={0: self.core, 1: self.core1})
         self.session = Mock()
         self.session.board.target = self.target
@@ -114,7 +152,8 @@ class RecorderTests(unittest.TestCase):
         for index in (0, 1):
             channel = Mock(size=1536)
             # A poll consumes the first chunk; a final post-halt read gets tail.
-            channel.read.side_effect = [f'run{index}'.encode(), b'', f'tail{index}'.encode()]
+            chunks = iter([f'run{index}'.encode(), b'', f'tail{index}'.encode()])
+            channel.read.side_effect = lambda chunks=chunks: self.read_channel(chunks)
             self.channels.append(channel)
         self.rtt = types.SimpleNamespace(up_channels=[Mock(), *self.channels], start=Mock())
         self.rtt.start.side_effect = lambda: self.events.append('rtt_start')
@@ -138,9 +177,15 @@ class RecorderTests(unittest.TestCase):
         self.assertEqual(address, 0x20000100)
         self.assertTrue(self.core.initialized, 'RTT inspected before the initializer ran')
         self.assertEqual(self.core.state, recorder.Target.State.HALTED)
+        self.assertEqual(self.core1.state, recorder.Target.State.HALTED)
         self.assertNotIn(MAIN, self.core.breakpoints)
         self.events.append('rtt_attach')
         return self.rtt
+
+    def read_channel(self, chunks):
+        self.assertEqual(self.core.state, self.core1.state,
+                         'RTT read while only one core is halted')
+        return next(chunks)
 
     def record(self):
         with redirect_stdout(io.StringIO()):
@@ -149,6 +194,7 @@ class RecorderTests(unittest.TestCase):
 
     def assert_startup_failed(self):
         self.assertEqual(self.core.state, recorder.Target.State.HALTED)
+        self.assertEqual(self.core1.state, recorder.Target.State.HALTED)
         self.assertFalse(self.core.breakpoints)
         self.assertEqual(self.core.resumes, 1)
         self.assertFalse(any(path.exists() for path in self.files))
@@ -156,6 +202,13 @@ class RecorderTests(unittest.TestCase):
     def test_attach_after_initialization_and_prepare_files_before_resume(self):
         self.assertEqual(self.record(), 0)
         self.assertEqual(self.core.resumes, 2)
+        self.assertEqual(self.core1.resumes, 2)
+        self.assertEqual(self.core.reset_type, recorder.Target.ResetType.SYSRESETREQ)
+        self.assertEqual(self.core1.reset_type, recorder.Target.ResetType.SYSRESETREQ)
+        self.assertLess(self.events.index('reset1'), self.events.index('reset'))
+        for phase in (1, 2):
+            self.assertLess(self.events.index(('resume1', phase)),
+                            self.events.index(('resume', phase)))
         self.assertEqual([e for e in self.events if isinstance(e, tuple) and e[0] == 'breakpoint'],
                          [('breakpoint', MAIN)])
         self.assertLess(self.events.index('reset'), self.events.index(('breakpoint', MAIN)))
@@ -164,7 +217,30 @@ class RecorderTests(unittest.TestCase):
         self.assertEqual(self.files[0].read_bytes(), b'run0tail0')
         self.assertEqual(self.files[1].read_bytes(), b'run1tail1')
         self.assertEqual(self.core.state, recorder.Target.State.HALTED)
-        self.core1.halt.assert_called_once()
+        self.assertEqual(self.core1.state, recorder.Target.State.HALTED)
+        self.assertEqual(self.events.count('halt1'), 3)
+
+    def test_missing_secondary_core_does_not_program(self):
+        del self.target.cores[1]
+        self.assertEqual(self.record(), 1)
+        self.mocks[1].assert_not_called()
+
+    def test_secondary_resume_failure_during_startup_stops_both_cores(self):
+        self.core1.fail_resume = 1
+        with self.assertRaisesRegex(RuntimeError, 'secondary resume failed'):
+            self.record()
+        self.assertEqual(self.core.state, recorder.Target.State.HALTED)
+        self.assertEqual(self.core1.state, recorder.Target.State.HALTED)
+        self.assertFalse(self.core.breakpoints)
+        self.mocks[3].assert_not_called()
+
+    def test_secondary_resume_failure_during_recording_stops_both_cores(self):
+        self.core1.fail_resume = 2
+        with self.assertRaisesRegex(RuntimeError, 'secondary resume failed'):
+            self.record()
+        self.assertEqual(self.core.state, recorder.Target.State.HALTED)
+        self.assertEqual(self.core1.state, recorder.Target.State.HALTED)
+        self.assertFalse(self.core.breakpoints)
 
     def test_timeout_halts_core_and_removes_breakpoint_without_reading_rtt(self):
         self.core.reach_main = False
@@ -199,6 +275,20 @@ class RecorderTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'control block unavailable'):
             self.record()
         self.assert_startup_failed()
+
+    def test_worker_uses_duration_selected_for_recording(self):
+        elf = self.files[0].parent / 'firmware.elf'
+        elf.write_bytes(b'firmware')
+        config = configparser.ConfigParser()
+        config.read_dict({'general': {'measure_seconds': '99'}})
+        gui = types.SimpleNamespace(recordingFolder=str(elf.parent), recordingSeconds=0.125)
+        with patch.multiple(recorder.HelperFunctions, create=True,
+                            getCwd=Mock(return_value=str(elf.parent)), makeFolder=Mock(),
+                            readConfig=Mock(return_value=config),
+                            getElfFilePath=Mock(return_value=str(elf))), \
+                patch.object(recorder, 'record_data') as record:
+            recorder.rtt_thread(gui)
+        self.assertEqual(record.call_args.args[4], 0.125)
 
 
 if __name__ == '__main__':

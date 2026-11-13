@@ -30,7 +30,9 @@ On Windows, activate with `.venv\Scripts\activate`.
    A USB serial connection alone cannot read RTT. Close other debugger sessions.
 3. Select **Pico2 FreeRTOS** under **Platform**. Click the folder button beside
    **Program** and choose your project, or a directory containing projects.
-4. Select the program and enter a recording name under **Record Trace**.
+4. Select the program, enter a recording name and set **Duration (s)** above
+   **Record Trace**. Positive fractional seconds are supported. Valid edits are
+   saved automatically to `Resources/config.local.ini` for subsequent runs.
 5. Click **Record Trace**. The recording workflow flashes the ELF, runs for the
    configured duration, then halts the target and loads the captured trace.
 6. Keep the matching ELF as `firmware.elf` beside the recording and load again
@@ -59,7 +61,7 @@ Only current format-3 FreeRTOS recordings are accepted.
 | Action | Control |
 | --- | --- |
 | Zoom | Up/Down keys or Ctrl + mouse wheel |
-| Move through time | Mouse wheel, horizontal scrollbar or drag the plot |
+| Move through time | Mouse wheel or drag the plot |
 | Scroll task rows | Shift + mouse wheel or vertical scrollbar |
 | Save the current view | **Export View to PDF** |
 
@@ -89,6 +91,10 @@ frequency = 4000000
 strict = False
 ui_scale = auto
 ```
+
+The duration field starts with `measure_seconds` from the merged configuration.
+It controls Pico 2 recording; Linux's remote recorder runs until its application
+exits, so the duration field is disabled for that platform.
 
 `strict = True` rejects event loss and structural inconsistencies instead of
 loading recoverable data with warnings. Recording and parsing failures write

@@ -150,7 +150,11 @@ Uses the kernel at `/Users/mabecker/Code/ES-Lab-Kit/Software/FreeRTOS-Kernel`
 
 6. **Flash and read RTT through SWD.** Channel 1 carries core 0; channel 2 carries
    core 1. Let `trace_init()` return before a reader examines the channels;
-   they are ready at `main()`. Save binary bytes as `raw_buffer0.txt` and
+   they are ready at `main()`. Reset both cores explicitly through their debug
+   interfaces (`SYSRESETREQ`); resetting core 0 alone leaves core 1's old state.
+   Resume both cores during startup and recording;
+   either debug-halted core can pause the shared timer. Halt both before draining
+   the channels. Save binary bytes as `raw_buffer0.txt` and
    `raw_buffer1.txt` in one recording folder. Preserve each stream's order;
    do not decode it as text.
    Copy the matching ELF there as `firmware.elf`. A USB serial connection alone

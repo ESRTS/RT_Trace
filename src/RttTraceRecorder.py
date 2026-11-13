@@ -41,7 +41,10 @@ def rtt_thread(gui):
     probe = config.get(configName,'probe', fallback = None)
     target = config.get(configName,'target', fallback = 'rp2350')
     frequency = int(config.get(configName,'frequency', fallback = '4_000_000'))
-    measure_seconds = float(config.get(configName,'measure_seconds', fallback = '10.0'))
+    measure_seconds = getattr(gui, 'recordingSeconds', None)
+    if measure_seconds is None:
+        measure_seconds = HelperFunctions.parseRecordingDuration(
+            config.get(configName, 'measure_seconds', fallback='2'))
 
     if elf is None or not os.path.exists(elf):
         HelperFunctions.printState("ERROR ELF not found", info=str(elf) + " does not exist. Build the program first.")
@@ -81,6 +84,23 @@ def wait_for_pc(core, expected_addr: int, timeout: float = 5.0) -> bool:
 
     return False
 
+
+def halt_cores(cores):
+    """Stop all producers before inspecting or draining shared trace state."""
+    for core in cores:
+        core.halt()
+    for number, core in enumerate(cores):
+        if not wait_for_halt(core):
+            raise RuntimeError(f"Core {number} did not halt within 5 s")
+
+
+def resume_cores(cores):
+    # Release core 1 first, then core 0. The RP2350 shared timer can remain
+    # paused while either core is debug-halted, including during SDK startup.
+    for core in reversed(cores):
+        core.resume()
+
+
 def record_data(elf, probe, target, frequency, measure_seconds, filename1, filename2):
     session = ConnectHelper.session_with_chosen_probe(
         unique_id=probe,
@@ -98,6 +118,10 @@ def record_data(elf, probe, target, frequency, measure_seconds, filename1, filen
 
     with session:
         target = session.board.target
+        if 0 not in target.cores or 1 not in target.cores:
+            HelperFunctions.printState("ERROR cores missing", info="RP2350 tracing requires debug access to both cores. Close other debugger sessions and check the pyOCD target configuration.")
+            return 1
+        cores = tuple(target.cores[number] for number in sorted(target.cores))
         core = target.cores[0]
 
         print(f"Programming {os.path.basename(elf)} ...")
@@ -126,7 +150,12 @@ def record_data(elf, probe, target, frequency, measure_seconds, filename1, filen
         print(f"_SEGGER_RTT at 0x{rtt_addr:08X}")
 
         print("Reset and halt.")
-        core.reset_and_halt()
+        # RP2350 SYSRESETREQ is a per-core warm reset. Reset both explicitly:
+        # otherwise core 1 can resume stale firmware after flashing overwrites
+        # SRAM, and core 0 then waits forever for its boot-ROM launch handshake.
+        for producer in reversed(cores):
+            producer.reset_and_halt(reset_type=Target.ResetType.SYSRESETREQ)
+        halt_cores(cores)
         # The SDK runs trace_init() before main. Breaking at the initializer's
         # entry would stop it before it can configure the RTT control block.
         print("Setting breakpoint for main()")
@@ -134,16 +163,18 @@ def record_data(elf, probe, target, frequency, measure_seconds, filename1, filen
             HelperFunctions.printState("ERROR breakpoint", info="Could not set a breakpoint at main(). Close other debugger sessions and try again.")
             return 1
         try:
-            print("Resume and waiting for main() ...")
-            core.resume()
+            print("Resume both cores and wait for main() ...")
+            resume_cores(cores)
             if not wait_for_pc(core, main_addr, timeout=10.0):
                 HelperFunctions.printState("ERROR program did not start", info="The program did not reach main() within 10 s. Check pre-main initialization and faults with the debugger.")
                 return 1
         finally:
-            # A timeout may leave the core running. Keep it stopped while
-            # inspecting RTT, and remove the temporary breakpoint on failure too.
-            core.halt()
-            core.remove_breakpoint(main_addr)
+            # A timeout may leave either core running. Stop both while inspecting
+            # RTT, and remove the temporary breakpoint on failure too.
+            try:
+                halt_cores(cores)
+            finally:
+                core.remove_breakpoint(main_addr)
         print("Hit main(); pre-main trace initialization has completed.")
 
         rtt = RTTControlBlock.from_target(target, address=rtt_addr)
@@ -164,7 +195,7 @@ def record_data(elf, probe, target, frequency, measure_seconds, filename1, filen
                 # Prepare the host files while main is still stopped so early
                 # application events can be read immediately after resuming.
                 print(f"Resume and start Trace Record for {measure_seconds} seconds")
-                core.resume()
+                resume_cores(cores)
                 deadline = time.monotonic() + measure_seconds
                 while time.monotonic() < deadline:
                     data1 = ch1.read()
@@ -182,8 +213,7 @@ def record_data(elf, probe, target, frequency, measure_seconds, filename1, filen
                     time.sleep(0.001)
             finally:
                 print("Finished trace recording, halting both cores.")
-                for producer in target.cores.values():
-                    producer.halt()
+                halt_cores(cores)
                 # Once both producers are halted, read the bytes that arrived
                 # after the final polling read before closing the files.
                 f1.write(ch1.read())
