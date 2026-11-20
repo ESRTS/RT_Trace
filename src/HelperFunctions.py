@@ -287,17 +287,19 @@ def getProjectPath():
         return os.path.abspath(projectPath)
     return resolved
 
-def getPossiblePrograms():
-    """ 
-    The function searches all projects found in the project folder. 
-    Each folder with a CMakeLists.txt is a project.
+def getPossiblePrograms(isProgram=None):
+    """
+    The function searches all projects found in the project folder.
+    isProgram(path) decides which folders are programs of the selected target; by default,
+    each folder with a CMakeLists.txt is a project.
     """
     programPath = getProjectPath()
+    isProgram = isProgram or isProjectFolder
 
     if not Path(programPath).exists():
         return []
-    
-    return sorted(f for f in get_subfolders(programPath) if isProjectFolder(os.path.join(programPath, f)))
+
+    return sorted(f for f in get_subfolders(programPath) if isProgram(os.path.join(programPath, f)))
 
 def isProjectFolder(path):
     """ A folder with a CMakeLists.txt is a project. """

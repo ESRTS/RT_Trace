@@ -41,6 +41,26 @@ On Windows, activate with `.venv\Scripts\activate`.
 Recordings are stored in `data/Pico2_FreeRTOS/<name>_<timestamp>/`.
 `raw_buffer0.txt` and `raw_buffer1.txt` contain binary data despite their extension.
 
+## Simulate a task set
+
+The **Simulator** platform schedules a task set on the host instead of recording
+hardware. A simulator program is a folder in the project folder that contains a
+`taskset.json`; [examples/simulator](examples/simulator) has one to copy:
+
+```json
+{"cores": 2, "scheduler": "fp", "tasks": [
+  {"name": "Control", "period": 5000, "wcet": 1500, "priority": 4, "affinity": [0]}]}
+```
+
+Times are integer microseconds. Per task, `deadline` defaults to `period`,
+`phase` (release time of the first job) to 0 and `affinity` (allowed cores) to
+all cores. A larger `priority` wins. `bcet` is validated but jobs currently always run for `wcet`. Select the
+folder under **Program**, set **Duration (s)** and click **Record Trace**. The
+recording folder receives `sim_trace.jsonl` and a copy of `taskset.json`.
+Scheduler `fp` is preemptive fixed priority; equal priorities are served FIFO
+and never preempt each other, and late jobs run to completion. See the
+[simulator architecture](arch_description/04-simulator.md).
+
 ## Load and inspect
 
 Select **Pico2 FreeRTOS**, choose a recording under **View Trace**, then click

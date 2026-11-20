@@ -10,6 +10,8 @@ from RttTraceRecorder import loadPico2RttTraceBuffers
 from LinuxTraceRecorder import loadLinuxraceBuffers
 from TraceParserFreeRTOS import parseTraceFiles
 from TraceParserLinux import parseTraceFiles as linuxParseTraceFiles
+from TraceParserSim import parseTraceFiles as simParseTraceFiles
+import SimulatorRecorder
 from pathlib import Path
 import subprocess
 import os
@@ -38,10 +40,15 @@ class TraceApp(customtkinter.CTk):
         Here all available targets are configures. If the flag 'implemented' is False, they are not supported yet.
         'requirement_str' can be used to inform the user of any additional prerequisites, this is displayed in the textbox once the target is selected. 
         'recordTraceFunc' is a target specific function that loads the trace buffer
+        'programCheckFunc' decides which folders in the project folder are programs of this target (default: CMake projects).
+        'noProgramsHint' is printed if the project folder contains no program of this target.
         """
         self.targets = [
             {'name': 'Pico2 FreeRTOS', 'numCores': 2, 'implemented': True, 'usesDuration': True, 'requirement_str' : 'Select a project.', 'recordTraceFunc' : loadPico2RttTraceBuffers, 'loadTraceFunc': parseTraceFiles, 'pathValidationFunc': HelperFunctions.validatePicoTrace},
-            {'name': 'RPI Linux', 'numCores': 4, 'implemented': True, 'requirement_str' : 'Experimental...', 'recordTraceFunc' : loadLinuxraceBuffers, 'loadTraceFunc': linuxParseTraceFiles, 'pathValidationFunc': None}
+            {'name': 'RPI Linux', 'numCores': 4, 'implemented': True, 'requirement_str' : 'Experimental...', 'recordTraceFunc' : loadLinuxraceBuffers, 'loadTraceFunc': linuxParseTraceFiles, 'pathValidationFunc': None},
+            # The number of cores comes from the task set and is stored in the trace header
+            {'name': 'Simulator', 'numCores': None, 'implemented': True, 'usesDuration': True, 'requirement_str' : 'Select a folder with a taskset.json.', 'recordTraceFunc' : SimulatorRecorder.runSimulation, 'loadTraceFunc': simParseTraceFiles, 'pathValidationFunc': SimulatorRecorder.validateTaskSet,
+             'programCheckFunc': SimulatorRecorder.isTaskSetFolder, 'noProgramsHint': 'Create a folder with a taskset.json in the project folder, then select the platform again.'}
         ]
 
         ''' Set default values for the GUI '''
@@ -146,7 +153,7 @@ class TraceApp(customtkinter.CTk):
         self.lbl_progSelect.grid(row=2, column=0, padx=(0, 0), pady=(10, 0))
 
         ''' Option to select the target program. '''
-        self.possiblePrograms = ["Select a program..."] + HelperFunctions.getPossiblePrograms()
+        self.possiblePrograms = ["Select a program..."] + self.getPossiblePrograms()
         self.selectedProgram = self.possiblePrograms[0]
         self.prog_frame = customtkinter.CTkFrame(self.sidebar_frame, fg_color="transparent")
         self.prog_frame.grid(row=3, column=0, padx=20, pady=(0, 5), sticky="ew")
@@ -469,22 +476,39 @@ class TraceApp(customtkinter.CTk):
         self.viewingFolder = HelperFunctions.getViewingFolderName(self)       # Read the GUI state here, the parser runs in a background thread
         self.targets[self.selectedTarget].get('loadTraceFunc')(self, self.targets[self.selectedTarget].get('numCores'))   # Call the target specific function to load the trace buffers
 
+    def isProgramFolder(self, path):
+        """
+        True if path is a program of the selected target (by default a CMake project).
+        """
+        return self.targets[self.selectedTarget].get('programCheckFunc', HelperFunctions.isProjectFolder)(path)
+
+    def getPossiblePrograms(self):
+        """
+        The programs of the selected target in the project folder.
+        """
+        return HelperFunctions.getPossiblePrograms(self.isProgramFolder)
+
     def refreshProgramList(self):
         """
         Reloads the projects for the program selection and prints a hint if there are none.
         """
-        programs = HelperFunctions.getPossiblePrograms()
+        programs = self.getPossiblePrograms()
         if len(programs) == 0:
+            self.selectedProgram = None
             self.opt_selectProg.configure(values=["No projects found"])
             self.opt_selectProg.set("No projects found")
             self.btn_recordTrace.configure(state="disabled")
             HelperFunctions.printState("No projects found", info="in " + str(HelperFunctions.getProjectPath()))
-            print("Create one with 'newembproj.py <name> -trace RTT' (or SRAM, PSRAM) and build it, then select the platform again.")
+            hint = self.targets[self.selectedTarget].get('noProgramsHint')
+            print(hint if hint else "Create one with 'newembproj.py <name> -trace RTT' (or SRAM, PSRAM) and build it, then select the platform again.")
             print("To use projects from another folder, click the folder button next to the program selection.")
         elif self.selectedProgram in programs:
             self.opt_selectProg.configure(values=programs)
             self.opt_selectProg.set(self.selectedProgram)
         else:
+            self.selectedProgram = None             # A program of another target, or one that was removed
+            if self.targets[self.selectedTarget].get('pathValidationFunc') is not None:     # Targets that need a program
+                self.btn_recordTrace.configure(state="disabled")
             self.opt_selectProg.configure(values=["Select a program..."] + programs)
             self.opt_selectProg.set("Select a program...")
 
@@ -497,7 +521,7 @@ class TraceApp(customtkinter.CTk):
             return
 
         folder = os.path.abspath(folder)
-        if HelperFunctions.isProjectFolder(folder):     # A single project, list it together with the projects next to it
+        if self.isProgramFolder(folder):                # A single project, list it together with the projects next to it
             HelperFunctions.setProjectPath(os.path.dirname(folder))
             self.refreshProgramList()
             self.opt_selectProg.set(os.path.basename(folder))
@@ -507,18 +531,18 @@ class TraceApp(customtkinter.CTk):
             self.selectedProgram = None
             self.btn_recordTrace.configure(state="disabled")
             self.refreshProgramList()
-            if len(HelperFunctions.getPossiblePrograms()) > 0:
+            if len(self.getPossiblePrograms()) > 0:
                 HelperFunctions.printState("Project folder", info=folder)
 
     def selectProgramSource(self, selectedFolder: str):
         
         # Ignore the placeholder entries
-        if selectedFolder not in HelperFunctions.getPossiblePrograms():
+        if selectedFolder not in self.getPossiblePrograms():
             return
 
         # Remove the initial selection from the menu
         if "Select a program..." in self.opt_selectProg.cget("values"):
-            self.opt_selectProg.configure(values=HelperFunctions.getPossiblePrograms())
+            self.opt_selectProg.configure(values=self.getPossiblePrograms())
 
         # Name the recording after the program, unless the user typed another name
         if self.recordTraceName.get() == self.autoTraceName:

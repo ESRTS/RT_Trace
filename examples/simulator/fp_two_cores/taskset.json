@@ -1,0 +1,10 @@
+{
+  "cores": 2,
+  "scheduler": "fp",
+  "tasks": [
+    {"name": "Control", "period": 5000,  "wcet": 1500, "priority": 4, "affinity": [0]},
+    {"name": "Sensor",  "period": 8000,  "wcet": 2500, "priority": 3},
+    {"name": "Comm",    "period": 10000, "wcet": 4000, "priority": 2, "phase": 500},
+    {"name": "Logger",  "period": 20000, "wcet": 9000, "deadline": 15000, "priority": 1, "bcet": 6000}
+  ]
+}

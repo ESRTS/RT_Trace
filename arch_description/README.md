@@ -6,6 +6,8 @@ when contracts or assumptions change.
 [Target](01-target.md) → per-core RTT bytes →
 [stage 1](02-binary-parser.md) → `Recording`/events →
 [stage 2](03-task-builder.md) → `TraceTask`/jobs → visualization/export.
+[Simulator](04-simulator.md): task set → JSON-lines trace → `TraceTask`/jobs,
+separate from the FreeRTOS stages.
 
 **Goals and rationale.**
 
