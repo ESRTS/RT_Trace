@@ -5,7 +5,7 @@ All times are integer microseconds. A larger priority value means a higher prior
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import json
 from pathlib import Path
 
@@ -33,10 +33,33 @@ class Task:
 
 
 @dataclass(frozen=True)
+class Precedence:
+    """
+    For k = 0, 1, 2, ...: job pred_first + k * pred_every of the predecessor task must complete
+    before job succ_first + k * succ_every of the successor task may start.
+    The successor job is still released at its nominal time; it only waits to start.
+    """
+    pred_task: int                          # Task ids
+    pred_first: int
+    pred_every: int
+    succ_task: int
+    succ_first: int
+    succ_every: int
+
+    def predecessor_of(self, succ_job: int) -> int | None:
+        """The predecessor job id that successor job succ_job waits for, or None if it is not affected."""
+        k, rest = divmod(succ_job - self.succ_first, self.succ_every)
+        if succ_job < self.succ_first or rest:
+            return None
+        return self.pred_first + k * self.pred_every
+
+
+@dataclass(frozen=True)
 class TaskSet:
     cores: int
     scheduler: str
     tasks: tuple[Task, ...]
+    precedence: tuple[Precedence, ...] = ()
 
     def utilization(self) -> float:
         return sum(task.wcet / task.period for task in self.tasks)
@@ -112,7 +135,68 @@ def parse_taskset(data) -> TaskSet:
 
         tasks.append(Task(id=index + 1, name=name, period=period, wcet=wcet, deadline=deadline,
                           priority=priority, phase=phase, bcet=bcet, affinity=affinity))
-    return TaskSet(cores=cores, scheduler=scheduler, tasks=tuple(tasks))
+    precedence = _parse_precedence(data.get('precedence', []), {task.name: task.id for task in tasks})
+    return TaskSet(cores=cores, scheduler=scheduler, tasks=tuple(tasks), precedence=precedence)
+
+
+def _parse_precedence(entries, ids):
+    """Validate the precedence constraints and reject cycles between tasks."""
+    if not isinstance(entries, list):
+        raise TaskSetError("'precedence' must be a list")
+    constraints = []
+    for index, entry in enumerate(entries):
+        where = f'precedence {index + 1}'
+        if not isinstance(entry, dict):
+            raise TaskSetError(f'{where}: must be a JSON object')
+        sides = []
+        for role in ('predecessor', 'successor'):
+            side = entry.get(role)
+            if not isinstance(side, dict):
+                raise TaskSetError(f"{where}: '{role}' must be an object with 'task', 'first_job' and 'every'")
+            name = side.get('task')
+            if name not in ids:
+                raise TaskSetError(f"{where}: {role} task {name!r} is not defined")
+            sides.append((ids[name], _integer(side, 'first_job', f'{where} {role}', minimum=0, default=0),
+                          _integer(side, 'every', f'{where} {role}', minimum=1, default=1)))
+        if sides[0][0] == sides[1][0]:
+            raise TaskSetError(f"{where}: predecessor and successor are the same task "
+                               f"'{entry['predecessor']['task']}'")
+        constraints.append(Precedence(*sides[0], *sides[1]))
+
+    names = {ident: name for name, ident in ids.items()}
+    cycle = _find_cycle({(c.pred_task, c.succ_task) for c in constraints})
+    if cycle:
+        raise TaskSetError('precedence constraints form a cycle: ' + ' -> '.join(names[i] for i in cycle))
+    return tuple(constraints)
+
+
+def _find_cycle(edges):
+    """Return the task ids of one cycle in the directed graph, or None."""
+    successors = {}
+    for pred, succ in edges:
+        successors.setdefault(pred, []).append(succ)
+    state, path = {}, []                    # state: 1 = on the current path, 2 = done
+
+    def visit(node):
+        state[node] = 1
+        path.append(node)
+        for succ in sorted(successors.get(node, [])):
+            if state.get(succ) == 1:
+                return path[path.index(succ):] + [succ]
+            if succ not in state:
+                cycle = visit(succ)
+                if cycle:
+                    return cycle
+        state[node] = 2
+        path.pop()
+        return None
+
+    for node in sorted(successors):
+        if node not in state:
+            cycle = visit(node)
+            if cycle:
+                return cycle
+    return None
 
 
 _MISSING = object()

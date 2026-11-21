@@ -13,10 +13,11 @@ directly. Nothing is estimated, so `uncertain` stays false.
 
 | File | Role |
 | --- | --- |
-| `model.py` | `taskset.json` validation; `Task`, `TaskSet`, `Job`. Integer µs. |
+| `model.py` | `taskset.json` validation; `Task`, `TaskSet`, `Job`, `Precedence` (rejects cycles). Integer µs. |
 | `engine.py` | Time, releases, execution accounting, dispatch; only file that advances time. |
-| `policies/base.py` | `SchedulingPolicy`: `validate`, `on_release`, `on_complete`, `select`. |
+| `policies/base.py` | `SchedulingPolicy`: `validate`, `on_release`, `on_complete`, `order`, `select`; `assign_ranked`. |
 | `policies/fixed_priority.py` | `fp`: preemptive fixed priority with affinity. |
+| `policies/edf.py` | `edf`: preemptive earliest deadline first with affinity. |
 | `policies/__init__.py` | Registry; `taskset.json` `scheduler` names the policy. |
 | `trace_format.py` | Format contract shared by writer and parser. |
 | `trace_writer.py` | Header, task lines, events. |
@@ -29,13 +30,24 @@ released before the horizon; completions at the horizon are kept; open jobs end
 there as incomplete. A late job continues; later jobs of its task queue behind
 it. Execution time is `Simulator.execution_time()` (WCET for now).
 
-**Policy `fp`.** Order: priority (higher value first), running before waiting
-among equals (equal priorities never preempt), release time, task order. Each job
-takes a free allowed core: its current core, else an idle core, else the core
-running the lowest-ranked job. Affinity therefore covers global, partitioned
-and mixed scheduling. A new policy is a `SchedulingPolicy` subclass plus a
-registry entry; resource protocols and overheads should become separate engine
-components rather than policy code.
+**Precedence.** A `Precedence` pairs predecessor job `pred_first + k·pred_every`
+with successor job `succ_first + k·succ_every`. The engine records completed job
+ids per task and offers the policy only running jobs and jobs whose predecessors
+have all completed (`Simulator.eligible`), so policies need no precedence logic.
+Releases and deadlines stay nominal. The loader rejects self-constraints and
+cycles in the task graph; without cycles, waiting cannot deadlock. The trace
+format is unchanged: waiting is not recorded.
+
+**Policies.** Ranking policies define `order(job)`; the default `select()`
+(`assign_ranked`) lets each job in that order take a free allowed core: its
+current core, else an idle core, else the core running the lowest-ranked job.
+Affinity therefore covers global, partitioned and mixed scheduling. `fp` ranks
+by priority (higher value first), `edf` by absolute deadline (a late job stays
+most urgent; `priority` is ignored). Both then rank running before waiting (ties
+never preempt), release time, task order. A new policy is a `SchedulingPolicy`
+subclass plus a registry entry ([policies/README.md](../src/simulator/policies/README.md));
+resource protocols and overheads should become separate engine components
+rather than policy code.
 
 **Trace format** (`rt-trace-sim`, version 1). One JSON object per line: header,
 one `task` line per task, then events `release` (absolute `deadline`), `start`,
@@ -50,6 +62,10 @@ missing `end` is a warning (truncated file); open jobs end at the last event.
 Rows get `kind='task'`, `deadlinesExplicit=True` and `traceFormat=3`, which
 `TraceView` uses for current-format rows. Jobs may overlap after a deadline miss,
 so jobs are created directly rather than via `TraceTask.newJob()`.
+
+**Command line.** `simulator/__main__.py`: `python src/simulator taskset.json
+<seconds> [-o file]` (or `python -m simulator` with `src` on the path). It validates
+before writing anything; exit code 1 for an invalid task set, 2 for bad arguments.
 
 **GUI.** Target `Simulator` in `RT-Trace.py`. `programCheckFunc` lists folders
 with `taskset.json` in the project folder; `pathValidationFunc` validates the task

@@ -13,6 +13,10 @@ class Simulator:
         self.ready = []                                     # Released, unfinished jobs (running or waiting)
         self.next_release = {task.id: task.phase for task in taskset.tasks}
         self.job_count = {task.id: 0 for task in taskset.tasks}
+        self.completed = {task.id: set() for task in taskset.tasks}     # Completed job ids, for precedence
+        self.constraints = {task.id: [] for task in taskset.tasks}       # Precedence constraints by successor
+        for constraint in taskset.precedence:
+            self.constraints[constraint.succ_task].append(constraint)
 
     @staticmethod
     def execution_time(task):
@@ -52,9 +56,18 @@ class Simulator:
                 self.writer.release(self.now, job)
                 self.policy.on_release(job, self.now)
 
+    def eligible(self, job):
+        """A job may run once all its predecessor jobs have completed."""
+        for constraint in self.constraints[job.task.id]:
+            predecessor = constraint.predecessor_of(job.id)
+            if predecessor is not None and predecessor not in self.completed[constraint.pred_task]:
+                return False
+        return True
+
     def dispatch(self):
-        assignment = self.policy.select(list(self.ready), self.taskset.cores, self.now)
-        self.check(assignment)
+        candidates = [job for job in self.ready if job.core is not None or self.eligible(job)]
+        assignment = self.policy.select(candidates, self.taskset.cores, self.now)
+        self.check(assignment, candidates)
         target = {job: core for core, job in assignment.items()}
         # Stop every job that changes core or loses its core first, then start the new ones.
         for job in self.ready:
@@ -67,14 +80,14 @@ class Simulator:
                 job.core = core
                 self.writer.start(self.now, job, core)
 
-    def check(self, assignment):
+    def check(self, assignment, candidates):
         jobs = list(assignment.values())
         if len(set(map(id, jobs))) != len(jobs):
             raise TaskSetError(f"policy '{self.policy.name}' assigned a job to two cores")
         for core, job in assignment.items():
             if not 0 <= core < self.taskset.cores:
                 raise TaskSetError(f"policy '{self.policy.name}' used core {core}, which does not exist")
-            if job not in self.ready:
+            if job not in candidates:
                 raise TaskSetError(f"policy '{self.policy.name}' scheduled {job}, which is not ready")
             if not job.task.allowed(core):
                 raise TaskSetError(f"policy '{self.policy.name}' put {job} on core {core}, outside its affinity")
@@ -90,4 +103,5 @@ class Simulator:
             self.writer.complete(self.now, job, job.core)
             job.core = None
             self.ready.remove(job)
+            self.completed[job.task.id].add(job.id)
             self.policy.on_complete(job, self.now)

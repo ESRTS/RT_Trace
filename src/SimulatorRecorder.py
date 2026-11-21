@@ -45,7 +45,8 @@ def validateTaskSet(gui, quiet=False):
     if not quiet:
         HelperFunctions.printState("Task set", info=f"{gui.selectedProgram}: {len(taskset.tasks)} tasks, "
                                    f"{taskset.cores} core(s), scheduler '{taskset.scheduler}', "
-                                   f"utilization {taskset.utilization():.2f}")
+                                   f"utilization {taskset.utilization():.2f}"
+                                   + (f", {len(taskset.precedence)} precedence constraint(s)" if taskset.precedence else ""))
     return True
 
 

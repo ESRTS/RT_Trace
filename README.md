@@ -54,12 +54,47 @@ hardware. A simulator program is a folder in the project folder that contains a
 
 Times are integer microseconds. Per task, `deadline` defaults to `period`,
 `phase` (release time of the first job) to 0 and `affinity` (allowed cores) to
-all cores. A larger `priority` wins. `bcet` is validated but jobs currently always run for `wcet`. Select the
-folder under **Program**, set **Duration (s)** and click **Record Trace**. The
-recording folder receives `sim_trace.jsonl` and a copy of `taskset.json`.
-Scheduler `fp` is preemptive fixed priority; equal priorities are served FIFO
-and never preempt each other, and late jobs run to completion. See the
-[simulator architecture](arch_description/04-simulator.md).
+all cores. `bcet` is validated but jobs currently always run for `wcet`. Select
+the folder under **Program**, set **Duration (s)** and click **Record Trace**.
+The recording folder receives `sim_trace.jsonl` and a copy of `taskset.json`.
+
+`scheduler` selects the policy. Both are preemptive, and late jobs run to
+completion:
+
+- `fp`: fixed priority; a larger `priority` wins.
+- `edf`: earliest absolute deadline first; `priority` is not needed.
+
+Ties are served FIFO and never preempt a running job.
+
+Optional `precedence` constraints make jobs of one task wait for jobs of another:
+
+```json
+"precedence": [
+  {"predecessor": {"task": "Sensor",  "first_job": 0, "every": 1},
+   "successor":   {"task": "Control", "first_job": 1, "every": 2}}]
+```
+
+For k = 0, 1, 2, …, predecessor job `first_job + k·every` must complete before
+successor job `first_job + k·every` may start: here Sensor job k gates Control
+job 1 + 2k. Job ids count from 0; `first_job` defaults to 0 and `every` to 1. The
+successor is released at its nominal time and keeps its deadline; it only waits
+to start. A job with several constraints waits for all its predecessors.
+Constraints within one task and cycles between tasks are rejected. Waiting is
+not marked in the trace view.
+
+The simulator also runs without the GUI. It takes the task set and the
+simulated time in seconds and writes `sim_trace.jsonl` (`-o` sets another path):
+
+```sh
+python src/simulator path/to/taskset.json 0.2 -o out/sim_trace.jsonl
+```
+
+To view such a trace, put it as `data/Simulator/<name>/sim_trace.jsonl`. It then
+appears under **View Trace** for the Simulator platform.
+
+See the
+[simulator architecture](arch_description/04-simulator.md) and
+[how to add a policy](src/simulator/policies/README.md).
 
 ## Load and inspect
 

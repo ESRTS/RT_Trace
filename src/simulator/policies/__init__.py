@@ -1,9 +1,10 @@
 """Registry of the scheduling policies, selected by the 'scheduler' field of taskset.json."""
 from ..model import TaskSetError
 from .base import SchedulingPolicy
+from .edf import EarliestDeadlineFirst
 from .fixed_priority import FixedPriority
 
-POLICIES = {policy.name: policy for policy in (FixedPriority,)}
+POLICIES = {policy.name: policy for policy in (FixedPriority, EarliestDeadlineFirst)}
 
 
 def get_policy(name) -> SchedulingPolicy:

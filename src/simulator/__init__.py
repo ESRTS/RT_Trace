@@ -13,6 +13,8 @@ def simulate(taskset, out_path, horizon):
     """Simulate taskset (a TaskSet or a path to taskset.json) for [0, horizon] us and write the trace."""
     if not isinstance(taskset, TaskSet):
         taskset = load_taskset(taskset)
+    policy = get_policy(taskset.scheduler)
+    policy.validate(taskset)                # Before opening, so an invalid task set leaves no empty trace
     with open(out_path, 'w') as stream:
-        Simulator(taskset, get_policy(taskset.scheduler), TraceWriter(stream)).run(horizon)
+        Simulator(taskset, policy, TraceWriter(stream)).run(horizon)
     return taskset
