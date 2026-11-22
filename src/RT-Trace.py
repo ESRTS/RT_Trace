@@ -233,7 +233,9 @@ class TraceApp(customtkinter.CTk):
         ''' Execution Trace Widget. '''
         self.traceView = TraceView(self.trace_frame, gui=self)
         self.traceView.grid(row=0, column=0, sticky="nswe")
-        self.paned.add(self.trace_frame, minsize=150, stretch="always")
+        self.traceFrameMinHeight = 150     # Smallest height of the trace view pane
+        self.minOutputLines = 10           # Lines the output box keeps when the trace view is fitted to the trace
+        self.paned.add(self.trace_frame, minsize=self.traceFrameMinHeight, stretch="always")
         self.paned.add(self.textbox, minsize=80, stretch="always")
 
         ''' Bind the key handler function. '''
@@ -320,6 +322,7 @@ class TraceApp(customtkinter.CTk):
 
     def updateTaskVisibility(self, tasks):
         self.traceView.setVisibleTasks(tasks)
+        self.fitTracePane()     # The trace view grows or shrinks with the visible rows
 
     def saveRecordingDuration(self, event=None, reportErrors=True):
         """Persist valid edits; invalid input stays visible and prevents recording."""
@@ -346,12 +349,25 @@ class TraceApp(customtkinter.CTk):
 
     def fitTracePane(self):
         """
-        Moves the separator so that the trace view is as high as the loaded trace, at most 70% of the window.
-        The user can drag it afterwards.
+        Moves the separator so that the trace view is as high as its visible rows and time axis, but leaves
+        at least minOutputLines lines for the output box. Rows that don't fit scroll. The user can drag it afterwards.
         """
-        height = self.traceView.fittedHeight()
-        self.paned.sash_place(0, 0, min(height, int(self.paned.winfo_height() * 0.7)))
         self.update_idletasks()
+        limit = self.paned.winfo_height() - self.minOutputHeight() - int(self.paned.cget("sashwidth"))
+        height = max(self.traceFrameMinHeight, min(self.traceView.fittedHeight(), limit))
+        self.paned.sash_place(0, 0, height)
+        self.update_idletasks()
+
+    def minOutputHeight(self):
+        """
+        Height of the output box with minOutputLines lines of text, measured from its font and padding.
+        """
+        inner = self.textbox._textbox      # The Tk text widget inside the CTkTextbox
+        font = tkinter.font.Font(root=self, font=inner.cget("font"))
+        lineHeight = font.metrics("linespace") + int(inner.cget("spacing1")) + int(inner.cget("spacing3"))
+        innerPadding = 2 * (int(inner.cget("pady")) + int(inner.cget("borderwidth")) + int(inner.cget("highlightthickness")))
+        frame = max(0, self.textbox.winfo_height() - inner.winfo_height())     # Corner radius and border of the CTkTextbox
+        return self.minOutputLines * lineHeight + innerPadding + frame
 
     def showOutputMenu(self, event):
         """
@@ -637,7 +653,12 @@ class TraceApp(customtkinter.CTk):
             HelperFunctions.makeFolder(outputPath)
             pdfFilename = os.path.abspath(os.path.join(outputPath, "Trace_" + now.strftime("%d_%m_%Y_%H_%M_%S") + ".pdf"))
 
-            self.traceView.exportView(pdfFilename)  # Create and save the PDF
+            try:
+                self.traceView.exportView(pdfFilename)  # Create and save the PDF
+            except OSError as error:
+                HelperFunctions.printState("ERROR PDF export failed", info=str(error))
+                return
+            HelperFunctions.printState("PDF exported", info=pdfFilename)
 
         else:
             HelperFunctions.printState("No trace loaded!")

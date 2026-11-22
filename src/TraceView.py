@@ -1,5 +1,6 @@
 import customtkinter
 import math
+import tkinter.font
 from bisect import bisect_left, bisect_right
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
@@ -13,7 +14,7 @@ class TraceView(customtkinter.CTkCanvas):
     """
 
     def __init__(self, master, gui=None):
-        super().__init__(master, scrollregion = (0,0,100,500))
+        super().__init__(master, scrollregion = (0,0,100,500), highlightthickness=0)   # No focus border, it would hide part of the view
 
         """
         Variables that indicate a value in pixel have the ending '_px'
@@ -21,13 +22,14 @@ class TraceView(customtkinter.CTkCanvas):
         """
         # --> Variables to alter the dimensions of different elements in the trace <--
         self.borderX_px = 40                                    # Border that is added to the left and right of the plot
-        self.borderY_px = 30                                    # Border that is added on top and bottom
+        self.axisTickLength_px = 5                              # Length of the tick marks below the rows (scaled with the UI)
+        self.axisLabelGap_px = 12                               # Distance from the rows to the top of the time labels (scaled)
+        self.axisMargin_px = 4                                  # Space below the time labels (scaled)
         self.legend_px = 90                                     # Size that is reserved for the legend (left of the trace)
         self.scaleFactor = 1                                    # Factor to scale the complete view (not used)
-        self.taskTimelineHeight_px = 45                         # Describes the height of one task's timeline (fitted to the view in fitRows())
+        self.taskTimelineHeight_px = 45                         # Describes the height of one task's timeline (set in setTasks())
         self.taskHeight_px = 25                                 # Describes the height of one task
-        self.maxTimelineHeight_px = 45                          # Timeline height the view is first sized for when a trace is loaded
-        self.minTimelineHeight_px = 30                          # Smallest timeline height, below this the view scrolls
+        self.maxTimelineHeight_px = 45                          # Timeline height of a row before the UI scale, rows don't shrink, they scroll
         self.releaseArrowWidth_px = 2                           # Stroke width of release arrow
         self.releaseArrowLength_px = 10                         # Length of the release arrow
         self.releaseArrowD_px = 4                               # D parameter of release arrow
@@ -60,6 +62,9 @@ class TraceView(customtkinter.CTkCanvas):
         self.pdf_height_pt = 0
         self.pdf_padding_north = 3
         self.traceHeight = 330
+        # Height of the time labels: they use the canvas default font, which the GUI scaled before creating the view
+        self.labelLinespace_px = tkinter.font.nametofont("TkDefaultFont", root=self).metrics("linespace")
+        self.axisItems = []                                     # Canvas items of the time axis, redrawn when the rows scroll
 
         self.ctk_textbox_scrollbar = customtkinter.CTkScrollbar(self, command=self.yview)
         self.ctk_textbox_scrollbar.place(relx=1,rely=0,relheight=1,anchor='ne')
@@ -79,6 +84,8 @@ class TraceView(customtkinter.CTkCanvas):
         Function adds the tasks to the view.
         """
         self.tasks = tasks
+        self.taskTimelineHeight_px = round(self.maxTimelineHeight_px * getattr(self.gui, "uiScale", 1))
+        self.taskHeight_px = round(self.taskTimelineHeight_px * 25 / 45)     # Keep the proportions of the 45 px rows
 
         if self.tasks is not None:
             # Find the maximum time to display in ticks
@@ -146,6 +153,7 @@ class TraceView(customtkinter.CTkCanvas):
         for item in self.canvasItems:
             self.delete(item)
         self.canvasItems.clear()
+        self.axisItems = []
 
     def draw(self):
         """
@@ -167,8 +175,7 @@ class TraceView(customtkinter.CTkCanvas):
             self.draw_text(self.sizeX_px // 2, 30, anchor=customtkinter.N,
                            text="No rows selected. Check rows under Show in trace.")
         else: 
-            #self.fitRows()
-            self.traceHeight = len(self.tasks) * self.taskTimelineHeight_px + self.scaledBorderY()
+            self.traceHeight = self.rowsHeight() + self.axisHeight()
             
             # Add a white background to the trace
             #self.canvasItems.append(self.create_rectangle(self.borderX_px + self.legend_px, 0, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (len(self.tasks)) - 1), fill="#FFFFFF"))
@@ -177,7 +184,7 @@ class TraceView(customtkinter.CTkCanvas):
             # Compute the length of the visible view in ticks
             self.view_tks = self.rightBound_tks - self.leftBound_tks
 
-            # Draw the tick marks for the current view on the canvas
+            # Draw the grid lines of the time ticks for the current view on the canvas
             self.drawTicks()
 
             for task in self.tasks:
@@ -196,28 +203,93 @@ class TraceView(customtkinter.CTkCanvas):
                 self.draw_line(self.sizeX_px - self.borderX_px, 0, self.sizeX_px - self.borderX_px, (self.taskTimelineHeight_px * (self.tasks.index(task) + 1)) - 1)
 
             self.paintLegend()
-        
+
         self.configure(scrollregion = (0,0,100,self.traceHeight))
 
         # Show the scrollbar only if the rows don't fit into the view
         if self.traceHeight > self.winfo_height():
-            if not self.ctk_textbox_scrollbar.winfo_ismapped():
+            if not self.scrollbarShown():
                 self.ctk_textbox_scrollbar.place(relx=1,rely=0,relheight=1,anchor='ne')
         else:
             self.ctk_textbox_scrollbar.place_forget()
             self.yview_moveto(0)
 
-    def fitRows(self):
+        # The time axis is drawn last so it covers rows that scroll below it. yview_moveto() above may
+        # already have drawn it at the new scroll position.
+        if self.tasks and not self.axisItems:
+            self.drawAxis()
+
+    def scrollbarShown(self):
         """
-        Sets the height of the task timelines so that the tasks fill the visible height of the view.
-        If they don't fit at the smallest height, the view can be scrolled.
+        True if the scrollbar is placed. winfo_ismapped() can lag behind a place/place_forget pair
+        between two redraws, the geometry manager reflects the last change.
         """
-        scale = getattr(self.gui, "uiScale", 1)     # Larger rows when the UI is scaled, the task names use a larger font
-        available_px = self.winfo_height() - self.scaledBorderY()
-        rowHeight = available_px // len(self.tasks)
-        rowHeight = max(round(self.minTimelineHeight_px * scale), rowHeight)
-        self.taskTimelineHeight_px = rowHeight
-        self.taskHeight_px = round(rowHeight * 25 / 45)     # Keep the proportions of the original 45 px rows
+        return self.ctk_textbox_scrollbar.winfo_manager() == "place"
+
+    def rowsHeight(self):
+        """
+        Height of all visible rows, without the time axis.
+        """
+        return len(self.tasks) * self.taskTimelineHeight_px if self.tasks else 0
+
+    def axisHeight(self):
+        """
+        Height of the time axis below the rows: tick marks, labels in the measured font height, and a margin.
+        """
+        scale = getattr(self.gui, "uiScale", 1)
+        return round(self.axisLabelGap_px * scale) + self.labelLinespace_px + round(self.axisMargin_px * scale)
+
+    def axisTop(self):
+        """
+        Canvas y of the time axis: directly below the rows, or at the bottom of the visible area if the rows
+        don't fit, so the axis stays visible while the rows scroll. The PDF has no scrolling and puts it below the rows.
+        """
+        if self.exportCanvas is not None:
+            return self.rowsHeight()
+        visibleBottom = self.canvasy(self.winfo_height())
+        return min(self.rowsHeight(), visibleBottom - self.axisHeight())
+
+    def drawAxis(self):
+        """
+        Draws the time axis (background, base line, tick marks and labels) at axisTop().
+        """
+        scale = getattr(self.gui, "uiScale", 1)
+        top = self.axisTop()
+        first = len(self.canvasItems)
+        if self.exportCanvas is None:      # Hide rows that scroll below the axis; the PDF shows no scrolled rows
+            self.canvasItems.append(self.create_rectangle(0, top, self.sizeX_px, top + self.axisHeight(),
+                                                          fill=self.cget("background"), outline=""))
+        self.draw_line(self.plotXOffset(), top - 1, self.sizeX_px - self.borderX_px, top - 1)
+        for pos, label in self.axisTicks:
+            self.draw_line(pos, top - 1, pos, top + round(self.axisTickLength_px * scale))
+            self.draw_text(pos, top + round(self.axisLabelGap_px * scale), anchor=customtkinter.N, text=label)
+        self.axisItems = self.canvasItems[first:]
+
+    def updateAxis(self):
+        """
+        Moves the time axis after the rows scrolled.
+        """
+        if not self.tasks or self.exportCanvas is not None:
+            return
+        for item in self.axisItems:
+            self.delete(item)
+        axis = set(self.axisItems)
+        self.canvasItems = [item for item in self.canvasItems if item not in axis]
+        self.drawAxis()
+
+    def yview(self, *args):
+        result = super().yview(*args)
+        if args:                            # Scrolled (without arguments, yview() only reports the position)
+            self.updateAxis()
+        return result
+
+    def yview_moveto(self, fraction):
+        super().yview_moveto(fraction)
+        self.updateAxis()
+
+    def yview_scroll(self, number, what):
+        super().yview_scroll(number, what)
+        self.updateAxis()
 
     def paintLegend(self):
         """
@@ -425,7 +497,8 @@ class TraceView(customtkinter.CTkCanvas):
 
     def drawTicks(self):
         """
-        Draws the tick lines based on the current view.
+        Draws the grid lines of the time ticks based on the current view and stores the ticks with
+        their labels in axisTicks for drawAxis().
         """
         plotWidth = self.sizeX_px - self.borderX_px - self.borderX_px - self.legend_px
         labelWidth_px = 80 * getattr(self.gui, "uiScale", 1)    # Room for one time label, so labels don't overlap in narrow windows
@@ -449,21 +522,16 @@ class TraceView(customtkinter.CTkCanvas):
             self.tickScale = 1000000
 
         tick = math.ceil(self.leftBound_tks / step) * step
+        self.axisTicks = []
 
         drawNextTick = True
         while drawNextTick:
 
             pos = self.tickToPixel(tick)
 
-            # Draw the ticks
-            #self.canvasItems.append(self.create_line(pos, 0, pos, self.taskTimelineHeight_px * (len(self.tasks)), fill="lightgrey"))
-            self.draw_line(pos, 0, pos, self.taskTimelineHeight_px * (len(self.tasks)), fill="#d3d3d3")
-            #self.canvasItems.append(self.create_line(pos, self.taskTimelineHeight_px * (len(self.tasks)) - 1, pos, self.taskTimelineHeight_px * (len(self.tasks)) + 5))
-            self.draw_line(pos, self.taskTimelineHeight_px * (len(self.tasks)) - 1, pos, self.taskTimelineHeight_px * (len(self.tasks)) + 5)
-            
-            # Draw timestring
-            #self.canvasItems.append(self.create_text(pos, self.taskTimelineHeight_px * (len(self.tasks)) + 12, anchor=customtkinter.N, text=self.getTimeString(tick)))
-            self.draw_text(pos, self.taskTimelineHeight_px * (len(self.tasks)) + 12, anchor=customtkinter.N, text=self.getTimeString(tick))
+            # Draw the grid line; tick marks and labels are drawn by drawAxis()
+            self.draw_line(pos, 0, pos, self.rowsHeight(), fill="#d3d3d3")
+            self.axisTicks.append((pos, self.getTimeString(tick)))
 
             tick = tick + step # Increment tick
             if tick >= self.rightBound_tks:
@@ -485,19 +553,15 @@ class TraceView(customtkinter.CTkCanvas):
             return str(int(tmp)) + " s"
         return None
     
-    def scaledBorderY(self):
-        """
-        Returns the space below the rows, it holds the time labels and grows with the UI scale.
-        """
-        return round(self.borderY_px * getattr(self.gui, "uiScale", 1))
-
     def fittedHeight(self):
         """
-        Returns the height the view needs to show all rows at their largest height.
+        Returns the height the view needs to show all visible rows and the time axis without scrolling.
         """
         if self.tasks is None:
             return 0
-        return len(self.tasks) * round(self.maxTimelineHeight_px * getattr(self.gui, "uiScale", 1)) + self.scaledBorderY()
+        if not self.tasks:
+            return 100                      # The "No rows selected" message
+        return self.rowsHeight() + self.axisHeight()
 
     def plotXOffset(self):
         """
@@ -599,7 +663,7 @@ class TraceView(customtkinter.CTkCanvas):
 
         if event.state & 0x0004:    # Control
             self.zoom(1 if up else -1, event.x)
-        elif event.state & 0x0001 and self.ctk_textbox_scrollbar.winfo_ismapped():    # Shift
+        elif event.state & 0x0001 and self.scrollbarShown():    # Shift
             self.yview_scroll(-1 if up else 1, "units")
         else:
             self.pan(-0.1 if up else 0.1)
@@ -849,3 +913,4 @@ class TraceView(customtkinter.CTkCanvas):
         self.draw()
         self.exportCanvas = None
         c.save()
+        self.draw()                         # Redraw the GUI view, the export placed the axis below all rows

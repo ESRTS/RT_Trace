@@ -187,11 +187,12 @@ class RowVisibilityTests(unittest.TestCase):
         view = View.__new__(View)
         self.view = view
         attributes = dict(
-            sizeX_px=1000, borderX_px=40, borderY_px=30, legend_px=90,
+            sizeX_px=1000, borderX_px=40, legend_px=90,
+            axisTickLength_px=5, axisLabelGap_px=12, axisMargin_px=4, labelLinespace_px=16, axisItems=[],
             leftBound_tks=0, rightBound_tks=43000, oldLeftBound_tks=0,
             oldRightBound_tks=0, zoomFactor=1.2, zoomMax=50, zoomMin=43000,
             taskTimelineHeight_px=45, taskHeight_px=25,
-            maxTimelineHeight_px=45, minTimelineHeight_px=30, maxTicks=20,
+            maxTimelineHeight_px=45, maxTicks=20,
             releaseArrowLength_px=10, releaseArrowWidth_px=2,
             releaseArrowH_px=4, releaseArrowD_px=3, mutexAccessHeight=15,
             mutexAccessDiameter=10, mutexFailureColor='#C94C4C',
@@ -204,9 +205,12 @@ class RowVisibilityTests(unittest.TestCase):
         view.winfo_width = lambda: 1000
         view.winfo_height = lambda: 400
         view.ctk_textbox_scrollbar = Mock()
-        view.ctk_textbox_scrollbar.winfo_ismapped.return_value = False
+        view.ctk_textbox_scrollbar.winfo_manager.return_value = ''
         view.configure = Mock()
         view.yview_moveto = Mock()
+        view.canvasy = lambda y: y + self.scrolled      # Canvas y of a window y, rows scrolled up by self.scrolled px
+        view.cget = lambda option: '#FFFFFF'
+        self.scrolled = 0
         for kind in ('text', 'rectangle', 'line', 'oval'):
             setattr(view, 'create_' + kind, lambda *args, kind=kind, **kwargs: self.create(kind, args, kwargs))
         view.delete = lambda ident: self.items.pop(ident, None)
@@ -253,6 +257,51 @@ class RowVisibilityTests(unittest.TestCase):
         self.assertIn('#6298D2', fills)
         self.assertNotIn(control.taskColor, fills)
 
+
+    def axis_label_tops(self):
+        return {args[1] for kind, args, kwargs in self.items.values() if kind == 'text' and kwargs.get('anchor') == 'N'}
+
+    def test_axis_height_holds_the_labels(self):
+        view = self.view
+        self.assertEqual(view.axisHeight(), 12 + 16 + 4)
+        self.assertEqual(view.fittedHeight(), len(self.tasks) * 45 + 32)
+        self.assertEqual(view.traceHeight, view.fittedHeight())
+        # The rows fit (1000 px window): labels directly below the rows, their bottom inside the trace height.
+        view.winfo_height = lambda: 1000
+        view.draw()
+        rows = len(self.tasks) * 45
+        self.assertLess(view.fittedHeight(), 1000)
+        self.assertEqual(self.axis_label_tops(), {rows + 12})
+        self.assertLessEqual(rows + 12 + view.labelLinespace_px, view.traceHeight)
+
+    def test_axis_is_pinned_when_rows_overflow_and_follows_scrolling(self):
+        view = self.view
+        view.winfo_height = lambda: 200             # Smaller than the rows
+        view.draw()
+        self.assertEqual(self.axis_label_tops(), {200 - 32 + 12})
+        backgrounds = [kwargs for kind, args, kwargs in self.items.values()
+                       if kind == 'rectangle' and kwargs.get('outline') == '' and args[1] == 200 - 32]
+        self.assertEqual(len(backgrounds), 1)       # Rows scrolled below the axis are covered
+        self.scrolled = 100
+        view.updateAxis()
+        self.assertEqual(self.axis_label_tops(), {300 - 32 + 12})
+        self.assertEqual(set(view.canvasItems), set(self.items))   # The old axis items are gone
+        self.scrolled = view.traceHeight - 200      # Scrolled to the end: the axis is right below the last row
+        view.updateAxis()
+        self.assertEqual(self.axis_label_tops(), {len(self.tasks) * 45 + 12})
+
+    def test_pdf_has_all_rows_and_the_axis_below_them(self):
+        view = self.view
+        view.winfo_height = lambda: 200
+        view.exportCanvas = object()
+        self.assertEqual(view.axisTop(), len(self.tasks) * 45)
+        view.exportCanvas = None
+
+    def test_axis_and_rows_scale_with_the_ui(self):
+        self.view.gui.uiScale = 2
+        self.view.setTasks(self.tasks)
+        self.assertEqual(self.view.taskTimelineHeight_px, 90)
+        self.assertEqual(self.view.axisHeight(), 24 + 16 + 8)     # The measured font height is already scaled
 
 if __name__ == '__main__':
     unittest.main()
