@@ -81,6 +81,7 @@ python src/analysis data/Simulator/<recording>               # default analyses
 python src/analysis <recording> deadline_misses longest_job  # selected ones
 python src/analysis <recording> --all --plugins ~/rt-trace-plugins
 python src/simulator taskset.json 0.2 --analyze deadline_misses
+python src/RttTraceRecorder.py MyProject 2 --analyze deadline_misses
 ```
 
 In the packaged app, plugins can import only the standard library and the

@@ -245,9 +245,12 @@ def getRecordedTraces(gui):
 
 def getRecordingFolderName(gui):
     """ Helper to create the absolute path for this experiment configuration. """
-    targetName = gui.targets[gui.selectedTarget].get('name').replace(' ', '_')
-    measurementName = f"{gui.txt_traceName.get()}_{getTimeString()}"
-    return os.path.abspath(os.path.join(os.path.dirname( getCwd() ), 'data', targetName, measurementName))
+    return newRecordingFolder(gui.targets[gui.selectedTarget].get('name'), gui.txt_traceName.get())
+
+def newRecordingFolder(platformName, recordingName):
+    """ data/<platform>/<recording name>_<timestamp>, where View Trace lists the recordings of the platform. """
+    measurementName = f"{recordingName}_{getTimeString()}"
+    return os.path.abspath(os.path.join(os.path.dirname( getCwd() ), 'data', platformName.replace(' ', '_'), measurementName))
     
 def getViewingFolderName(gui):
     """ Helper to create the absolute path for the trace visualization. """
@@ -427,6 +430,20 @@ def noTracingHint(elfFilePath, missing=('trace_init',)):
             "Build with rt_trace_enable(firmware), include trace.h at the end of FreeRTOSConfig.h, "
             "and preserve the ELF symbol table (see target/README.md).")
 
+def picoTraceProblem(elfFilePath):
+    """
+    None if the ELF exists and has RT-Trace RTT support linked in, otherwise (state, info) for printState.
+    """
+    if not Path(elfFilePath).is_file():
+        return "ERROR ELF not found", str(elfFilePath) + " does not exist, build the program first"
+    try:
+        missing = getMissingElfSymbols(elfFilePath, _PICO_TRACE_SYMBOLS)
+    except (OSError, ELFError) as error:
+        return "ERROR invalid ELF", os.path.basename(elfFilePath) + ": " + str(error) + ". Rebuild the firmware."
+    if missing:
+        return "ERROR no tracing", noTracingHint(elfFilePath, missing)
+    return None
+
 def validatePicoTrace(gui, quiet=False):
     """
     Check the selected firmware for linked RT-Trace support before recording.
@@ -443,13 +460,9 @@ def validatePicoTrace(gui, quiet=False):
         printState("ERROR ELF not found", info=os.path.relpath(elfFilePath, programPath) + " in " + programPath + ", build the program first")
         return False
 
-    try:
-        missing = getMissingElfSymbols(elfFilePath, _PICO_TRACE_SYMBOLS)
-    except (OSError, ELFError) as error:
-        printState("ERROR invalid ELF", info=os.path.basename(elfFilePath) + ": " + str(error) + ". Rebuild the firmware.")
-        return False
-    if missing:
-        printState("ERROR no tracing", info=noTracingHint(elfFilePath, missing))
+    problem = picoTraceProblem(elfFilePath)
+    if problem is not None:
+        printState(problem[0], info=problem[1])
         return False
 
     if not quiet:

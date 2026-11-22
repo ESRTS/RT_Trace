@@ -40,9 +40,7 @@ def rtt_thread(gui):
     
     config = HelperFunctions.readConfig()
     elf = HelperFunctions.getElfFilePath(gui)#config.get(configName,'elf', fallback = None)
-    probe = config.get(configName,'probe', fallback = None)
-    target = config.get(configName,'target', fallback = 'rp2350')
-    frequency = int(config.get(configName,'frequency', fallback = '4_000_000'))
+    probe, target, frequency = recorder_settings(config)
     measure_seconds = getattr(gui, 'recordingSeconds', None)
     if measure_seconds is None:
         measure_seconds = HelperFunctions.parseRecordingDuration(
@@ -114,6 +112,7 @@ def record_data(elf, probe, target, frequency, measure_seconds, filename1, filen
     elf = str(saved_elf)
 
     session = ConnectHelper.session_with_chosen_probe(
+        blocking=False,             # Without a probe, return None (reported below) instead of waiting forever
         unique_id=probe,
         options={
             "target_override": target,
@@ -234,23 +233,137 @@ def record_data(elf, probe, target, frequency, measure_seconds, filename1, filen
         print(f"Wrote RTT channel 2 to {filename2}")
         return 0
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--elf", required=True, help="Firmware ELF file")
-    ap.add_argument("--probe", default=None, help="Probe unique ID")
-    ap.add_argument("--target", default="rp2350", help="Target name")
-    ap.add_argument("--frequency", type=parse_int, default=4_000_000)
-    ap.add_argument("--seconds", type=float, default=10.0)
-    ap.add_argument("--ch1-file", default="rtt_test/rtt_ch1.bin", help="Output file for RTT channel 1")
-    ap.add_argument("--ch2-file", default="rtt_test/rtt_ch2.bin", help="Output file for RTT channel 2")
-    args = ap.parse_args()
+PLATFORM = 'Pico2 FreeRTOS'     # The platform name of the GUI; recordings go to data/Pico2_FreeRTOS/
+NUM_CORES = 2
 
-    retval = record_data(args.elf, args.probe, args.target, args.frequency, args.seconds, args.ch1_file, args.ch2_file)
 
-    #print(open('rtt_test/rtt_ch1.bin','rb').read().decode('ascii','replace'))
-    #print(open('rtt_test/rtt_ch2.bin','rb').read().decode('ascii','replace'))
+def resolve_program(program):
+    """
+    (ELF path, program name) of a project folder (build/<name>.elf, as in the GUI), the name of a project
+    in project_path, or an ELF file. The ELF itself is checked later.
+    """
+    path = os.path.abspath(os.path.expanduser(program))
+    if os.path.isfile(path):
+        return path, Path(path).stem
+    candidates = [path]
+    if not os.path.isabs(os.path.expanduser(program)):
+        candidates.append(os.path.join(HelperFunctions.getProjectPath(), program))
+    for folder in candidates:
+        if os.path.isdir(folder):
+            name = os.path.basename(os.path.normpath(folder))
+            return os.path.join(folder, 'build', name + '.elf'), name
+    raise ValueError(f"{program}: not an ELF file, a project folder or a project in {HelperFunctions.getProjectPath()}")
 
-    return retval
+
+def recorder_settings(config, probe=None, target=None, frequency=None):
+    """(probe, target, frequency) from the [general] settings of the config, unless given."""
+    return (probe or config.get('general', 'probe', fallback=None),
+            target or config.get('general', 'target', fallback='rp2350'),
+            frequency or int(config.get('general', 'frequency', fallback='4_000_000')))
+
+
+def postprocess(folder, csv, analyses, config):
+    """
+    As loading in the GUI: parse the recording, write events.txt and the per-task CSVs (csv), then run
+    analyses (None: no analyses, empty: the default analyses). Returns the exit code.
+    """
+    import DataExport
+    from TraceParserFreeRTOS import readRecording, reportedWarnings
+    try:
+        tasks, warnings = readRecording(folder, NUM_CORES, writeEvents=csv,
+                                        strict=config.getboolean('general', 'strict', fallback=False))
+    except Exception as error:
+        HelperFunctions.reportError('Parsing failed', error, folder, 'parse_error.log',
+                                    'Check the recording and job_policy.json; details are in parse_error.log.')
+        return 1
+    for warning in reportedWarnings(warnings):
+        HelperFunctions.printState('Warning', info=warning)
+    if csv:
+        written = DataExport.exportCsvFiles(folder, tasks, overwrite=True)
+        print(f'{len(written)} CSV file(s) and events.txt -> {folder}')
+    if analyses is not None:
+        import analysis
+        from analysis.__main__ import run_named
+        return run_named(analysis.context_for_tasks(tasks, folder, PLATFORM, NUM_CORES, warnings), analyses)
+    return 0
+
+
+def main(argv=None) -> int:
+    """
+    Command line: flash a program, record its trace for some seconds and store it as a recording.
+
+        python src/RttTraceRecorder.py MyProject 2                  # project in project_path (config)
+        python src/RttTraceRecorder.py path/to/MyProject 0.5 --csv  # project folder; also events.txt and CSVs
+        python src/RttTraceRecorder.py build/MyProject.elf 2 -o out/rec --analyze deadline_misses
+    """
+    ap = argparse.ArgumentParser(prog='RttTraceRecorder',
+                                 description='Flash a Pico 2 FreeRTOS program and record its RT-Trace trace over RTT.')
+    ap.add_argument('program', help='project folder (with build/<name>.elf), the name of a project in project_path, '
+                                    'or an ELF file')
+    ap.add_argument('duration', nargs='?', type=duration_arg,
+                    help='recording time in seconds (default: measure_seconds of the config)')
+    ap.add_argument('-o', '--output', help='recording folder (default: data/Pico2_FreeRTOS/<name>_<timestamp>, '
+                                           'listed under View Trace in the GUI)')
+    ap.add_argument('-n', '--name', help='recording name in the default folder (default: the program name)')
+    ap.add_argument('--csv', action='store_true', help='then write events.txt and one CSV file per task, as loading in the GUI does')
+    ap.add_argument('--analyze', nargs='*', metavar='ANALYSIS',
+                    help='then run analyses (default: the task statistics; see python src/analysis --list)')
+    ap.add_argument('--probe', help='debug probe unique ID (default: probe of the config, or the only probe)')
+    ap.add_argument('--target', help='pyOCD target (default: target of the config, rp2350)')
+    ap.add_argument('--frequency', type=parse_int, help='SWD frequency in Hz (default: frequency of the config)')
+    args = ap.parse_args(argv)
+
+    config = HelperFunctions.readConfig()
+    try:
+        elf, name = resolve_program(args.program)
+    except ValueError as error:
+        ap.error(str(error))
+    seconds = args.duration
+    if seconds is None:
+        try:
+            seconds = HelperFunctions.parseRecordingDuration(config.get('general', 'measure_seconds', fallback='2'))
+        except ValueError as error:
+            ap.error(f'measure_seconds in the config: {error}')
+    if args.analyze:                    # Unknown analyses fail before the target is flashed
+        from analysis.__main__ import available_analyses
+        unknown = [a for a in args.analyze if a not in available_analyses()]
+        if unknown:
+            ap.error(f"unknown analysis: {', '.join(unknown)} (see python src/analysis --list)")
+
+    problem = HelperFunctions.picoTraceProblem(elf)
+    if problem is not None:             # Checked before a folder is created or the probe is touched
+        HelperFunctions.printState(problem[0], info=problem[1])
+        return 1
+    folder = os.path.abspath(args.output) if args.output else HelperFunctions.newRecordingFolder(PLATFORM, args.name or name)
+    if os.path.exists(os.path.join(folder, 'raw_buffer0.txt')):
+        HelperFunctions.printState('ERROR recording exists', info=folder + ' already contains a recording, choose another folder')
+        return 1
+
+    probe, target, frequency = recorder_settings(config, args.probe, args.target, args.frequency)
+    HelperFunctions.printState('Recording', info=f'{name} for {seconds:g} s -> {folder}')
+    files = [os.path.join(folder, f'raw_buffer{core}.txt') for core in range(NUM_CORES)]
+    try:
+        result = record_data(elf, probe, target, frequency, seconds, *files)
+    except KeyboardInterrupt:
+        HelperFunctions.printState('ERROR recording interrupted', info=f'the partial recording is in {folder}')
+        return 130
+    except Exception as error:          # One line for the user, the traceback in record_error.log
+        HelperFunctions.reportError('Recording failed', error, folder, 'record_error.log', HelperFunctions.recordHint(error),
+                                    context=f'Program: {elf}\nPlatform: {PLATFORM}\nRecording: {folder}')
+        return 1
+    if result != 0:
+        return result
+    HelperFunctions.printState('Recorded', info=folder)
+    if args.csv or args.analyze is not None:
+        return postprocess(folder, args.csv, args.analyze, config)
+    return 0
+
+
+def duration_arg(value):
+    try:
+        return HelperFunctions.parseRecordingDuration(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from None
 
 
 if __name__ == "__main__":

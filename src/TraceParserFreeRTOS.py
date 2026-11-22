@@ -725,16 +725,18 @@ def readRecording(folder, numCores, *, strict=False, writeEvents=True):
     return tasks, list(lastReport.get('warnings', []))
 
 
+def reportedWarnings(warnings):
+    """The warnings shown to the user: debugger-stopped captures normally omit the optional target END event."""
+    return [w for w in warnings if not w.endswith(': no END marker; coverage ends at its last decoded event')]
+
+
 def loadRecording(gui, numCores):
     import HelperFunctions
     import DataExport
     config = HelperFunctions.readConfig()
     tasks, warnings = readRecording(gui.viewingFolder, numCores,
                                     strict=config.getboolean('general', 'strict', fallback=False))
-    for warning in warnings:
-        # Debugger-stopped captures normally omit the optional target END event.
-        if warning.endswith(': no END marker; coverage ends at its last decoded event'):
-            continue
+    for warning in reportedWarnings(warnings):
         HelperFunctions.printState('Warning', info=warning)
     DataExport.exportData(gui, tasks, overwrite=True)
     return tasks

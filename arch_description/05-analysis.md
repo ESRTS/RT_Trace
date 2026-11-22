@@ -15,7 +15,7 @@ the GUI, both command lines and `DataExport.exportData()` drive the same runner.
 | `registry.py` | Built-in analyses first, then plugin folders (`[analysis] plugin_folders`); `DEFAULT`. |
 | `recording.py` | Context from parsed tasks (GUI) or from a recording folder (CLI). |
 | `builtin/` | `statistics`, `deadline_misses`, `response_times`, `preemptions`. |
-| `__main__.py` | `python src/analysis`; also used by `python src/simulator --analyze`. |
+| `__main__.py` | `python src/analysis`; `run_named()` also serves `--analyze` of the simulator and recorder CLIs. |
 
 **Flow.** After loading, `exportData()` writes the per-task CSVs and runs
 `DEFAULT` (only `statistics`). **Analyze** runs the selected analysis in a worker

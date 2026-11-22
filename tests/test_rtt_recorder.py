@@ -254,6 +254,13 @@ class RecorderTests(unittest.TestCase):
         self.mocks[1].assert_not_called()
         self.assertFalse(any(path.exists() for path in self.files))
 
+    def test_missing_probe_is_reported_instead_of_waiting(self):
+        self.mocks[0].return_value = None
+        self.assertEqual(self.record(), 1)
+        self.assertIs(self.mocks[0].call_args.kwargs['blocking'], False)
+        self.mocks[1].assert_not_called()                   # Nothing flashed
+        self.assertFalse(any(path.exists() for path in self.files))
+
     def test_missing_secondary_core_does_not_program(self):
         del self.target.cores[1]
         self.assertEqual(self.record(), 1)
@@ -340,6 +347,127 @@ class RecorderTests(unittest.TestCase):
         gui.btn_recordTrace.configure.assert_called_once_with(state='normal', text='Record Trace')
         gui.updateTraceViewOptions.assert_called_once()
         gui.load_function.assert_not_called()
+
+
+class CommandLineTests(unittest.TestCase):
+    """main(): program resolution, checks before flashing, folders and the steps after recording."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.temp = Path(temp.name)
+        sys.path.insert(0, str(ROOT / 'src'))
+        self.addCleanup(sys.path.remove, str(ROOT / 'src'))
+        import HelperFunctions
+        self.helper = HelperFunctions
+        self.project = self.temp / 'projects' / 'Demo'
+        (self.project / 'build').mkdir(parents=True)
+        self.elf = self.project / 'build' / 'Demo.elf'
+        self.elf.write_bytes(b'elf')
+        config = configparser.ConfigParser()
+        config.read_dict({'general': {'measure_seconds': '1.5', 'frequency': '2000000', 'probe': 'ABC'}})
+        patches = [patch.object(recorder, 'HelperFunctions', HelperFunctions),
+                   patch.object(HelperFunctions, 'readConfig', return_value=config),
+                   patch.object(HelperFunctions, 'getProjectPath', return_value=str(self.temp / 'projects')),
+                   patch.object(HelperFunctions, 'getCwd', return_value=str(self.temp / 'src')),
+                   patch.object(HelperFunctions, 'picoTraceProblem', return_value=None)]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def main(self, *argv, record=None):
+        out = io.StringIO()
+        with patch.object(recorder, 'record_data', side_effect=record or (lambda *a: 0)) as mock, redirect_stdout(out):
+            try:
+                code = recorder.main(list(argv))
+            except SystemExit as exit:
+                code = exit.code
+        return code, mock, out.getvalue()
+
+    def test_program_resolution(self):
+        self.assertEqual(recorder.resolve_program(str(self.project)), (str(self.elf), 'Demo'))
+        self.assertEqual(recorder.resolve_program('Demo'), (str(self.elf), 'Demo'))       # Name in project_path
+        self.assertEqual(recorder.resolve_program(str(self.elf)), (str(self.elf), 'Demo'))
+        with self.assertRaisesRegex(ValueError, 'not an ELF file'):
+            recorder.resolve_program('Missing')
+
+    def test_default_folder_duration_and_settings_from_config(self):
+        code, record, out = self.main('Demo')
+        self.assertEqual(code, 0)
+        elf, probe, target, frequency, seconds, *files = record.call_args.args
+        self.assertEqual((elf, probe, target, frequency, seconds), (str(self.elf), 'ABC', 'rp2350', 2000000, 1.5))
+        folder = Path(files[0]).parent
+        self.assertEqual(folder.parent, self.temp / 'data' / 'Pico2_FreeRTOS')
+        self.assertTrue(folder.name.startswith('Demo_'))
+        self.assertEqual([Path(f).name for f in files], ['raw_buffer0.txt', 'raw_buffer1.txt'])
+        self.assertIn('=> RECORDED', out)
+
+    def test_options_override_the_config(self):
+        code, record, _ = self.main(str(self.elf), '0.25', '-o', str(self.temp / 'out'), '--probe', 'XYZ',
+                                    '--frequency', '0x100000', '--target', 'rp2040')
+        self.assertEqual(code, 0)
+        self.assertEqual(record.call_args.args[1:5], ('XYZ', 'rp2040', 0x100000, 0.25))
+        self.assertEqual(record.call_args.args[5], str(self.temp / 'out' / 'raw_buffer0.txt'))
+        _, record, _ = self.main('Demo', '-n', 'Run')
+        self.assertTrue(Path(record.call_args.args[5]).parent.name.startswith('Run_'))
+
+    def test_checks_before_flashing(self):
+        with patch.object(self.helper, 'picoTraceProblem', return_value=('ERROR no tracing', 'hint')):
+            code, record, out = self.main('Demo', '1', '-o', str(self.temp / 'out'))
+        self.assertEqual(code, 1)
+        record.assert_not_called()
+        self.assertFalse((self.temp / 'out').exists())
+        self.assertIn('=> ERROR NO TRACING hint', out)
+
+        existing = self.temp / 'existing'
+        existing.mkdir()
+        (existing / 'raw_buffer0.txt').write_bytes(b'old')
+        code, record, out = self.main('Demo', '1', '-o', str(existing))
+        self.assertEqual(code, 1)
+        record.assert_not_called()
+        self.assertEqual((existing / 'raw_buffer0.txt').read_bytes(), b'old')
+
+        for argv in (('Missing', '1'), ('Demo', '0'), ('Demo', '1', '--analyze', 'nothing')):
+            with patch('sys.stderr', io.StringIO()):
+                code, record, _ = self.main(*argv)
+            self.assertEqual(code, 2, argv)
+            record.assert_not_called()
+
+    def test_recording_errors(self):
+        def fail(*args):
+            raise RuntimeError('probe lost')
+        code, _, out = self.main('Demo', '1', '-o', str(self.temp / 'out'), record=fail)
+        self.assertEqual(code, 1)
+        self.assertIn('=> ERROR RECORDING FAILED RuntimeError: probe lost', out)
+        self.assertTrue((self.temp / 'out' / 'record_error.log').is_file())
+
+        def interrupt(*args):
+            raise KeyboardInterrupt
+        self.assertEqual(self.main('Demo', '1', '-o', str(self.temp / 'out2'), record=interrupt)[0], 130)
+        code, _, out = self.main('Demo', '1', '--csv', record=lambda *a: 1)
+        self.assertEqual(code, 1)
+        self.assertNotIn('CSV', out)
+
+    def test_csv_and_analyses_after_recording(self):
+        def capture(elf, probe, target, frequency, seconds, *files):      # The example trace instead of a target
+            for core, path in enumerate(files):
+                Path(path).parent.mkdir(parents=True, exist_ok=True)
+                Path(path).write_bytes((ROOT / 'examples/freertos_smp' / f'raw_buffer{core}.txt').read_bytes())
+            return 0
+        folder = self.temp / 'rec'
+        code, _, out = self.main('Demo', '1', '-o', str(folder), '--csv', '--analyze', 'deadline_misses',
+                                 record=capture)
+        self.assertEqual(code, 0)
+        self.assertTrue((folder / 'events.txt').is_file())
+        self.assertTrue((folder / 'Control.csv').is_file())
+        self.assertIn('=> DEADLINE MISSES 1 late job(s)', out)
+        self.assertTrue((folder / 'analysis' / 'deadline_misses.csv').is_file())
+
+        folder = self.temp / 'rec2'
+        code, _, out = self.main('Demo', '1', '-o', str(folder), '--analyze', record=capture)
+        self.assertEqual(code, 0)
+        self.assertIn('=> TASK STATISTICS', out)
+        self.assertFalse((folder / 'Control.csv').exists())
 
 
 if __name__ == '__main__':

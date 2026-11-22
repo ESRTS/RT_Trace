@@ -41,6 +41,23 @@ On Windows, activate with `.venv\Scripts\activate`.
 Recordings are stored in `data/Pico2_FreeRTOS/<name>_<timestamp>/`.
 `raw_buffer0.txt` and `raw_buffer1.txt` contain binary data despite their extension.
 
+The recorder also runs without the GUI. It takes the program and the duration in
+seconds:
+
+```sh
+python src/RttTraceRecorder.py MyProject 2           # a project in project_path
+python src/RttTraceRecorder.py path/to/MyProject 0.5 --csv --analyze deadline_misses
+python src/RttTraceRecorder.py build/MyProject.elf -o out/rec
+```
+
+The program can be a project folder (`build/<name>.elf`), a project name in
+`project_path`, or an ELF file. The duration defaults to `measure_seconds`. The
+recording goes to the same folder as from the GUI, so it appears under
+**View Trace**; `-o` sets another folder and `-n` another recording name.
+`--csv` writes `events.txt` and the per-task CSVs, as loading does; `--analyze`
+runs [analyses](#analyze-a-trace). `--probe`, `--target` and `--frequency`
+override the config. The ELF is checked before the probe is used.
+
 ## Simulate a task set
 
 The **Simulator** platform schedules a task set on the host instead of recording
@@ -170,6 +187,7 @@ example. Analyses also run without the GUI:
 python src/analysis --list
 python src/analysis data/Simulator/<recording> deadline_misses response_times
 python src/simulator taskset.json 0.2 --analyze deadline_misses
+python src/RttTraceRecorder.py MyProject 2 --analyze deadline_misses
 ```
 
 ## Settings and development

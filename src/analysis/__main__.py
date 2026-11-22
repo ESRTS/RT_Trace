@@ -67,6 +67,20 @@ def analyze(recording, names=(), plugins=(), run_all=False, taskset=None):
     print(f'{ctx.platform}: {len(ctx.tasks)} rows, {ctx.cores} core(s), {ctx.trace_end / 1000:g} ms -> {ctx.folder}')
     for warning in ctx.warnings:
         print(f'warning: {warning}', file=sys.stderr)
+    return run_named(ctx, names, available=available)
+
+
+def run_named(ctx, names=(), plugins=(), run_all=False, available=None):
+    """
+    Run analyses by name on an AnalysisContext (names empty: the default analyses) and print the results.
+    Returns the exit code: 0, 1 (an analysis failed) or 2 (unknown analysis).
+    """
+    available = available or available_analyses(plugins)
+    names = list(available) if run_all else (list(names) or list(analysis.DEFAULT))
+    unknown = [name for name in names if name not in available]
+    if unknown:
+        print(f"error: unknown analysis: {', '.join(unknown)} (see python src/analysis --list)", file=sys.stderr)
+        return 2
     ok = True
     for name in names:
         print()
