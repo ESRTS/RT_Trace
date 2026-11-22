@@ -89,7 +89,8 @@ simulated time in seconds and writes `sim_trace.jsonl` (`-o` sets another path):
 python src/simulator path/to/taskset.json 0.2 -o out/sim_trace.jsonl
 ```
 
-To view such a trace, put it as `data/Simulator/<name>/sim_trace.jsonl`. It then
+`--csv` also writes the per-task CSV files next to the trace, as loading in
+the GUI does. To view such a trace, put it as `data/Simulator/<name>/sim_trace.jsonl`. It then
 appears under **View Trace** for the Simulator platform.
 
 See the
@@ -133,7 +134,11 @@ startup trace with IRQ tracing enabled; otherwise it uses the first event.
 Both fallback origins are reported as estimates.
 
 Loading writes `events.txt` and per-task CSVs into the recording folder. CSV
-times are in microseconds. PDFs go to `output/<platform>/<recording>/`.
+times are in microseconds. Each job row ends with `Deadline_us`, the deadline
+the trace view uses, and `DeadlineEstimated`. A 1 means the deadline time is
+estimated, or is the next job's release because the parser sets no deadlines
+(Linux). Both cells are empty if the deadline is unknown. PDFs go to
+`output/<platform>/<recording>/`.
 Optional `job_policy.json` overrides inference; see the
 [task/job architecture](arch_description/03-task-builder.md).
 

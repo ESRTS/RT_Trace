@@ -3,6 +3,7 @@ Command-line entry point: simulate a task set and write the JSON-lines trace.
 
     python src/simulator taskset.json 0.2                  # from the repository root
     python src/simulator taskset.json 0.2 -o out/trace.jsonl
+    python src/simulator taskset.json 0.2 --csv            # also one CSV per task next to the trace
     python -m simulator taskset.json 0.2                   # with src on the Python path
 """
 import argparse
@@ -10,8 +11,9 @@ import math
 import os
 import sys
 
-if not __package__:                         # Run as a folder (python src/simulator): make the package importable
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SRC = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if SRC not in sys.path:                     # Run as a folder (python src/simulator): make src importable
+    sys.path.insert(0, SRC)
 
 from simulator import TaskSetError, get_policy, load_taskset, simulate
 from simulator import trace_format as fmt
@@ -33,6 +35,8 @@ def main(argv=None):
     parser.add_argument('duration', type=seconds, help='simulated time in seconds, e.g. 0.2')
     parser.add_argument('-o', '--output', default=fmt.TRACE_FILE,
                         help=f'trace file to write (default: {fmt.TRACE_FILE} in the current directory)')
+    parser.add_argument('--csv', action='store_true',
+                        help='also write one CSV file per task (as the GUI does) into the folder of the trace')
     args = parser.parse_args(argv)
 
     horizon = max(1, round(args.duration * 1_000_000))
@@ -46,6 +50,22 @@ def main(argv=None):
         return 1
     print(f"{len(taskset.tasks)} tasks, {taskset.cores} core(s), scheduler '{taskset.scheduler}', "
           f"{args.duration:g} s simulated -> {args.output}")
+    if args.csv:
+        return export_csv(args.output)
+    return 0
+
+
+def export_csv(trace_path):
+    """Write the per-task CSV files of a trace into its folder, with the same code as the GUI."""
+    import DataExport
+    from TraceParserSim import SimTraceError, read_trace
+    try:
+        _, tasks, _ = read_trace(trace_path)
+        written = DataExport.exportCsvFiles(os.path.dirname(os.path.abspath(trace_path)), tasks, overwrite=True)
+    except (SimTraceError, OSError) as error:
+        print(f'error: CSV export failed: {error}', file=sys.stderr)
+        return 1
+    print(f'{len(written)} CSV file(s) -> {os.path.dirname(os.path.abspath(trace_path))}')
     return 0
 
 

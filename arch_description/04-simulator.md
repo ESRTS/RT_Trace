@@ -66,6 +66,8 @@ so jobs are created directly rather than via `TraceTask.newJob()`.
 **Command line.** `simulator/__main__.py`: `python src/simulator taskset.json
 <seconds> [-o file]` (or `python -m simulator` with `src` on the path). It validates
 before writing anything; exit code 1 for an invalid task set, 2 for bad arguments.
+`--csv` writes the per-task CSVs next to the trace via `DataExport.exportCsvFiles()`,
+which needs no GUI modules (`printStatistics()` alone imports `HelperFunctions`).
 
 **GUI.** Target `Simulator` in `RT-Trace.py`. `programCheckFunc` lists folders
 with `taskset.json` in the project folder; `pathValidationFunc` validates the task

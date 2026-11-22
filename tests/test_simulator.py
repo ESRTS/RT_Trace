@@ -235,6 +235,16 @@ class CommandLine(unittest.TestCase):
             self.assertIn("needs a 'priority'", result.stderr)
             self.assertFalse(out.parent.exists())
 
+    def test_csv_option(self):
+        with tempfile.TemporaryDirectory() as folder:
+            out = Path(folder) / 'trace.jsonl'
+            result = self.simulate(self.EXAMPLE, 0.02, '-o', out, '--csv')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(sorted(p.name for p in Path(folder).glob('*.csv')),
+                             ['Comm.csv', 'Control.csv', 'Logger.csv', 'Sensor.csv'])
+            header = (Path(folder) / 'Control.csv').read_text().splitlines()[0]
+            self.assertTrue(header.endswith('Deadline_us,DeadlineEstimated'))
+
     def test_invalid_duration(self):
         result = self.simulate(self.EXAMPLE, 0)
         self.assertEqual(result.returncode, 2)
