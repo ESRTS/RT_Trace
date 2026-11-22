@@ -15,33 +15,13 @@ Column  Data
 All times are in microseconds. The deadline is the one the trace view uses (see jobDeadline()).
 
 exportCsvFiles() only writes files and needs no GUI modules, so tools such as the simulator's
-command line can use it. printStatistics() prints to the GUI output box and imports HelperFunctions.
+command line can use it. exportData() also runs the default analyses (src/analysis), which print the
+task statistics.
 '''
 from pathlib import Path
 from TraceTask import *
 import os
 import csv
-
-def getLastActivity(tasks):
-    """
-    Get the last activity of any of the tasks to compute the utilization time.
-    """
-    maxActivity = 0
-
-    for task in tasks:
-        for job in task.jobs:
-            if len(job.execIntervals) > 0:
-                lastActivity = job.execIntervals[-1].stop
-                if maxActivity < lastActivity:
-                    maxActivity = lastActivity
-    return maxActivity
-
-
-def msString(time_us):
-    """
-    Formats a time in us as ms, or "-" if there is none (no job of the task finished in the trace).
-    """
-    return "-" if time_us is None else f"{time_us / 1000:.3f}"
 
 def jobDeadline(task, index):
     """
@@ -91,30 +71,11 @@ def exportCsvFiles(destFolder, tasks, overwrite=False):
 
 def exportData(gui, tasks, overwrite=False):
     """
-    Export the CSV files into the folder of the loaded trace, then print the statistics in the GUI.
+    Export the CSV files into the folder of the loaded trace, then run the default analyses (the task
+    statistics), which print into the GUI output box.
     """
     exportCsvFiles(gui.viewingFolder, tasks, overwrite)
-    printStatistics(tasks)
-
-def printStatistics(tasks):
-    """
-    Print the observed parameters of each task in the GUI output box.
-    """
-    import HelperFunctions      # GUI module, imported here so the CSV export works without it
-
-    maxName = len('Task')
-    for task in tasks:
-        if len(task.name) > maxName:
-            maxName = len(task.name)
-
-    HelperFunctions.printState("Tasks", info="(times in ms, the maximum over all jobs)")
-
-    lastActivity = getLastActivity(tasks)
-
-    print(f"\n  {'Task':<{maxName}}  {'Response':>10}  {'Execution':>10}  {'Utilization':>11}")
-    print("  " + "-" * (maxName + 37))
-    for task in tasks:
-        rt = msString(task.getMaxResponseTime())
-        wcet = msString(task.getMaxExecutionTime())
-        util = task.getUtilization(lastActivity) * 100
-        print(f"  {task.name:<{maxName}}  {rt:>10}  {wcet:>10}  {util:>10.2f}%")
+    import analysis
+    target = gui.targets[gui.selectedTarget] if hasattr(gui, 'targets') else {}
+    analysis.run_defaults(analysis.context_for_tasks(tasks, gui.viewingFolder, target.get('name'),
+                                                     target.get('numCores')))

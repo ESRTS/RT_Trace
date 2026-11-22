@@ -287,6 +287,15 @@ def getProjectPath():
         return os.path.abspath(projectPath)
     return resolved
 
+def getAnalysisPluginFolders():
+    """
+    The folders with analysis plugins ([analysis] plugin_folders in the config). Relative folders are
+    resolved against the RT_Trace folder, as project_path.
+    """
+    import analysis
+    rtTraceFolder = os.path.dirname(os.path.dirname(getConfigFilePath()))   # <RT_Trace>/Resources/config.ini
+    return analysis.plugin_folders(readConfig(), rtTraceFolder)
+
 def getPossiblePrograms(isProgram=None):
     """
     The function searches all projects found in the project folder.

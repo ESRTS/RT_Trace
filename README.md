@@ -142,6 +142,36 @@ estimated, or is the next job's release because the parser sets no deadlines
 Optional `job_policy.json` overrides inference; see the
 [task/job architecture](arch_description/03-task-builder.md).
 
+## Analyze a trace
+
+After loading, the output panel shows the task statistics. Use **Analyze** below
+**Export View to PDF** to run another analysis on all rows of the loaded trace:
+
+- **Deadline misses**: late jobs per task and their lateness.
+- **Response times**: min/avg/max response, jitter and start delay.
+- **Preemptions and migrations**: per task and job.
+
+Results appear in the output panel. Tables are also saved as CSV in
+`<recording>/analysis/`.
+
+You can add your own analyses as Python plugins in a folder outside the
+repository. Set it in `Resources/config.local.ini`:
+
+```ini
+[analysis]
+plugin_folders = ~/rt-trace-plugins
+```
+
+The [plugin guide](src/analysis/README.md) explains the interface;
+[examples/analysis_plugins](examples/analysis_plugins) has a per-core load
+example. Analyses also run without the GUI:
+
+```sh
+python src/analysis --list
+python src/analysis data/Simulator/<recording> deadline_misses response_times
+python src/simulator taskset.json 0.2 --analyze deadline_misses
+```
+
 ## Settings and development
 
 Put overrides in `Resources/config.local.ini`; defaults are in

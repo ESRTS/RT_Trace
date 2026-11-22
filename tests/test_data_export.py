@@ -92,15 +92,17 @@ class Split(unittest.TestCase):
             self.assertEqual(len(Export.exportCsvFiles(folder, [task], overwrite=True)), 1)
 
     def test_export_data_still_prints_statistics(self):
-        helper = types.ModuleType('HelperFunctions')
-        helper.printState = unittest.mock.Mock()
+        # The statistics are now the default analysis; no other analysis runs after loading.
         task = TraceTask(1, 'T', 1, '#000')
         job(task, 0, 0, 0, 3, deadline=10)
-        with tempfile.TemporaryDirectory() as folder, patch.dict(sys.modules, {'HelperFunctions': helper}), \
-                patch('builtins.print'):
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as folder, patch.dict(sys.modules, {'HelperFunctions': None}), \
+                patch('sys.stdout', output):
             Export.exportData(types.SimpleNamespace(viewingFolder=folder), [task], overwrite=True)
             self.assertTrue((Path(folder) / 'T.csv').is_file())
-        helper.printState.assert_called_once()
+            self.assertFalse((Path(folder) / 'analysis').exists())
+        self.assertIn('=> TASK STATISTICS', output.getvalue())
+        self.assertNotIn('DEADLINE MISSES', output.getvalue())
 
 
 if __name__ == '__main__':

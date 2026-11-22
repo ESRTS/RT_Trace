@@ -713,19 +713,25 @@ def parser(buffers, event_file_path=None, *, strict=False, policy=None, elf_path
     return events_to_tasks(recording, policy, strict, elf_path)
 
 
-def loadRecording(gui, numCores):
-    import HelperFunctions
-    import DataExport
-    folder = Path(gui.viewingFolder)
-    config = HelperFunctions.readConfig()
+def readRecording(folder, numCores, *, strict=False, writeEvents=True):
+    """Parse the recording in folder without GUI modules. Returns (tasks, warnings)."""
+    folder = Path(folder)
     buffers = [(folder / f'raw_buffer{core}.txt').read_bytes() for core in range(numCores)]
     policy_path = folder / 'job_policy.json'
     policy = JobPolicy.from_dict(json.loads(policy_path.read_text())) if policy_path.exists() else JobPolicy()
     elf = next((p for p in (folder / 'firmware.elf', folder / 'trace.elf') if p.exists()), None)
-    tasks = parser(buffers, folder / 'events.txt',
-                   strict=config.getboolean('general', 'strict', fallback=False),
-                   policy=policy, elf_path=elf)
-    for warning in lastReport.get('warnings', []):
+    tasks = parser(buffers, folder / 'events.txt' if writeEvents else None,
+                   strict=strict, policy=policy, elf_path=elf)
+    return tasks, list(lastReport.get('warnings', []))
+
+
+def loadRecording(gui, numCores):
+    import HelperFunctions
+    import DataExport
+    config = HelperFunctions.readConfig()
+    tasks, warnings = readRecording(gui.viewingFolder, numCores,
+                                    strict=config.getboolean('general', 'strict', fallback=False))
+    for warning in warnings:
         # Debugger-stopped captures normally omit the optional target END event.
         if warning.endswith(': no END marker; coverage ends at its last decoded event'):
             continue

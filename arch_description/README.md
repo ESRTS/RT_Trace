@@ -8,6 +8,8 @@ when contracts or assumptions change.
 [stage 2](03-task-builder.md) → `TraceTask`/jobs → visualization/export.
 [Simulator](04-simulator.md): task set → JSON-lines trace → `TraceTask`/jobs,
 separate from the FreeRTOS stages.
+[Analysis](05-analysis.md): `TraceTask`/jobs → statistics and plugin results, for
+all platforms.
 
 **Goals and rationale.**
 

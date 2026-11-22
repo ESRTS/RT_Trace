@@ -12,6 +12,7 @@ from TraceParserFreeRTOS import parseTraceFiles
 from TraceParserLinux import parseTraceFiles as linuxParseTraceFiles
 from TraceParserSim import parseTraceFiles as simParseTraceFiles
 import SimulatorRecorder
+import analysis
 from pathlib import Path
 import subprocess
 import os
@@ -87,7 +88,7 @@ class TraceApp(customtkinter.CTk):
 
         ''' Create a frame for each main GUI area. '''
         self.sidebar_frame = customtkinter.CTkFrame(self.hpaned, width=140, corner_radius=10)
-        self.sidebar_frame.grid_rowconfigure(12, weight=1)
+        self.sidebar_frame.grid_rowconfigure(15, weight=1)    # The row selector takes the remaining height
         self.sidebar_frame.grid_columnconfigure(0, weight=1)    # The widgets follow the sidebar width
 
         ''' Split the right side into the trace view and the output box. The separator can be dragged. '''
@@ -190,11 +191,22 @@ class TraceApp(customtkinter.CTk):
         self.btn_saveTrace = customtkinter.CTkButton(self.sidebar_frame, text="Export View to PDF", command=self.save_image_function, corner_radius=default_corner_radius)
         self.btn_saveTrace.grid(row=11, column=0, padx=20, pady=5, sticky="ew")
 
+        ''' Analysis of the loaded trace: built-in analyses and plugins (src/analysis/README.md). '''
+        self.loadedTrace = None         # (tasks, folder, platform, cores) of the loaded trace, for the analyses
+        self.analysisLabels = {}        # Dropdown label -> analysis name
+        self.lbl_analysis = customtkinter.CTkLabel(self.sidebar_frame, text="Analyze", font=customtkinter.CTkFont(size=15, weight="bold"), anchor="w")
+        self.lbl_analysis.grid(row=12, column=0, padx=(0, 0), pady=(10, 0))
+        self.opt_analysis = customtkinter.CTkOptionMenu(self.sidebar_frame, values=[a.title for a in analysis.BUILTIN], corner_radius=default_corner_radius)
+        self.opt_analysis.grid(row=13, column=0, padx=20, pady=(0, 5), sticky="ew")
+        self.btn_runAnalysis = customtkinter.CTkButton(self.sidebar_frame, text="Run Analysis", command=self.runAnalysis_function, corner_radius=default_corner_radius)
+        self.btn_runAnalysis.grid(row=14, column=0, padx=20, pady=5, sticky="ew")
+        self.btn_runAnalysis.configure(state="disabled")    # Enabled once a trace is loaded
+
         self.taskSelector = TraceRowSelector(
             self.sidebar_frame, command=self.updateTaskVisibility,
             width=150, height=100, corner_radius=default_corner_radius,
             label_font=customtkinter.CTkFont(size=15, weight="bold"))
-        self.taskSelector.grid(row=12, column=0, padx=10, pady=(10, 15), sticky="nswe")
+        self.taskSelector.grid(row=15, column=0, padx=10, pady=(10, 15), sticky="nswe")
         
         ''' Textbox to display stdout. '''
         monospaceFamily = tkinter.font.nametofont("TkFixedFont").actual("family")   # The platform's default monospace font
@@ -254,6 +266,7 @@ class TraceApp(customtkinter.CTk):
         ''' Print the requirement string for the initially selected target. '''
         print(self.targets[self.selectedTarget].get('requirement_str'))
         self.refreshProgramList()
+        self.refreshAnalysisList(report=True)     # Reports plugins that cannot be loaded
 
         # If there is no existing trace to load, disable the buttons
         if len(existingTraces) > 0:
@@ -312,6 +325,10 @@ class TraceApp(customtkinter.CTk):
         self.btn_loadTrace.configure(state="normal", text="Load Trace")
         if tasks is None:
             return
+        target = self.targets[self.selectedTarget]
+        self.loadedTrace = (tasks, self.viewingFolder, target.get('name'), target.get('numCores'))
+        self.refreshAnalysisList()                  # Picks up plugins added since the start
+        self.btn_runAnalysis.configure(state="normal" if tasks else "disabled")
         self.traceView.setTasks(tasks)
         self.taskSelector.setTasks(tasks)
         if not tasks:
@@ -319,6 +336,62 @@ class TraceApp(customtkinter.CTk):
         else:
             self.fitTracePane()
         self.traceView.draw()
+
+    def clearLoadedTrace(self):
+        """
+        Empties the trace view, the row selection and the trace the analyses use.
+        """
+        self.loadedTrace = None
+        self.btn_runAnalysis.configure(state="disabled")
+        self.taskSelector.setTasks(None)
+        self.traceView.setTasks(None)
+        self.traceView.draw()
+
+    def refreshAnalysisList(self, report=False):
+        """
+        Finds the analyses (built-in and plugins of [analysis] plugin_folders) and updates the dropdown.
+        Plugin files are imported again, so edits take effect. Returns {name: analysis class}.
+        """
+        available, errors = analysis.discover(HelperFunctions.getAnalysisPluginFolders())
+        if report:
+            for error in errors:
+                HelperFunctions.printState("ERROR analysis plugin", info=error)
+        titles = [a.title or a.name for a in available.values()]
+        self.analysisLabels = {}
+        for name, analysisClass in available.items():
+            title = analysisClass.title or name
+            self.analysisLabels[title if titles.count(title) == 1 else f"{title} ({name})"] = name
+        labels = list(self.analysisLabels)
+        self.opt_analysis.configure(values=labels)
+        if self.opt_analysis.get() not in labels:
+            self.opt_analysis.set(labels[0])
+        return available
+
+    def runAnalysis_function(self):
+        """
+        Callback of the "Run Analysis" button: runs the selected analysis on the loaded trace in a background thread.
+        """
+        if self.loadedTrace is None:
+            HelperFunctions.printState("No trace loaded!")
+            return
+        HelperFunctions.printHeader("analysis")
+        label = self.opt_analysis.get()
+        available = self.refreshAnalysisList(report=True)
+        analysisClass = available.get(self.analysisLabels.get(label))
+        if analysisClass is None:
+            HelperFunctions.printState("ERROR analysis not found", info=label)
+            return
+        tasks, folder, platform, cores = self.loadedTrace
+
+        def run(gui):
+            ctx = analysis.context_for_tasks(tasks, folder, platform, cores)
+            analysis.run_analysis(analysisClass, ctx)
+
+        self.btn_runAnalysis.configure(state="disabled", text="Running...")
+        HelperFunctions.startWorker(self, run, self.analysisFinished)
+
+    def analysisFinished(self, result=None):
+        self.btn_runAnalysis.configure(state="normal" if self.loadedTrace is not None else "disabled", text="Run Analysis")
 
     def updateTaskVisibility(self, tasks):
         self.traceView.setVisibleTasks(tasks)
@@ -594,9 +667,7 @@ class TraceApp(customtkinter.CTk):
         self.textbox.configure(state=customtkinter.DISABLED)
 
         # Reset the trace view
-        self.taskSelector.setTasks(None)
-        self.traceView.setTasks(None)
-        self.traceView.draw()
+        self.clearLoadedTrace()
 
         # Finalize the new platform target
         if self.targets[self.selectedTarget].get('implemented') is True:    # Make sure only to load from supported targets
@@ -636,9 +707,7 @@ class TraceApp(customtkinter.CTk):
         self.textbox.configure(state=customtkinter.DISABLED)
 
         # Reset the trace view
-        self.taskSelector.setTasks(None)
-        self.traceView.setTasks(None)
-        self.traceView.draw()
+        self.clearLoadedTrace()
 
     def save_image_function(self):
         """
