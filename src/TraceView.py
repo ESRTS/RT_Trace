@@ -72,6 +72,7 @@ class TraceView(customtkinter.CTkCanvas):
         # Height of the time labels: they use the canvas default font, which the GUI scaled before creating the view
         self.labelLinespace_px = tkinter.font.nametofont("TkDefaultFont", root=self).metrics("linespace")
         self.axisItems = []                                     # Canvas items of the time axis, redrawn when the rows scroll
+        self.axisTicks = []                                     # (x, label) of the time ticks, set by drawTicks()
 
         self.ctk_textbox_scrollbar = customtkinter.CTkScrollbar(self, command=self.yview)
         self.ctk_textbox_scrollbar.place(relx=1,rely=0,relheight=1,anchor='ne')
@@ -143,11 +144,15 @@ class TraceView(customtkinter.CTkCanvas):
             self.zoomMin = 0
             self.clearTrace()
 
-    def setVisibleTasks(self, tasks):
-        """Change displayed rows while retaining the loaded trace's time/core scale."""
+    def setVisibleTasks(self, tasks, draw=True):
+        """
+        Change displayed rows while retaining the loaded trace's time/core scale. draw=False only sets the rows
+        (the caller draws): scrolling redraws the time axis, which needs the ticks of a draw.
+        """
         self.tasks = list(tasks)
-        self.yview_moveto(0)
-        self.draw()
+        if draw:
+            self.yview_moveto(0)
+            self.draw()
 
     def clearTrace(self):
         """

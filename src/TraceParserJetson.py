@@ -30,6 +30,7 @@ All times of the rows are integer nanoseconds (timeunits.py) relative to the tim
 from bisect import bisect_right
 from dataclasses import dataclass, field
 import os
+import re
 import sqlite3
 
 from TraceTask import TraceTask, TraceJob, TraceInterval, ExecutionType
@@ -44,6 +45,9 @@ PLATFORM = 'Jetson Thor'
 _COLORS = ('#64ED9D', '#648FED', '#D4ED4C', '#ED7B64', '#8D64ED', '#E29578', '#006D77')
 _GPU_COLOR = '#9CCB5A'
 _THREAD_COLOR = '#B5B5B5'
+# Threads Nsight Systems injects into the profiled process: '[NSys]', '[NSys Comms]', '*2CommsProcessor' (its
+# internal threads are named '*<digit><name>') and the CUPTI worker. Their rows start hidden in the view.
+_NSYS_THREAD = re.compile(r'\[NSys|\*\d|CUPTI worker thread$')
 _EVENT_TYPES = {'NvtxMark': 34, 'NvtxThread': 39, 'NvtxPushPopRange': 59, 'NvtxStartEndRange': 60,
                 'NvtxDomainCreate': 75}     # Fallback if the export has no ENUM_NSYS_EVENT_TYPE table
 _GPU_TABLES = (('kernel', 'CUPTI_ACTIVITY_KIND_KERNEL'), ('memcpy', 'CUPTI_ACTIVITY_KIND_MEMCPY'),
@@ -264,12 +268,15 @@ def build_rows(export):
         warnings.append(f"{counters['unreleased']} job(s) have no next_release; their release is their start")
     tasks.sort(key=lambda task: (-(task.priority or 0), task.name))
 
-    gpu_rows, late = _gpu_rows(export, tasks, zero)
+    gpu_rows, late = _gpu_rows(export, tasks + others, zero)
     if late:
         warnings.append(f'{late} GPU operation(s) end after the job that launched them')
     _attach_waits(export, tasks, zero)
     info['gpus'] = sorted(set(export.gpus.values()))
     info['rows'] = {'tasks': len(tasks), 'gpu streams': len(gpu_rows), 'threads': len(others)}
+    hidden = sum(row.hiddenByDefault for row in others)
+    if hidden:
+        info['rows']['of them hidden (nsys)'] = hidden
     return tasks + gpu_rows + others, info, warnings
 
 
@@ -394,6 +401,7 @@ def _thread_row(gtid, export, intervals, end):
     task = TraceTask(thread_id(gtid), f'{_thread_name(gtid, export)} ({thread_id(gtid)})', None, _THREAD_COLOR)
     task.kind, task.traceFormat = 'thread', 3
     task.tid, task.pid = thread_id(gtid), process_id(gtid)
+    task.hiddenByDefault = is_nsys_thread(_thread_name(gtid, export))
     for number, (start, stop, core) in enumerate(intervals):
         job = TraceJob(task, number, start, None)
         _add_intervals(job, [(start, stop, core)])
@@ -403,6 +411,11 @@ def _thread_row(gtid, export, intervals, end):
             job.completionTime = stop
         task.jobs.append(job)
     return task
+
+
+def is_nsys_thread(name):
+    """True for the threads Nsight Systems adds to the profiled process."""
+    return _NSYS_THREAD.match(name) is not None
 
 
 def _job_at(task, time):
@@ -419,9 +432,12 @@ def _job_at(task, time):
     return None
 
 
-def _gpu_rows(export, tasks, zero):
-    """One row per (device, stream); each GPU operation is a job released at its launch call."""
-    by_thread = {task.tid: task for task in tasks}
+def _gpu_rows(export, threads, zero):
+    """
+    One row per (device, stream); each GPU operation is a job released at its launch call. launchedBy is the row
+    of the launching thread: a task, or a plain thread (without NVTX); only jobs of tasks get the GPU work.
+    """
+    by_thread = {task.tid: task for task in threads}
     rows, late = {}, 0
     for op in export.gpu_ops:
         key = op.device, op.stream
@@ -443,14 +459,14 @@ def _gpu_rows(export, tasks, zero):
             task = by_thread.get(thread_id(call[2]))
             if task is not None:
                 job.launchedBy = task
-                row.launchers.add(task.name)
-                owner = _job_at(task, launch)
+                row.launchers.add(task.name if task.kind == 'task' else f'{_thread_name(call[2], export)} {task.tid}')
+                owner = _job_at(task, launch) if task.kind == 'task' else None
                 if owner is not None:
                     owner.gpuWork.append(job)
                     late += owner.getFinishTime() < job.completionTime
         row.jobs.append(job)
     for row in rows.values():
-        if len(row.launchers) == 1:                 # Name the stream after the only task that uses it
+        if len(row.launchers) == 1:                 # Name the stream after the only thread that uses it
             row.name += f' ({next(iter(row.launchers))})'
     return [rows[key] for key in sorted(rows)], late
 

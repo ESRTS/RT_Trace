@@ -214,6 +214,27 @@ class Synthetic(unittest.TestCase):
         self.assertEqual([job.incomplete for job in helper.jobs], [False, True])     # Still running at the end
         self.assertEqual(intervals(early.jobs[0]), [(-ZERO, -8_000, 4)])               # Running since the start
 
+    def test_gpu_work_of_a_plain_thread(self):
+        n = scenario()
+        n.call(700_000, 705_000, 13, 9, 'cudaMemsetAsync_v3020').kernel(710_000, 720_000, 20, 9, 'memset')
+        rows = self.load(n)[0]
+        helper = next(row for row in rows if row.name == 'helper (13)')
+        stream = next(row for row in rows if row.kind == 'gpu' and row.stream == 20)
+        self.assertEqual(stream.name, 'GPU0 Stream 20 (helper 13)')
+        self.assertIs(stream.jobs[0].launchedBy, helper)
+        self.assertEqual(rows.index(stream), 3)                                     # Recorded order: tasks, GPU, threads
+
+    def test_nsys_threads_start_hidden(self):
+        n = scenario()
+        for tid, name in ((15, '[NSys]'), (16, '[NSys Comms]'), (17, '*2CommsProcesso'), (18, 'CUPTI worker thread'),
+                          (19, 'cuda-EvtHandlr')):
+            n.thread(tid, name).switch(1_000, 5, True, tid).switch(2_000, 5, False, tid)
+        rows, info, _ = self.load(n)
+        self.assertEqual([row.name for row in rows if getattr(row, 'hiddenByDefault', False)],
+                         ['[NSys] (15)', '[NSys Comms] (16)', '*2CommsProcesso (17)', 'CUPTI worker thread (18)'])
+        self.assertEqual(info['rows']['of them hidden (nsys)'], 4)
+        self.assertFalse(jetson.is_nsys_thread('Task_*2'))
+
     def test_missing_scheduling_and_clock(self):
         n = scenario(sched=False, schema=(3, 30))
         n.nvtx = [row for row in n.nvtx if row[4] != 'clock_sync']
@@ -259,7 +280,11 @@ class Example(unittest.TestCase):
                          {'Task_CpuA': (176, 20, 98), 'Task_GpuB': (88, 40, 97),
                           'Task_GpuA': (71, 50, 96), 'Task_CpuB': (36, 100, 95)})
         self.assertEqual([row.name for row in self.rows if row.kind == 'gpu'],
-                         ['GPU0 Stream 7', 'GPU0 Stream 13 (Task_GpuA)', 'GPU0 Stream 14 (Task_GpuB)'])
+                         ['GPU0 Stream 7 (gpuTasksExample 3573720)', 'GPU0 Stream 13 (Task_GpuA)',
+                          'GPU0 Stream 14 (Task_GpuB)'])
+        self.assertEqual([row.name for row in self.rows if getattr(row, 'hiddenByDefault', False)],
+                         ['[NSys] (3573732)', '[NSys Comms] (3573733)', '*2CommsProcesso (3573734)',
+                          'CUPTI worker thread (3573736)'])
         self.assertEqual((self.info['cpus'], self.info['clockSyncs']), (14, 20))
         self.assertEqual(len(self.warnings), 1)         # Only the Unified Memory note of nsys
         self.assertIn('Unified Memory', self.warnings[0])

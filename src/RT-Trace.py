@@ -335,8 +335,10 @@ class TraceApp(customtkinter.CTk):
         self.loadedTrace = (tasks, self.viewingFolder, target.get('name'), target.get('numCores'))
         self.refreshAnalysisList()                  # Picks up plugins added since the start
         self.btn_runAnalysis.configure(state="normal" if tasks else "disabled")
-        self.traceView.setTasks(tasks)
+        self.traceView.setTasks(tasks)             # All rows set the time and core scale
         self.taskSelector.setTasks(tasks)
+        if tasks:                                   # Rows hidden by default (nsys threads) are not shown
+            self.traceView.setVisibleTasks(self.taskSelector.visibleTasks(), draw=False)
         if not tasks:
             HelperFunctions.printState("ERROR no tasks", info="No task executed in this trace. The program may have stopped before the scheduler ran (a failed configASSERT, a fault); check it with the debugger.")
         else:

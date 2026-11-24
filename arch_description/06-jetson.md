@@ -36,8 +36,10 @@ GpuTasksExample (bpfTrace repository).
   (estimated), with warnings.
 - Rows: threads of the processes with NVTX or CUDA activity. Named threads with
   NVTX jobs are tasks (`kind` `task`, sorted by priority); the others
-  (`thread`) have one job per execution interval, like ISR rows. One `gpu` row
-  per (device, stream).
+  (`thread`) have one job per execution interval, like ISR rows; the threads
+  nsys injects (`[NSys…`, `*<digit>…`, `CUPTI worker thread`) get
+  `hiddenByDefault`, so the row selector starts with them unchecked. One `gpu`
+  row per (device, stream).
 - Jobs: the k-th range is job k, released at the k-th `next_release`,
   deadline = release + period (`deadlinesExplicit`). CPU intervals are clipped to
   the range. A release after the last job before the thread exits is a job that
@@ -46,7 +48,8 @@ GpuTasksExample (bpfTrace repository).
   with `outsideJob`, `incomplete` and `uncertain`, so statistics, CSVs and
   deadline checks ignore it.
 - GPU: each operation is a job of its stream row, released at its launch call
-  (`launchedBy`: the task row); interval core `GPU<device>` (the view uses the
+  (`launchedBy`: the row of the launching thread, a task or a plain thread; a
+  stream with one launcher is named after it); interval core `GPU<device>` (the view uses the
   row color, CPU-core analyses skip it). It joins `gpuWork` of the job whose range
   contains the launch; `gpuWaits` lists the waits for the GPU of a job. The
   preemption analysis does not count pauses during these waits.

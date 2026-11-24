@@ -246,6 +246,14 @@ class RowVisibilityTests(unittest.TestCase):
             self.assertTrue({task.name for task in self.tasks} <= self.labels())
             self.assertEqual(set(self.view.canvasItems), set(self.items))
 
+    def test_rows_set_before_the_first_draw(self):
+        # Loading a trace sets the visible rows before the first draw: no scrolling, which redraws the axis.
+        self.view.yview_moveto = Mock(side_effect=AssertionError('scrolled before the first draw'))
+        self.view.draw = Mock()
+        self.view.setVisibleTasks(self.tasks[:1], draw=False)
+        self.assertEqual(self.view.tasks, self.tasks[:1])
+        self.view.draw.assert_not_called()
+
     def test_filter_preserves_zoom_full_duration_and_core_colors(self):
         self.view.zoom(1)
         before = self.view.leftBound_tks, self.view.rightBound_tks, self.view.zoomMin

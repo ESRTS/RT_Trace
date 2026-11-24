@@ -122,9 +122,13 @@ Select **Pico2 FreeRTOS**, choose a recording under **View Trace**, then click
 Reselect the platform to refresh the recording list.
 
 Use the scrollable **Show in trace** checkboxes below the buttons to show or hide
-tasks, interrupts and scheduler rows. Changes redraw immediately and preserve
-the time view. All rows start checked when a trace loads. PDF export follows
-this selection; CSV exports retain all tasks.
+tasks, interrupts and scheduler rows. The menu at the top of the list orders the
+rows: as recorded, by priority, by name, by kind, or, for traces with GPU rows,
+each GPU stream below the task that launches it. The ▲/▼ buttons beside a row move
+it by one place; hidden rows keep their place. Changes redraw immediately and
+preserve the time view. All rows start checked and in the recorded order when a
+trace loads. PDF export follows this selection and order; CSV exports and
+analyses retain all tasks in the recorded order.
 
 To try the supplied example, copy the two `raw_buffer*.txt` files from
 [examples/freertos_smp](examples/freertos_smp/) into
@@ -179,8 +183,12 @@ has a row of its own, where each kernel starts at its launch call. Tasks and job
 come from NVTX annotations in the application: the thread name, the period,
 priority and release of each job, and one NVTX range per job (the contract is in
 [TraceParserJetson.py](src/TraceParserJetson.py) and the
-[Jetson architecture](arch_description/06-jetson.md)). Without them, threads
-are shown without jobs. Times are nanoseconds; the time zero is the common
+[Jetson architecture](arch_description/06-jetson.md)). Without them, any
+program can be loaded: each thread shows where it ran, each GPU stream is
+named after the thread that launches it, but there are no jobs, deadlines or
+analysis results, and the time zero is the start of the recording. The threads
+nsys adds to the program (`[NSys]`, `CUPTI worker thread`, …) start unchecked
+under **Show in trace**. Times are nanoseconds; the time zero is the common
 release of the tasks. [examples/jetsonThor](examples/jetsonThor) has a trace
 with two CPU and two GPU tasks.
 
