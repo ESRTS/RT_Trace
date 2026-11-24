@@ -229,7 +229,7 @@ tasks = events_to_tasks(recording)
 
 Stage 1 reads `raw_buffer<N>.txt` as binary; `recording.events` contains events
 with `kind`, absolute `timestamp`, `core`, `sequence`, `task_id` and named `data`.
-Stage 2 uses application-relative microseconds. Unknown/estimated jobs are
+Stage 2 converts them to application-relative nanoseconds, the unit of the trace model. Unknown/estimated jobs are
 flagged and excluded from completion statistics; unknown CPU coverage has its
 own row. The GUI uses this parser; it accepts only format-3 recordings.
 Reloading format-3 traces regenerates their CSV exports to reflect policy changes.

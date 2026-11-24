@@ -13,7 +13,7 @@ directly. Nothing is estimated, so `uncertain` stays false.
 
 | File | Role |
 | --- | --- |
-| `model.py` | `taskset.json` validation; `Task`, `TaskSet`, `Job`, `Precedence` (rejects cycles). Integer µs. |
+| `model.py` | `taskset.json` validation; `Task`, `TaskSet`, `Job`, `Precedence` (rejects cycles). Integer µs; `TraceParserSim` converts to the ns of the trace model by the header's `time_unit`. |
 | `engine.py` | Time, releases, execution accounting, dispatch; only file that advances time. |
 | `policies/base.py` | `SchedulingPolicy`: `validate`, `on_release`, `on_complete`, `order`, `select`; `assign_ranked`. |
 | `policies/fixed_priority.py` | `fp`: preemptive fixed priority with affinity. |

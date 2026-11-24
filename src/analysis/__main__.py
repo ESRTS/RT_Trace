@@ -9,6 +9,7 @@ Command-line entry point: run analyses on a recording folder.
 
 <recording> is a recording folder (simulator, Pico 2 FreeRTOS or Linux) or a simulator trace file.
 Plugin folders come from [analysis] plugin_folders in Resources/config.ini and config.local.ini, plus --plugins.
+Input files of the analyses (see --list) are read from the recording folder.
 """
 import argparse
 import configparser
@@ -63,8 +64,8 @@ def analyze(recording, names=(), plugins=(), run_all=False, taskset=None):
         print(f'error: {error}', file=sys.stderr)
         return 1
     if taskset is not None:
-        ctx.taskset = taskset
-    print(f'{ctx.platform}: {len(ctx.tasks)} rows, {ctx.cores} core(s), {ctx.trace_end / 1000:g} ms -> {ctx.folder}')
+        ctx.taskset = analysis.recording.taskset_in_ns(taskset)
+    print(f'{ctx.platform}: {len(ctx.tasks)} rows, {ctx.cores} core(s), {analysis.ms(ctx.trace_end):g} ms -> {ctx.folder}')
     for warning in ctx.warnings:
         print(f'warning: {warning}', file=sys.stderr)
     return run_named(ctx, names, available=available)
@@ -104,6 +105,9 @@ def main(argv=None):
         width = max(len(name) for name in available)
         for name, analysis_class in available.items():
             print(f'{name:<{width}}  {analysis_class.title}: {analysis_class.description}')
+            for declared in analysis_class.inputs.values():
+                text = declared.label() + ('' if declared.required else ', optional')
+                print(f"{'':<{width}}    input: {text}" + (f' - {declared.description}' if declared.description else ''))
         return 0
     if args.recording is None:
         parser.error('the recording folder is required (or use --list)')

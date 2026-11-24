@@ -10,6 +10,9 @@ when contracts or assumptions change.
 separate from the FreeRTOS stages.
 [Analysis](05-analysis.md): `TraceTask`/jobs → statistics and plugin results, for
 all platforms.
+[Jetson](06-jetson.md): Nsight Systems SQLite export → CPU, GPU and NVTX job rows.
+All times of the model, the CSV export and the analyses are integer nanoseconds
+([timeunits.py](../src/timeunits.py)); parsers convert from their recording's unit.
 
 **Goals and rationale.**
 

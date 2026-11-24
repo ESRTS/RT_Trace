@@ -1,0 +1,4 @@
+{
+  "periods": {"Control": 5000, "Sensor": 8000, "Comm": 10000, "Logger": 20000},
+  "budgets": {"Control": 1500, "Sensor": 2500, "Comm": 4000, "Logger": 8000}
+}

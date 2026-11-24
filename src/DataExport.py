@@ -12,7 +12,7 @@ Column  Data
 6       DeadlineEstimated, empty if the deadline is unknown:
           0 = the parser determined the deadline from traced events (simulator: from the task set),
           1 = its time is estimated, or it is the next job's release because the parser sets no deadlines
-All times are in microseconds. The deadline is the one the trace view uses (see jobDeadline()).
+All times are in nanoseconds (timeunits.py). The deadline is the one the trace view uses (see jobDeadline()).
 
 exportCsvFiles() only writes files and needs no GUI modules, so tools such as the simulator's
 command line can use it. exportData() also runs the default analyses (src/analysis), which print the
@@ -21,6 +21,7 @@ task statistics.
 from pathlib import Path
 from TraceTask import *
 import os
+import re
 import csv
 
 def jobDeadline(task, index):
@@ -46,8 +47,8 @@ def createDataFile(taskDataFile, task):
 
     with open(taskDataFile, "w", newline="") as csvFile:
         writer = csv.writer(csvFile)
-        writer.writerow(["JobId", "ReleaseTime_us", "StartTime_us", "FinishTime_us", "ExecutionTime_us",
-                         "Deadline_us", "DeadlineEstimated"])
+        writer.writerow(["JobId", "ReleaseTime_ns", "StartTime_ns", "FinishTime_ns", "ExecutionTime_ns",
+                         "Deadline_ns", "DeadlineEstimated"])
 
         for index, job in enumerate(task.jobs):
             jobData = [job.id, job.releaseTime, job.getStartTime(), job.getFinishTime(), job.getExecutionTime()]
@@ -56,6 +57,10 @@ def createDataFile(taskDataFile, task):
                 writer.writerow(jobData + ["" if deadline is None else deadline,
                                            "" if estimated is None else int(estimated)])
 
+def csvFileName(name):
+    """A row name as file name on every system: whitespace and the characters Windows forbids become '_'."""
+    return re.sub(r'[<>:"/\\|?*\s]', '_', name)
+
 def exportCsvFiles(destFolder, tasks, overwrite=False):
     """
     Export one CSV file per task into destFolder. Skip existing files unless explicitly regenerated.
@@ -63,7 +68,7 @@ def exportCsvFiles(destFolder, tasks, overwrite=False):
     """
     written = []
     for task in tasks:
-        taskDataFile = os.path.join(destFolder, f"{task.name.replace(' ', '_')}.csv")
+        taskDataFile = os.path.join(destFolder, f"{csvFileName(task.name)}.csv")
         if overwrite or not Path(taskDataFile).is_file():
             createDataFile(taskDataFile, task)
             written.append(taskDataFile)

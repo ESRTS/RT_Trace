@@ -9,7 +9,7 @@ import inspect
 import os
 import re
 
-from .base import Analysis
+from .base import Analysis, input_problem
 from .builtin import BUILTIN
 
 DEFAULT = ('statistics',)       # Run after every trace load
@@ -35,7 +35,10 @@ def discover(plugin_folders=()):
             if not found:
                 errors.append(f'{path}: defines no subclass of analysis.Analysis with a name')
             for analysis in found:
-                if analysis.name in analyses:
+                problem = input_problem(analysis)
+                if problem:
+                    errors.append(f"{path}: '{analysis.name}': {problem}, the analysis is ignored")
+                elif analysis.name in analyses:
                     errors.append(f"{path}: the name '{analysis.name}' is already used, the analysis is ignored")
                 else:
                     analyses[analysis.name] = analysis

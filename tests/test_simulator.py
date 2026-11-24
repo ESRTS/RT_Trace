@@ -243,7 +243,7 @@ class CommandLine(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in Path(folder).glob('*.csv')),
                              ['Comm.csv', 'Control.csv', 'Logger.csv', 'Sensor.csv'])
             header = (Path(folder) / 'Control.csv').read_text().splitlines()[0]
-            self.assertTrue(header.endswith('Deadline_us,DeadlineEstimated'))
+            self.assertTrue(header.endswith('Deadline_ns,DeadlineEstimated'))
 
     def test_invalid_duration(self):
         result = self.simulate(self.EXAMPLE, 0)

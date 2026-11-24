@@ -14,6 +14,7 @@ from TraceEventsFreeRTOS import (EventType as E, Syscall as S, DecodeError, deco
 import TraceParserFreeRTOS as parser_module
 from TraceParserFreeRTOS import JobPolicy, events_to_tasks
 from TraceTask import TraceInconsistency
+from timeunits import US
 
 
 class Wire:
@@ -74,8 +75,16 @@ def task_named(tasks, name='worker'):
     return next(task for task in tasks if task.name == name)
 
 
+def us(time):
+    """A time of the trace model (ns) in the microseconds of the synthetic wire data."""
+    if time is None:
+        return None
+    assert time % US == 0, f'{time} ns is no whole microsecond'
+    return time // US
+
+
 def intervals(task):
-    return [(i.start, i.stop, i.core) for job in task.jobs for i in job.execIntervals]
+    return [(us(i.start), us(i.stop), i.core) for job in task.jobs for i in job.execIntervals]
 
 
 class DecoderTests(unittest.TestCase):
@@ -205,7 +214,7 @@ class OriginTests(unittest.TestCase):
         self.assertIsNone(report['originUncertaintyUs'])
         self.assertEqual(report['originDetails']['validationSamples'], 2)
         self.assertEqual(report['originDetails']['irqTimestamp'], 1001257)
-        self.assertEqual(task_named(tasks).jobs[0].releaseTime, -257)
+        self.assertEqual(us(task_named(tasks).jobs[0].releaseTime), -257)
         self.assertEqual(intervals(task_named(tasks)),
                          [(-257, 1000, 0), (1025, 2002, 0), (2027, 2143, 0)])
         # The same absolute origin supplied explicitly must produce identical
@@ -223,7 +232,7 @@ class OriginTests(unittest.TestCase):
         self.assertFalse(report['originEstimated'])
         self.assertTrue(report['epochKnown'])
         self.assertEqual(report['originUncertaintyUs'], 0)
-        self.assertEqual(task_named(tasks).jobs[0].releaseTime, -37)
+        self.assertEqual(us(task_named(tasks).jobs[0].releaseTime), -37)
         self.assertFalse(any('No traceTimeZero' in w for w in report['warnings']))
 
     def test_lost_time_zero_recovered_from_sync_still_wins(self):
@@ -256,7 +265,7 @@ class OriginTests(unittest.TestCase):
         _, tasks, report = self.convert(core0, core1.end(2500))
         self.assertEqual(report['origin'], 1000257)
         self.assertEqual(report['originDetails']['core'], 1)
-        self.assertEqual(task_named(tasks).jobs[0].releaseTime, -257)
+        self.assertEqual(us(task_named(tasks).jobs[0].releaseTime), -257)
 
     def test_initial_tick_value_and_wrap_do_not_change_first_irq_rule(self):
         wire = Wire(epoch=None, bits=16, hz=100).boot()
@@ -337,19 +346,19 @@ class ConversionTests(unittest.TestCase):
         wire.returned(5030, 7, S.DELAY_UNTIL).end(5100)
         task = task_named(events_to_tasks(recording(wire)))
         self.assertEqual(len(task.jobs), 2)
-        self.assertEqual((task.jobs[0].completionTime, task.jobs[0].deadline), (100, 5000))
-        self.assertEqual(task.jobs[1].releaseTime, 5000)
-        self.assertEqual(task.jobs[0].getExecutionTime(), 100)
+        self.assertEqual((us(task.jobs[0].completionTime), us(task.jobs[0].deadline)), (100, 5000))
+        self.assertEqual(us(task.jobs[1].releaseTime), 5000)
+        self.assertEqual(us(task.jobs[0].getExecutionTime()), 100)
         self.assertTrue(task.jobs[1].incomplete)
 
     def test_late_delay_without_context_switch(self):
         wire = Wire().boot().add(E.TICK, 1000, 0, 0, 0).add(E.TICK, 2000, 0, 1, 0)
         wire.enter(2500, 7, S.DELAY_UNTIL, a=0, b=2).returned(2501, 7, S.DELAY_UNTIL, 0).end(3000)
         task = task_named(events_to_tasks(recording(wire)))
-        self.assertEqual(task.jobs[0].deadline, 2000)
-        self.assertEqual(task.jobs[0].getFinishTime(), 2500)
-        self.assertEqual(task.jobs[1].releaseTime, 2000)
-        self.assertEqual(task.jobs[1].execIntervals[0].start, 2500)
+        self.assertEqual(us(task.jobs[0].deadline), 2000)
+        self.assertEqual(us(task.jobs[0].getFinishTime()), 2500)
+        self.assertEqual(us(task.jobs[1].releaseTime), 2000)
+        self.assertEqual(us(task.jobs[1].execIntervals[0].start), 2500)
 
     def test_relative_delay_uses_actual_kernel_wake_tick(self):
         wire = Wire().boot().enter(10, 7, S.DELAY, timeout=5)
@@ -358,16 +367,16 @@ class ConversionTests(unittest.TestCase):
         wire.add(E.READY, 6001, 7, 6).add(E.SWITCH_IN, 6010, 7)
         wire.returned(6011, 7, S.DELAY, 0).end(6020)
         task = task_named(events_to_tasks(recording(wire)))
-        self.assertEqual(task.jobs[1].releaseTime, 6000)
+        self.assertEqual(us(task.jobs[1].releaseTime), 6000)
 
     def test_sparse_ticks_do_not_move_late_deadline_to_previous_wrap(self):
         wire = Wire().boot().add(E.TICK, 1000, 0, 0, 0)
         wire.enter(10000, 7, S.DELAY_UNTIL, a=0, b=5)
         wire.returned(10001, 7, S.DELAY_UNTIL, 0).end(11000)
         task = task_named(events_to_tasks(recording(wire)))
-        self.assertEqual(task.jobs[0].deadline, 5000)
+        self.assertEqual(us(task.jobs[0].deadline), 5000)
         self.assertTrue(task.jobs[0].deadlineEstimated)
-        self.assertEqual(task.jobs[1].releaseTime, 5000)
+        self.assertEqual(us(task.jobs[1].releaseTime), 5000)
 
     def test_three_cores_and_empty_stream(self):
         core0 = Wire(0, 3).create(0, 7).add(E.READY, 0, 7, 0).end(30)
@@ -392,8 +401,8 @@ class ConversionTests(unittest.TestCase):
         tasks = events_to_tasks(recording(wire))
         task = task_named(tasks)
         self.assertEqual(len(task.jobs), 2)
-        self.assertEqual((task.jobs[0].completionTime, task.jobs[1].releaseTime), (10, 12))
-        self.assertEqual(sum(j.getExecutionTime() for j in task.jobs), 18)
+        self.assertEqual((us(task.jobs[0].completionTime), us(task.jobs[1].releaseTime)), (10, 12))
+        self.assertEqual(us(sum(j.getExecutionTime() for j in task.jobs)), 18)
         runtime = next(t for t in tasks if t.kind == 'runtime')
         self.assertEqual(intervals(runtime), [(10, 12, 0)])
 
@@ -402,14 +411,14 @@ class ConversionTests(unittest.TestCase):
         wire.add(E.QUEUE_RECEIVED, 12, 7, 0x20001000, 0).returned(15, 7, S.QUEUE_RECEIVE).end(20)
         task = task_named(events_to_tasks(recording(wire)))
         self.assertEqual(len(task.jobs), 1)
-        self.assertEqual(task.jobs[0].getExecutionTime(), 20)
+        self.assertEqual(us(task.jobs[0].getExecutionTime()), 20)
 
     def test_timeout_release_precedes_dispatch(self):
         wire = Wire().boot().enter(10, 7, S.QUEUE_RECEIVE, timeout=5)
         wire.add(E.BLOCK, 11, 7, S.QUEUE_RECEIVE, 0x20001000).add(E.SWITCH_OUT, 12, 7)
         wire.add(E.READY, 100, 7, 1).add(E.SWITCH_IN, 110, 7).returned(112, 7, S.QUEUE_RECEIVE, 0).end(120)
         task = task_named(events_to_tasks(recording(wire)))
-        self.assertEqual(task.jobs[1].releaseTime, 100)
+        self.assertEqual(us(task.jobs[1].releaseTime), 100)
         self.assertEqual(task.jobs[1].trigger, 'timeout')
 
     def test_reblocked_queue_wait_uses_final_ready(self):
@@ -420,7 +429,7 @@ class ConversionTests(unittest.TestCase):
         wire.add(E.READY, 30, 7, 0).add(E.SWITCH_IN, 31, 7)
         wire.add(E.QUEUE_RECEIVED, 32, 7, 0x20001000, 0).returned(33, 7, S.QUEUE_RECEIVE).end(40)
         task = task_named(events_to_tasks(recording(wire)))
-        self.assertEqual(task.jobs[1].releaseTime, 30)
+        self.assertEqual(us(task.jobs[1].releaseTime), 30)
         self.assertEqual(intervals(task), [(0, 10, 0), (31, 40, 0)])
 
     def test_nested_irqs_and_scheduler_time(self):
@@ -440,7 +449,7 @@ class ConversionTests(unittest.TestCase):
         core1.add(E.NOTIFY_TAKEN, 22, 7, 1, 9).returned(23, 7, S.NOTIFY_TAKE, 9).end(40)
         task = task_named(events_to_tasks(recording(core0, core1)))
         self.assertEqual(len(task.jobs), 2)  # nine coalesced notifications, one wait resolution
-        self.assertEqual(task.jobs[1].releaseTime, 20)
+        self.assertEqual(us(task.jobs[1].releaseTime), 20)
         self.assertEqual(intervals(task), [(0, 10, 0), (20, 40, 1)])
 
     def test_mutex_history_and_recursive_depth(self):
@@ -452,7 +461,7 @@ class ConversionTests(unittest.TestCase):
         wire.add(E.RECURSIVE_GIVEN, 13, 7, 0x20002000, 2).add(E.RECURSIVE_GIVEN, 14, 7, 0x20002000, 1)
         wire.add(E.QUEUE_SENT, 15, 7, 0x20002000, 4).end(20)
         job = task_named(events_to_tasks(recording(wire))).jobs[0]
-        self.assertEqual([(m.start, m.stop) for m in job.mutexAccess], [(2, 4), (6, 8), (10, 15)])
+        self.assertEqual([(us(m.start), us(m.stop)) for m in job.mutexAccess], [(2, 4), (6, 8), (10, 15)])
 
     def test_mutex_attempt_precedes_grant_and_failure_preserves_ownership(self):
         wire = Wire().boot().enter(10, 7, S.MUTEX_TAKE, timeout=5)
@@ -462,10 +471,10 @@ class ConversionTests(unittest.TestCase):
         wire.enter(60, 7, S.MUTEX_TAKE, timeout=0).returned(61, 7, S.SEMAPHORE_TAKE, 0)
         wire.add(E.QUEUE_SENT, 70, 7, 0x20001000, 1).end(80)
         task = task_named(events_to_tasks(recording(wire), strict=True))
-        self.assertEqual([(a.start, a.success, a.acquiredAt, a.resultTime) for a in task.mutexAttempts],
+        self.assertEqual([(us(a.start), a.success, us(a.acquiredAt), us(a.resultTime)) for a in task.mutexAttempts],
                          [(10, True, 55, 56), (60, False, None, 61)])
-        self.assertEqual(task.mutexAttemptTimes, [10, 60])
-        self.assertEqual([(a.start, a.stop) for a in task.jobs[0].mutexAccess], [(55, 70)])
+        self.assertEqual([us(t) for t in task.mutexAttemptTimes], [10, 60])
+        self.assertEqual([(us(a.start), us(a.stop)) for a in task.jobs[0].mutexAccess], [(55, 70)])
         self.assertTrue(task.jobs[0].mutexAccess[0].released)
         self.assertEqual({a.letter for a in task.mutexAttempts}, {'A'})
 
@@ -477,7 +486,7 @@ class ConversionTests(unittest.TestCase):
         task = task_named(events_to_tasks(recording(wire), strict=True))
         self.assertEqual(len(task.jobs), 1)
         self.assertEqual(task.jobs[0].mutexAccess, [])
-        self.assertEqual((task.mutexAttempts[0].start, task.mutexAttempts[0].success), (10, False))
+        self.assertEqual((us(task.mutexAttempts[0].start), task.mutexAttempts[0].success), (10, False))
 
     def test_recursive_attempts_exclude_internal_semaphore_calls(self):
         wire = Wire().boot().enter(10, 7, S.MUTEX_RECURSIVE)
@@ -488,17 +497,17 @@ class ConversionTests(unittest.TestCase):
         wire.add(E.RECURSIVE_GIVEN, 23, 7, 0x20001000, 2).add(E.RECURSIVE_GIVEN, 24, 7, 0x20001000, 1)
         wire.add(E.QUEUE_SENT, 25, 7, 0x20001000, 4).end(30)
         task = task_named(events_to_tasks(recording(wire), strict=True))
-        self.assertEqual([(a.start, a.acquiredAt, a.success) for a in task.mutexAttempts],
+        self.assertEqual([(us(a.start), us(a.acquiredAt), a.success) for a in task.mutexAttempts],
                          [(10, 12, True), (20, 21, True)])
         self.assertTrue(all(a.recursive for a in task.mutexAttempts))
-        self.assertEqual([(a.start, a.stop) for a in task.jobs[0].mutexAccess], [(12, 25)])
+        self.assertEqual([(us(a.start), us(a.stop)) for a in task.jobs[0].mutexAccess], [(12, 25)])
 
     def test_failed_recursive_call_has_one_failed_marker(self):
         wire = Wire().boot().enter(10, 7, S.MUTEX_RECURSIVE)
         wire.enter(11, 7, S.MUTEX_TAKE).returned(20, 7, S.SEMAPHORE_TAKE, 0)
         wire.returned(21, 7, S.MUTEX_RECURSIVE, 0).end(30)
         task = task_named(events_to_tasks(recording(wire), strict=True))
-        self.assertEqual([(a.start, a.success) for a in task.mutexAttempts], [(10, False)])
+        self.assertEqual([(us(a.start), a.success) for a in task.mutexAttempts], [(10, False)])
         self.assertEqual(task.jobs[0].mutexAccess, [])
 
     def test_missing_mutex_result_remains_unknown(self):
@@ -513,7 +522,7 @@ class ConversionTests(unittest.TestCase):
         wire.add(E.QUEUE_RECEIVED, 12, 7, 0x20001000, 1).end(20)
         task = task_named(events_to_tasks(recording(wire), strict=True))
         self.assertTrue(task.mutexAttempts[0].success)
-        self.assertEqual(task.mutexAttempts[0].acquiredAt, 12)
+        self.assertEqual(us(task.mutexAttempts[0].acquiredAt), 12)
         self.assertIsNone(task.mutexAttempts[0].resultTime)
         self.assertFalse(task.jobs[0].mutexAccess[0].released)
 
@@ -550,15 +559,15 @@ class ConversionTests(unittest.TestCase):
         wire.add(E.TICK, 10100, 0, 65535, 0).add(E.READY, 10101, 7, 0)
         wire.add(E.SWITCH_IN, 10102, 7).returned(10103, 7, S.DELAY_UNTIL).end(10200)
         task = task_named(events_to_tasks(recording(wire)))
-        self.assertEqual(task.jobs[0].deadline, 10100)
-        self.assertEqual(task.jobs[1].releaseTime, 10100)
+        self.assertEqual(us(task.jobs[0].deadline), 10100)
+        self.assertEqual(us(task.jobs[1].releaseTime), 10100)
 
     def test_open_job_and_deleted_task_are_incomplete(self):
         wire = Wire().boot().add(E.TASK_DELETE, 10, 7).end(20)
         job = task_named(events_to_tasks(recording(wire))).jobs[0]
         self.assertTrue(job.incomplete)
         self.assertTrue(job.aborted)
-        self.assertEqual(job.getFinishTime(), 10)
+        self.assertEqual(us(job.getFinishTime()), 10)
 
     def test_parser_rejects_other_formats(self):
         for raw in (b'old-format', b'old-name-RTT3\0\0\0\0'):
@@ -570,7 +579,7 @@ class ConversionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'events.txt'
             tasks = parser_module.parser([wire.data], output, strict=True)
-            self.assertEqual(task_named(tasks).jobs[0].getExecutionTime(), 20)
+            self.assertEqual(us(task_named(tasks).jobs[0].getExecutionTime()), 20)
             self.assertTrue(output.exists())
             self.assertEqual(json.loads(output.read_text().splitlines()[0])['kind'], 'SYNC')
 
@@ -586,7 +595,7 @@ class ConversionTests(unittest.TestCase):
     def test_exact_epoch_and_no_recording_end_padding(self):
         wire = Wire(epoch=1000037).boot().end(50)
         task = task_named(events_to_tasks(recording(wire)))
-        self.assertEqual(task.jobs[0].releaseTime, -37)
+        self.assertEqual(us(task.jobs[0].releaseTime), -37)
         self.assertEqual(intervals(task), [(-37, 13, 0)])
 
     def test_missing_irq_entry_strict_mode(self):
@@ -625,8 +634,8 @@ class ConversionTests(unittest.TestCase):
         wire = Wire().boot().enter(10, 7, S.QUEUE_RECEIVE)
         wire.add(E.QUEUE_RECEIVED, 12, 7, 0x20001000, 0).returned(15, 7, S.QUEUE_RECEIVE).end(100)
         task = task_named(events_to_tasks(recording(wire)))
-        self.assertEqual(task.getMaxExecutionTime(), 10)
-        self.assertEqual(task.getMaxResponseTime(), 10)
+        self.assertEqual(us(task.getMaxExecutionTime()), 10)
+        self.assertEqual(us(task.getMaxResponseTime()), 10)
 
     def test_csv_excludes_incomplete_and_uncertain_jobs(self):
         import csv

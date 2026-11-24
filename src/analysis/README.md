@@ -49,6 +49,46 @@ are reported in the output box. See
 [examples/analysis_plugins](../../examples/analysis_plugins) for a complete
 plugin.
 
+## Input files
+
+An analysis that needs more than the trace, such as a specification or
+expected values, reads it from a file in the **recording folder**, next to
+`taskset.json` or `firmware.elf`. A recording then contains everything its
+results depend on. Declare the files in `inputs`:
+
+```python
+from analysis import Analysis, Input, Result
+
+class PeriodCheck(Analysis):
+    name = 'period_check'
+    title = 'Specified vs. observed periods'
+    inputs = {'periods': Input('timing_spec.json', key='periods', description='period per task in us')}
+
+    def run(self, ctx):
+        periods = ctx.input('periods')        # {'Control': 5000, ...}
+        ...
+```
+
+- If a required file is missing, or a JSON file lacks the element named by
+  `key`, the runner skips the analysis and says which file it needs and where:
+  `=> SPECIFIED VS. OBSERVED PERIODS SKIPPED needs timing_spec.json (element 'periods') in <recording>`.
+  `check()` and `run()` are only called once all required inputs are present.
+- Several analyses can share one file. Each one takes its own top-level element
+  with `key`, and the file is read only once.
+- `ctx.input(name)` returns the content: JSON as parsed (only the `key`
+  element, if given), CSV as a list of dicts with the header line as keys, any
+  other file as text. It returns `None` if an optional input (`required=False`)
+  is missing. Each call returns a fresh copy. `ctx.input_path(name)` gives the
+  path, so you can read other formats yourself.
+- A file that cannot be read, for example invalid JSON, is an error of the
+  analysis. The message names the file and the line.
+- `file` is relative to the recording folder; sub-folders are allowed
+  (`specs/limits.csv`). `--list` shows the inputs of every analysis.
+
+[examples/analysis_plugins/timing_spec.py](../../examples/analysis_plugins/timing_spec.py)
+has two analyses that share
+[timing_spec.json](../../examples/analysis_plugins/timing_spec.json).
+
 ## Contract
 
 - `run()` only computes. It must not print, use GUI modules or modify the tasks,
@@ -67,11 +107,20 @@ plugin.
 | `task_rows()` | only the task rows |
 | `completed_jobs(task)` | completed jobs with trustworthy boundaries, as used by the CSVs |
 | `deadline(job)` | `(deadline, estimated)`, the deadline the trace view uses, or `(None, None)` |
-| `platform`, `cores`, `trace_end` | platform name, number of cores, end of the trace in µs |
+| `platform`, `cores`, `trace_end` | platform name, number of cores, end of the trace in ns |
 | `taskset` | the simulator `TaskSet` (from `taskset.json`), else `None` |
 | `folder`, `warnings` | recording folder and parser warnings |
+| `input(name)`, `input_path(name)` | content and path of a declared input file (see above) |
 
-All times are integer microseconds.
+Jetson traces add to the jobs of task rows `gpuWork` (the jobs of the `gpu`
+stream rows they launched) and `gpuWaits` (`(start, stop)` waits for the GPU);
+execution outside the jobs is in jobs with `outsideJob`, which `completed_jobs()`
+excludes.
+
+All times are integer nanoseconds. Use `ms()` for printing and the constants
+`US`, `MS`, `S` of `timeunits` for conversions (e.g. `timeunits.US` for an
+input file written in microseconds), never a literal 1000. The simulator
+`taskset` is converted to ns as well.
 
 ## Run from the command line
 

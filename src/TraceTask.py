@@ -1,5 +1,10 @@
 from enum import Enum
 import collections
+from timeunits import MS
+
+"""
+All times of the trace model are integer nanoseconds (see timeunits.py).
+"""
 
 """
 Lost or corrupted trace events leave the data inconsistent, for example a task that starts
@@ -26,7 +31,7 @@ def resetRepairs(strictMode=False):
     repairExamples.clear()
 
 def formatTime(ts):
-    return "-" if ts is None else "%.3f ms" % (ts / 1000)
+    return "-" if ts is None else "%.3f ms" % (ts / MS)
 
 def inconsistent(name, ts, core, what):
     """

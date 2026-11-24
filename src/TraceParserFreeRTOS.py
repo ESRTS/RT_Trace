@@ -15,6 +15,11 @@ import TraceTask as model
 from TraceTask import TraceTask, TraceInconsistency, ExecutionType
 from TraceEventsFreeRTOS import (EventType as E, Syscall, Recording,
                                 decode_buffers, write_events)
+from timeunits import US, S
+
+# Stage 1 (TraceEventsFreeRTOS) keeps the microseconds of the target's shared timer. Stage 2 converts
+# times to the nanoseconds of the trace model where they leave the wire format: _Converter.ts(), the
+# tick clock, the end of the trace and loss gaps. The SysTick origin estimate works on raw microseconds.
 
 
 _DEFAULT_BOUNDARIES = frozenset((Syscall.DELAY_UNTIL, Syscall.DELAY, Syscall.QUEUE_RECEIVE,
@@ -196,12 +201,12 @@ class _TickClock:
     def __init__(self, recording, origin):
         stream = next(s for s in recording.streams if s.session is not None)
         self.modulus, self.hz = 1 << stream.tick_bits, stream.tick_hz
-        samples = [(e.timestamp - origin, (e.data['tick'] + 1) % self.modulus, False)
+        samples = [((e.timestamp - origin) * US, (e.data['tick'] + 1) % self.modulus, False)
                    for e in recording.events if e.kind == E.TICK and not e.data['suspended']]
-        samples += [(e.timestamp - origin, e.data['tick'], True)
+        samples += [((e.timestamp - origin) * US, e.data['tick'], True)
                     for e in recording.events if e.kind == E.TICK_JUMP]
         if not samples:
-            samples = [(e.timestamp - origin, e.data['tick'], True)
+            samples = [((e.timestamp - origin) * US, e.data['tick'], True)
                        for e in recording.events if e.kind == E.READY]
         self.samples, self.exact = [], {}
         previous = None
@@ -210,7 +215,7 @@ class _TickClock:
                 count = raw
             else:
                 last_ts, last_count = previous
-                expected = last_count + (timestamp - last_ts) * self.hz / 1000000
+                expected = last_count + (timestamp - last_ts) * self.hz / S
                 count = raw + round((expected - raw) / self.modulus) * self.modulus
             self.samples.append((timestamp, count, estimated))
             previous = timestamp, count
@@ -226,7 +231,7 @@ class _TickClock:
         timestamp, count, estimated = self.samples[i]
         # Resolve wrap relative to the call time, not the nearest stored anchor:
         # a past deadline may still be AFTER an older, sparse anchor.
-        reference_count = count + (reference - timestamp) * self.hz // 1000000
+        reference_count = count + (reference - timestamp) * self.hz // S
         delta = (raw - reference_count) % self.modulus
         if direction == 'past':
             if delta:
@@ -236,7 +241,7 @@ class _TickClock:
         target = reference_count + delta
         if target in self.exact:
             return self.exact[target]
-        return round(timestamp + (target - count) * 1000000 / self.hz), True
+        return round(timestamp + (target - count) * S / self.hz), True
 
 
 @dataclass
@@ -265,7 +270,7 @@ class _Converter:
                 details = {'reason': evidence}
                 warning = ('No traceTimeZero(): using the first decoded event as a provisional '
                            f'origin; SysTick estimate unavailable: {evidence}')
-        self.end = max(e.timestamp for e in recording.events) - self.origin
+        self.end = (max(e.timestamp for e in recording.events) - self.origin) * US
         self.report = {'warnings': list(recording.warnings), 'eventsLost': sum(s.dropped for s in recording.streams),
                        'gaps': [], 'origin': self.origin, 'epochKnown': recording.epoch is not None,
                        'originSource': origin_source, 'originEstimated': origin_source != 'explicit',
@@ -289,7 +294,8 @@ class _Converter:
         self.report['warnings'].append(message)
 
     def ts(self, event):
-        return event.timestamp - self.origin
+        """Time of event in the trace model: ns since the origin."""
+        return (event.timestamp - self.origin) * US
 
     def task(self, ident):
         if ident not in self.tasks:
@@ -431,7 +437,7 @@ class _Converter:
                 continue
             if call.kind == Syscall.DELAY_UNTIL:
                 task.delayUntil = True
-                task.period = call.entry.data['arg1'] * 1000000 / self.clock.hz
+                task.period = round(call.entry.data['arg1'] * S / self.clock.hz)
             completion = self.ts(call.entry)
             if deleted is not None and completion > deleted:
                 break
@@ -583,7 +589,7 @@ class _Converter:
         if kind == E.GAP:
             if self.strict:
                 self.issue('Loss prevents exact reconstruction', event, True)
-            start = data['start'] - self.origin
+            start = (data['start'] - self.origin) * US
             for _, job in state.irqs:
                 self.finish_row(job, start, True)
             state.irqs.clear()

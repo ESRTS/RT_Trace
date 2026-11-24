@@ -11,6 +11,7 @@ from LinuxTraceRecorder import loadLinuxraceBuffers
 from TraceParserFreeRTOS import parseTraceFiles
 from TraceParserLinux import parseTraceFiles as linuxParseTraceFiles
 from TraceParserSim import parseTraceFiles as simParseTraceFiles
+import TraceParserJetson
 import SimulatorRecorder
 import analysis
 from pathlib import Path
@@ -49,7 +50,12 @@ class TraceApp(customtkinter.CTk):
             {'name': 'RPI Linux', 'numCores': 4, 'implemented': True, 'requirement_str' : 'Experimental...', 'recordTraceFunc' : loadLinuxraceBuffers, 'loadTraceFunc': linuxParseTraceFiles, 'pathValidationFunc': None},
             # The number of cores comes from the task set and is stored in the trace header
             {'name': 'Simulator', 'numCores': None, 'implemented': True, 'usesDuration': True, 'requirement_str' : 'Select a folder with a taskset.json.', 'recordTraceFunc' : SimulatorRecorder.runSimulation, 'loadTraceFunc': simParseTraceFiles, 'pathValidationFunc': SimulatorRecorder.validateTaskSet,
-             'programCheckFunc': SimulatorRecorder.isTaskSetFolder, 'noProgramsHint': 'Create a folder with a taskset.json in the project folder, then select the platform again.'}
+             'programCheckFunc': SimulatorRecorder.isTaskSetFolder, 'noProgramsHint': 'Create a folder with a taskset.json in the project folder, then select the platform again.'},
+            # Recording runs on the Jetson for now (nsys); RT-Trace loads the SQLite export. The CPUs come from the trace.
+            {'name': TraceParserJetson.PLATFORM, 'numCores': None, 'implemented': True,
+             'requirement_str': 'Only loading: record with nsys on the Jetson, export to SQLite and copy the .sqlite file into data/Jetson_Thor/<recording>/ (see the README).',
+             'recordTraceFunc': TraceParserJetson.noRecording, 'loadTraceFunc': TraceParserJetson.parseTraceFiles, 'pathValidationFunc': None,
+             'programCheckFunc': lambda path: False, 'noProgramsHint': 'Recording on the Jetson is not supported yet; load a recording under View Trace.'}
         ]
 
         ''' Set default values for the GUI '''

@@ -1,12 +1,17 @@
 """
 Reads a simulator trace (simulator/trace_format.py) and builds the TraceTask rows for the visualization.
 The simulator knows every release, deadline and completion, so nothing is inferred or estimated here.
+The simulator works in microseconds (time_unit "us" in the header); the rows are in the nanoseconds of the
+trace model (timeunits.py).
 """
 import json
 from pathlib import Path
 
 from TraceTask import TraceTask, TraceJob, ExecutionType
 from simulator import trace_format as fmt
+from timeunits import NS, US, MS
+
+UNITS = {'us': US, 'ns': NS}        # time_unit of the header -> factor to nanoseconds
 
 _COLORS = ('#64ED9D', '#648FED', '#D4ED4C', '#ED7B64', '#8D64ED', '#E29578', '#006D77')
 
@@ -44,9 +49,10 @@ def parse_lines(lines):
                 fail(number, f"the first line must be the '{fmt.FORMAT}' header")
             if record.get('version') != fmt.VERSION:
                 fail(number, f"unsupported version {record.get('version')}, expected {fmt.VERSION}")
-            if record.get('time_unit') != fmt.TIME_UNIT:
-                fail(number, f"unsupported time unit {record.get('time_unit')!r}, expected '{fmt.TIME_UNIT}'")
+            if record.get('time_unit') not in UNITS:
+                fail(number, f"unsupported time unit {record.get('time_unit')!r}, expected one of {', '.join(UNITS)}")
             header = record
+            unit = UNITS[record['time_unit']]
             continue
         if ended:
             fail(number, f"data after the '{fmt.END}' event")
@@ -63,7 +69,7 @@ def parse_lines(lines):
             task.kind = 'task'
             task.traceFormat = 3                # TraceView treats only these rows as current-format rows (time bounds)
             task.deadlinesExplicit = True       # Deadline misses use job.deadline, not the next release
-            task.period = record.get('period')
+            task.period = None if record.get('period') is None else record['period'] * unit
             tasks[ident] = task
             continue
         if kind not in fmt.EVENT_TYPES:
@@ -87,7 +93,8 @@ def parse_lines(lines):
         if kind == fmt.RELEASE:
             if key in jobs:
                 fail(number, f'{task.name} job {key[1]} released twice')
-            job = TraceJob(task, key[1], t, record.get('deadline'))
+            deadline = record.get('deadline')
+            job = TraceJob(task, key[1], t * unit, None if deadline is None else deadline * unit)
             jobs[key] = job
             task.jobs.append(job)               # Jobs can overlap after a deadline miss, so TraceTask.newJob() is not used
             continue
@@ -105,21 +112,21 @@ def parse_lines(lines):
                 fail(number, f'{task.name} job {key[1]} started while running')
             if core in running:
                 fail(number, f'core {core} started {task.name} while running {running[core]}')
-            job.startExec(t, core, ExecutionType.EXECUTE)
+            job.startExec(t * unit, core, ExecutionType.EXECUTE)
             running[core] = job
         else:                                   # preempt or complete
             if running.get(core) is not job:
                 fail(number, f'{task.name} job {key[1]} is not running on core {core}')
-            job.stopExec(t)
+            job.stopExec(t * unit)
             del running[core]
             if kind == fmt.COMPLETE:
-                job.completionTime = t
+                job.completionTime = t * unit
 
     if header is None:
         raise SimTraceError('empty trace file')
     if not ended:
         warnings.append(f"trace has no '{fmt.END}' event, it was probably cut off; jobs end at the last event")
-    end = now if now is not None else 0
+    end = now * unit if now is not None else 0
 
     for job in jobs.values():                   # Jobs still open at the horizon
         if job.completionTime is None:
@@ -130,12 +137,18 @@ def parse_lines(lines):
     return header, [task for task in tasks.values() if task.jobs], warnings
 
 
+def horizon_ns(header):
+    """The simulated horizon of a trace header in nanoseconds, None if unknown."""
+    horizon = header.get('horizon')
+    return None if horizon is None else horizon * UNITS.get(header.get('time_unit'), US)
+
+
 def loadRecording(gui):
     import HelperFunctions
     import DataExport
     header, tasks, warnings = read_trace(Path(gui.viewingFolder) / fmt.TRACE_FILE)
     HelperFunctions.printState('Simulation', info=f"scheduler '{header.get('scheduler')}', {header['cores']} core(s), "
-                                                  f"{header.get('horizon', 0) / 1000:g} ms")
+                                                  f"{(horizon_ns(header) or 0) / MS:g} ms")
     for warning in warnings:
         HelperFunctions.printState('Warning', info=warning)
     DataExport.exportData(gui, tasks, overwrite=True)

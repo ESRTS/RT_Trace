@@ -47,7 +47,8 @@ def job(task, ident, release, start, stop, deadline=None):
 
 class DeadlineColumns(unittest.TestCase):
     def test_header(self):
-        self.assertEqual(rows(TraceTask(1, 'T', 1, '#000'))[0][-2:], ['Deadline_us', 'DeadlineEstimated'])
+        self.assertEqual(rows(TraceTask(1, 'T', 1, '#000'))[0], ['JobId', 'ReleaseTime_ns', 'StartTime_ns', 'FinishTime_ns',
+                                                            'ExecutionTime_ns', 'Deadline_ns', 'DeadlineEstimated'])
 
     def test_simulator_deadlines_are_exact(self):
         taskset = parse_taskset({'cores': 1, 'tasks': [
@@ -56,8 +57,8 @@ class DeadlineColumns(unittest.TestCase):
         Simulator(taskset, get_policy('fp'), TraceWriter(stream)).run(40)
         _, (task,), _ = parse_lines(stream.getvalue().splitlines())
         # Jobs 0 and 1 complete (15, 30) after their deadlines (8, 18); the others are incomplete.
-        self.assertEqual(rows(task)[1:], [['0', '0', '0', '15', '15', '8', '0'],
-                                          ['1', '10', '15', '30', '15', '18', '0']])
+        self.assertEqual(rows(task)[1:], [['0', '0', '0', '15000', '15000', '8000', '0'],      # ns
+                                          ['1', '10000', '15000', '30000', '15000', '18000', '0']])
 
     def test_explicit_deadlines_keep_estimate_flag_and_unknown_stays_empty(self):
         task = TraceTask(1, 'FreeRTOS', 1, '#000')
@@ -90,6 +91,10 @@ class Split(unittest.TestCase):
             self.assertEqual([Path(p).name for p in written], ['My_Task.csv'])
             self.assertEqual(Export.exportCsvFiles(folder, [task]), [])          # Existing files are kept
             self.assertEqual(len(Export.exportCsvFiles(folder, [task], overwrite=True)), 1)
+
+    def test_file_names_are_valid_on_every_system(self):
+        self.assertEqual([Export.csvFileName(name) for name in ('My Task', '[NSys] (12)', '*2Comms (13)', 'a/b:c?')],
+                         ['My_Task', '[NSys]_(12)', '_2Comms_(13)', 'a_b_c_'])
 
     def test_export_data_still_prints_statistics(self):
         # The statistics are now the default analysis; no other analysis runs after loading.

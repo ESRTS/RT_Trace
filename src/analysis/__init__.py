@@ -5,7 +5,7 @@ Analysis plugins: evaluate a trace after it was loaded or simulated.
 
 See README.md in this folder for how to write an analysis and where to put it.
 """
-from .base import ANALYSIS_FOLDER, Analysis, AnalysisContext, Result, Table, ms
+from .base import ANALYSIS_FOLDER, Analysis, AnalysisContext, Input, InputError, Result, Table, ms
 from .builtin import BUILTIN
 from .registry import DEFAULT, discover, plugin_folders
 from .report import run_analyses, run_analysis

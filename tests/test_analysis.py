@@ -14,13 +14,14 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 import analysis
-from analysis import Analysis, AnalysisContext, Result, Table
+from analysis import Analysis, AnalysisContext, Input, Result, Table
 from analysis.__main__ import main as analysis_main
 from analysis.report import format_table, run_analysis
 from simulator import Simulator, TraceWriter, get_policy, parse_taskset
 from simulator.__main__ import main as simulator_main
 from TraceParserSim import parse_lines
 from TraceTask import TraceTask, TraceJob, ExecutionType
+from timeunits import US
 
 TASKSET = {'cores': 1, 'scheduler': 'fp', 'tasks': [
     {'name': 'High', 'period': 10, 'wcet': 4, 'priority': 2},
@@ -187,6 +188,120 @@ def job(task, ident, release, intervals, deadline=None, incomplete=False):
     return result
 
 
+class Inputs(unittest.TestCase):
+    """Input files that analyses read from the recording folder."""
+
+    def setUp(self):
+        self.folder = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__('shutil').rmtree(self.folder))
+        _, tasks, _ = simulated_tasks()
+        self.ctx = AnalysisContext(tasks, str(self.folder))
+        self.seen = {}
+        seen = self.seen
+
+        class Periods(Analysis):
+            name, title = 'periods', 'Periods'
+            inputs = {'spec': Input('spec.json', key='periods'),
+                      'notes': Input('notes.txt', required=False),
+                      'limits': Input('data/limits.csv', required=False)}
+            def run(self, ctx):
+                spec = ctx.input('spec')
+                seen['periods'] = dict(spec), ctx.input('notes'), ctx.input('limits'), ctx.input_path('spec')
+                spec['High'] = -1                               # Changes only this copy
+                return Result(headline=f"{len(spec)} task(s)")
+
+        class Budgets(Analysis):
+            name, title = 'budgets', 'Budgets'
+            inputs = {'spec': Input('spec.json', key='budgets')}
+            def run(self, ctx):
+                seen['budgets'] = ctx.input('spec')
+                return Result()
+
+        self.Periods, self.Budgets = Periods, Budgets
+
+    def write(self, name, text):
+        path = self.folder / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(textwrap.dedent(text))
+
+    def test_missing_required_input_skips_with_the_file_name(self):
+        result, out, _ = captured(run_analysis, self.Periods, self.ctx)
+        self.assertIsNotNone(result)                            # Skipped, not failed
+        self.assertIn(f"=> PERIODS SKIPPED needs spec.json (element 'periods') in {self.folder}", out)
+        self.write('spec.json', '{"budgets": {"High": 4}}')     # The file without the element
+        self.assertIn("needs spec.json (element 'periods')", captured(run_analysis, self.Periods, self.ctx)[1])
+        self.assertNotIn('periods', self.seen)
+
+    def test_one_file_shared_by_two_analyses(self):
+        self.write('spec.json', '{"periods": {"High": 10, "Low": 20}, "budgets": {"Low": 9}}')
+        self.write('notes.txt', 'free text')
+        self.write('data/limits.csv', 'Task,Limit\nHigh,4\nLow,9\n')
+        self.assertTrue(captured(analysis.run_analyses, [self.Periods, self.Budgets, self.Periods], self.ctx)[0])
+        spec, notes, limits, path = self.seen['periods']
+        self.assertEqual(spec, {'High': 10, 'Low': 20})         # The second run did not see the change of the first
+        self.assertEqual(notes, 'free text')
+        self.assertEqual(limits, [{'Task': 'High', 'Limit': '4'}, {'Task': 'Low', 'Limit': '9'}])
+        self.assertEqual(path, str(self.folder / 'spec.json'))
+        self.assertEqual(self.seen['budgets'], {'Low': 9})
+
+    def test_optional_inputs_are_none_when_missing(self):
+        self.write('spec.json', '{"periods": {}}')
+        captured(run_analysis, self.Periods, self.ctx)
+        self.assertEqual(self.seen['periods'][:3], ({}, None, None))
+
+    def test_unreadable_input_fails_without_traceback(self):
+        self.write('spec.json', '{"periods": {"High": 10,}\n')
+        result, out, err = captured(run_analysis, self.Periods, self.ctx)
+        self.assertIsNone(result)
+        self.assertIn(f'=> ERROR ANALYSIS PERIODS INPUT {self.folder / "spec.json"}: line 1, column 25', out)
+        self.assertEqual(err, '')
+        self.write('spec.json', '[1, 2]')                       # An element needs a JSON object
+        self.assertIn('expected a JSON object', captured(run_analysis, self.Periods, self.ctx)[1])
+
+    def test_undeclared_input_is_an_error_of_the_analysis(self):
+        class Undeclared(Analysis):
+            name, title = 'undeclared', 'Undeclared'
+            def run(self, ctx):
+                return ctx.input('spec')
+
+        result, out, _ = captured(run_analysis, Undeclared, self.ctx)
+        self.assertIsNone(result)
+        self.assertIn("'spec' is not an input of this analysis", out)
+
+    def test_invalid_declarations_are_rejected_at_discovery(self):
+        with tempfile.TemporaryDirectory() as plugins:
+            write_plugin(plugins, 'bad.py', '''
+                from analysis import Analysis, Input
+                class A(Analysis):
+                    name, title, inputs = 'a', 'A', {'x': 'spec.json'}
+                class B(Analysis):
+                    name, title, inputs = 'b', 'B', {'x': Input('../spec.json')}
+                class C(Analysis):
+                    name, title, inputs = 'c', 'C', {'x': Input('spec.csv', key='k')}
+                class D(Analysis):
+                    name, title, inputs = 'd', 'D', {'x': Input('specs/spec.json', key='k')}
+            ''')
+            available, errors = analysis.discover([plugins])
+        self.assertEqual([name for name in 'abcd' if name in available], ['d'])
+        self.assertEqual(len(errors), 3)
+        self.assertIn('is not an analysis.Input', errors[0])
+        self.assertIn('inside the recording folder', errors[1])
+        self.assertIn('only possible for JSON', errors[2])
+
+    def test_example_plugins(self):
+        available, errors = analysis.discover([ROOT / 'examples/analysis_plugins'])
+        self.assertEqual(errors, [])
+        self.write('timing_spec.json', '{"periods": {"High": 10, "Low": 20, "Gone": 5}, "budgets": {"Low": 8}}')
+        ctx = self.ctx
+        result, out, _ = captured(run_analysis, available['period_check'], ctx)
+        self.assertEqual(result.lines, ['not in the trace: Gone'])
+        self.assertEqual([row[0] for row in result.tables[0].rows], ['High', 'Low'])
+        self.assertEqual(result.tables[0].rows[0][-1], 0)        # Periodic releases: no deviation
+        result, _, _ = captured(run_analysis, available['exec_budget'], ctx)
+        self.assertEqual(result.tables[0].rows, [['Low', 0.008, 2, 2, 0.009]])
+        self.assertTrue((self.folder / 'analysis/exec_budget.csv').is_file())
+
+
 class Builtins(unittest.TestCase):
     def run_builtin(self, name, ctx):
         return captured(run_analysis, dict(analysis.discover()[0])[name], ctx)[0]
@@ -194,12 +309,14 @@ class Builtins(unittest.TestCase):
     def test_deadline_misses(self):
         _, tasks, _ = simulated_tasks()
         with tempfile.TemporaryDirectory() as folder:
-            result = self.run_builtin('deadline_misses', AnalysisContext(tasks, folder, trace_end=40))
+            result = self.run_builtin('deadline_misses', AnalysisContext(tasks, folder, trace_end=40 * US))
             late = list(csv.reader((Path(folder) / 'analysis/deadline_misses.csv').read_text().splitlines()))
         # Low: released 0 and 20, preempted by High (0-4, 10-14, ...), completes 17 and 37, deadlines 12 and 32
         self.assertEqual(result.headline, '2 late job(s)')
         self.assertEqual(result.tables[0].rows, [['High', 4, 0, None, 0, 0], ['Low', 2, 2, 0.005, 0, 0]])
-        self.assertEqual(late[1:], [['Low', '0', '0', '12', '17', '5', '0'], ['Low', '1', '20', '32', '37', '5', '0']])
+        self.assertEqual(late[0][2:6], ['ReleaseTime_ns', 'Deadline_ns', 'FinishTime_ns', 'Lateness_ns'])
+        self.assertEqual(late[1:], [['Low', '0', '0', '12000', '17000', '5000', '0'],
+                                    ['Low', '1', '20000', '32000', '37000', '5000', '0']])
 
     def test_unfinished_late_jobs_and_unknown_deadlines(self):
         task = TraceTask(1, 'T', 1, '#000')
@@ -217,8 +334,9 @@ class Builtins(unittest.TestCase):
 
     def test_response_times_and_preemptions(self):
         task = TraceTask(1, 'T', 1, '#000')
-        job(task, 0, 0, [(1, 3, 0), (5, 6, 1)])           # Preempted once, migrated once
-        job(task, 1, 10, [(10, 12, 0), (12, 14, 0)])      # Back-to-back intervals: no preemption
+        u = US
+        job(task, 0, 0, [(1 * u, 3 * u, 0), (5 * u, 6 * u, 1)])           # Preempted once, migrated once
+        job(task, 1, 10 * u, [(10 * u, 12 * u, 0), (12 * u, 14 * u, 0)])  # Back-to-back intervals: no preemption
         with tempfile.TemporaryDirectory() as folder:
             ctx = AnalysisContext([task], folder)
             times = self.run_builtin('response_times', ctx)
@@ -245,15 +363,17 @@ class Recording(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             self.make_recording(folder)
             ctx = analysis.load_recording(folder)
-        self.assertEqual((ctx.platform, ctx.cores, ctx.trace_end), ('Simulator', 1, 40))
+        self.assertEqual((ctx.platform, ctx.cores, ctx.trace_end), ('Simulator', 1, 40 * US))
         self.assertEqual([t.name for t in ctx.taskset.tasks], ['High', 'Low'])
+        self.assertEqual([(t.period, t.wcet, t.deadline) for t in ctx.taskset.tasks],     # Like the trace: ns
+                         [(10 * US, 4 * US, 10 * US), (20 * US, 9 * US, 12 * US)])
 
     def test_gui_context_reads_the_task_set(self):
         with tempfile.TemporaryDirectory() as folder:
             self.make_recording(folder)
             _, tasks, _ = simulated_tasks()
             ctx = analysis.context_for_tasks(tasks, folder, 'Simulator', None)
-        self.assertEqual((ctx.cores, ctx.trace_end, ctx.taskset.cores), (1, 40, 1))
+        self.assertEqual((ctx.cores, ctx.trace_end, ctx.taskset.cores), (1, 40 * US, 1))
 
     def test_not_a_recording(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -281,6 +401,8 @@ class CommandLine(unittest.TestCase):
             code, out, _ = captured(analysis_main, ['--list', '--plugins', plugins])
             self.assertEqual(code, 0)
             self.assertIn('count', out)
+            code, out, _ = captured(analysis_main, ['--list', '--plugins', str(ROOT / 'examples/analysis_plugins')])
+            self.assertIn("input: timing_spec.json (element 'budgets') - execution time budget", out)
             self.assertEqual(captured(analysis_main, [folder, 'nothing'])[0], 2)
             self.assertEqual(captured(analysis_main, [plugins])[0], 1)     # No recording
 

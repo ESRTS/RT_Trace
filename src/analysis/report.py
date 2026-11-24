@@ -6,7 +6,7 @@ import csv
 import sys
 import traceback
 
-from .base import Result
+from .base import InputError, Result
 
 
 def print_state(state, info=''):
@@ -60,12 +60,18 @@ def run_analysis(analysis_class, ctx):
     """
     Run one analysis on ctx and print its result. Errors of the analysis are reported, never raised,
     so a broken plugin cannot stop the trace from loading. Returns the Result, or None if the analysis failed.
+    Missing required inputs skip the analysis like check() does; an unreadable input file is a failure.
     """
     title = analysis_class.title or analysis_class.name
     ctx.files = []
+    ctx._inputs = dict(analysis_class.inputs or {})
     try:
-        analysis = analysis_class()
-        reason = analysis.check(ctx)
+        missing = ctx.missing_inputs()
+        if missing:
+            reason = f"needs {', '.join(missing)} in {ctx.folder}"
+        else:
+            analysis = analysis_class()
+            reason = analysis.check(ctx)
         if reason:
             print_state(f'{title} skipped', info=str(reason))
             return Result(headline=str(reason))     # Not applicable is no failure
@@ -75,6 +81,9 @@ def run_analysis(analysis_class, ctx):
         for table in result.tables:
             if table.csv:
                 write_csv(ctx.output_path(table.csv), table)
+    except InputError as error:                     # A bad input file is no bug of the analysis: no traceback
+        print_state(f'ERROR analysis {analysis_class.name} input', info=str(error))
+        return None
     except Exception as error:
         print_state(f'ERROR analysis {analysis_class.name} failed', info=f'{type(error).__name__}: {error}')
         print(traceback.format_exc(), file=sys.stderr, end='')

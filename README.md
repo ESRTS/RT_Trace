@@ -2,7 +2,8 @@
 
 Record and visualize task execution, inferred jobs, deadlines, mutex operations,
 IRQ activity and scheduling on a shared timeline. The main target is **Pico 2
-with FreeRTOS SMP**, using one SEGGER RTT channel per core. Linux tracing is
+with FreeRTOS SMP**, using one SEGGER RTT channel per core. NVIDIA Jetson traces
+of Nsight Systems, including the GPU, can be loaded. Linux tracing is
 experimental.
 
 ## Run
@@ -151,13 +152,37 @@ startup trace with IRQ tracing enabled; otherwise it uses the first event.
 Both fallback origins are reported as estimates.
 
 Loading writes `events.txt` and per-task CSVs into the recording folder. CSV
-times are in microseconds. Each job row ends with `Deadline_us`, the deadline
+times are in nanoseconds, like all times of the trace model (FreeRTOS and the
+simulator record whole microseconds). Each job row ends with `Deadline_ns`, the deadline
 the trace view uses, and `DeadlineEstimated`. A 1 means the deadline time is
 estimated, or is the next job's release because the parser sets no deadlines
 (Linux). Both cells are empty if the deadline is unknown. PDFs go to
 `output/<platform>/<recording>/`.
 Optional `job_policy.json` overrides inference; see the
 [task/job architecture](arch_description/03-task-builder.md).
+
+## Load a Jetson trace (Nsight Systems)
+
+RT-Trace loads CPU and GPU traces of a Jetson (tested on a Jetson Thor) that
+Nsight Systems recorded; recording from RT-Trace is not supported yet. On the
+Jetson, with `kernel.perf_event_paranoid` at 1 or lower (otherwise the trace has
+no CPU context switches):
+
+```sh
+nsys profile --trace=cuda,nvtx,osrt --sample=none --cpuctxsw=process-tree -o trace ./app
+nsys export --type sqlite trace.nsys-rep
+```
+
+Copy `trace.sqlite` into `data/Jetson_Thor/<recording>/`, select **Jetson Thor**
+and load the recording. Every thread of the application is a row; each GPU stream
+has a row of its own, where each kernel starts at its launch call. Tasks and jobs
+come from NVTX annotations in the application: the thread name, the period,
+priority and release of each job, and one NVTX range per job (the contract is in
+[TraceParserJetson.py](src/TraceParserJetson.py) and the
+[Jetson architecture](arch_description/06-jetson.md)). Without them, threads
+are shown without jobs. Times are nanoseconds; the time zero is the common
+release of the tasks. [examples/jetsonThor](examples/jetsonThor) has a trace
+with two CPU and two GPU tasks.
 
 ## Analyze a trace
 
@@ -181,7 +206,10 @@ plugin_folders = ~/rt-trace-plugins
 
 The [plugin guide](src/analysis/README.md) explains the interface;
 [examples/analysis_plugins](examples/analysis_plugins) has a per-core load
-example. Analyses also run without the GUI:
+example. A plugin can also read input files from the recording folder, such as
+a timing specification; the example `timing_spec.py` shows how. If a file is
+missing, the output panel says which file the analysis needs and where. Analyses
+also run without the GUI:
 
 ```sh
 python src/analysis --list

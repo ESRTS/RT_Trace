@@ -43,7 +43,7 @@ class DeadlineMisses(Analysis):
         tables = [Table(['Task', 'Jobs', 'Misses', 'Worst lateness (ms)', 'Estimated', 'Unfinished late'],
                         summary, formats=[None, None, None, '.3f'])]
         if late:
-            tables.append(Table(['Task', 'JobId', 'ReleaseTime_us', 'Deadline_us', 'FinishTime_us', 'Lateness_us',
-                                 'DeadlineEstimated'], late, title='Late jobs (times in us)', csv='deadline_misses.csv',
+            tables.append(Table(['Task', 'JobId', 'ReleaseTime_ns', 'Deadline_ns', 'FinishTime_ns', 'Lateness_ns',
+                                 'DeadlineEstimated'], late, title='Late jobs (times in ns)', csv='deadline_misses.csv',
                                 max_rows=20))
         return Result(headline=f'{total} late job(s)', lines=lines, tables=tables)

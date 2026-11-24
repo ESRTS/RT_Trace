@@ -6,12 +6,19 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib.colors import HexColor
+from timeunits import US, MS, S
 
 
 class TraceView(customtkinter.CTkCanvas):
     """
     Class to implement a widget that displays the execution trace.
     """
+
+    # Colors to indicate that a task executes on a CPU, used if the trace contains more than one CPU. Core n uses
+    # color n modulo the length. Intervals whose core is no CPU number (e.g. 'GPU0') use the color of their row.
+    CORE_COLORS = ((98, 152, 210), (51, 156, 156), (255, 209, 102), (204, 157, 251), (0, 109, 119), (226, 149, 120),
+                   (130, 192, 108), (231, 111, 140), (150, 120, 90), (120, 170, 230), (190, 190, 60), (110, 110, 180),
+                   (240, 160, 50), (90, 190, 180), (200, 120, 200), (160, 160, 160))
 
     def __init__(self, master, gui=None):
         super().__init__(master, scrollregion = (0,0,100,500), highlightthickness=0)   # No focus border, it would hide part of the view
@@ -43,17 +50,17 @@ class TraceView(customtkinter.CTkCanvas):
         # --> Internal variables. No manual configuration needed! <--
         self.sizeX_px = 0                                       # Width of the canvas
         self.view_tks = 0                                       # Length of the visible interval in time ticks
-        self.tickScale = 1                                      # Tick scale 0 = us, 1 = ms, 2 = s
+        self.tickScale = 1                                      # Unit of the time labels in ticks: 1 (ns), US, MS or S
         self.leftBound_tks = 0                                  # Smallest time value of the visible trace
-        self.rightBound_tks = 50000                             # Largest time value of the visible trace (50 ms)
+        self.rightBound_tks = 50 * MS                           # Largest time value of the visible trace (50 ms); ticks are ns
         self.oldLeftBound_tks = 0                               # Last value of leftBound_tks before the view was updated 
         self.oldRightBound_tks = 0                              # Last value of rightBound_tks before the view was updated
         self.zoomFactor = 1.2                                   # Factor used to compute zoom areas
-        self.zoomMax = 50                                       # Maximum zoom level 50us
+        self.zoomMax = 1 * US                                   # Maximum zoom level: 1 us wide
         self.zoomMin = 0                                        # Minimum zoom level, this is set to the last trace event.
         self.moveView = False                                   # Flag to indicate that the view is moved
         self.moveInitialX = 0                                   # Initial X-position if the view is moved
-        self.coreColors = [(98, 152, 210), (51, 156, 156), (255, 209, 102), (204, 157, 251), (0, 109, 119), (226, 149, 120)]      # Colors to indicate that a task executes on a CPU, used if the trace contains more than one CPU
+        self.coreColors = list(self.CORE_COLORS)
         self.deadlineMissColor = '#f5697c'                    # Color to use for the job section after a deadline is missed
         self.cores = 1                                          # Number of cores in the trace (will be set automatically)
         self.gui = gui if gui is not None else master           # GUI instance, needed to change the Y-dimension to fit the trace.
@@ -109,31 +116,28 @@ class TraceView(customtkinter.CTkCanvas):
                     self.legend_px = elementWidth
 
             # we add one ms to the right bound to not finish the trace with the last event
-            self.rightBound_tks = self.rightBound_tks + 1000 
+            self.rightBound_tks = self.rightBound_tks + MS
             self.zoomMin = self.rightBound_tks
             self.leftBound_tks = 0      # Start at the beginning of a newly loaded trace
 
-            if self.rightBound_tks > 100000:
-                self.rightBound_tks = 100000
+            if self.rightBound_tks > 100 * MS:     # Show at most the first 100 ms of a newly loaded trace
+                self.rightBound_tks = 100 * MS
 
             # Check how many cores are used in the trace. If there is one core, the task colors are used. If there are multiple cores, 
             # one color is used per core. 
-            coresFound = []
+            coresFound = set()
             for task in self.tasks:
                 for job in task.jobs:
                     for exec in job.execIntervals:
-                        if exec.core not in coresFound:
-                            coresFound.append(exec.core)
-            
-            self.cores = max(1, len(coresFound))
+                        if isinstance(exec.core, int):      # CPU cores; GPU intervals are no CPU core
+                            coresFound.add(exec.core)
 
-            # Make sure that enough core colors are specified
-            assert max(coresFound, default=0) <= len(self.coreColors) - 1
+            self.cores = max(1, len(coresFound))
 
         else:
             # If there is no task, reset bounds and legend width to default values.
             self.leftBound_tks = 0
-            self.rightBound_tks = 50000
+            self.rightBound_tks = 50 * MS
             self.legend_px = 90
             self.cores = 1
             self.zoomMin = 0
@@ -387,10 +391,10 @@ class TraceView(customtkinter.CTkCanvas):
             if visible is None:
                 continue
             start_px, stop_px = visible
-            if self.cores == 1:
+            if self.cores == 1 or not isinstance(interval.core, int):
                 color = task.taskColor
             else:
-                color = '#%02X%02X%02X' % tuple(self.coreColors[interval.core])
+                color = '#%02X%02X%02X' % tuple(self.coreColors[interval.core % len(self.coreColors)])
 
             split_px = stop_px if deadlineMissAt is None else max(start_px, min(stop_px, self.tickToPixel(deadlineMissAt)))
             if split_px > start_px:
@@ -505,7 +509,7 @@ class TraceView(customtkinter.CTkCanvas):
         maxTicks = max(1, min(self.maxTicks, plotWidth // labelWidth_px))
         minSizeTick = self.view_tks / maxTicks
 
-        # Tick distance of 1, 2 or 5 times a power of ten (in us), at least minSizeTick
+        # Tick distance of 1, 2 or 5 times a power of ten (in ns), at least minSizeTick
         step = 1
         while step < minSizeTick:
             for factor in (2, 2.5, 2):      # 1 -> 2 -> 5 -> 10
@@ -514,12 +518,14 @@ class TraceView(customtkinter.CTkCanvas):
                     break
         step = round(step)
 
-        if step < 1000:     # Unit of the time labels
+        if step < US:       # Unit of the time labels
             self.tickScale = 1
-        elif step < 1000000:
-            self.tickScale = 1000
+        elif step < MS:
+            self.tickScale = US
+        elif step < S:
+            self.tickScale = MS
         else:
-            self.tickScale = 1000000
+            self.tickScale = S
 
         tick = math.ceil(self.leftBound_tks / step) * step
         self.axisTicks = []
@@ -545,13 +551,8 @@ class TraceView(customtkinter.CTkCanvas):
         """
         tmp = tick / self.tickScale
 
-        if self.tickScale == 1:
-            return str(int(tmp)) + " us"
-        elif self.tickScale == 1000:
-            return str(int(tmp)) + " ms"
-        elif self.tickScale == 1000000:
-            return str(int(tmp)) + " s"
-        return None
+        units = {1: " ns", US: " us", MS: " ms", S: " s"}
+        return str(int(tmp)) + units[self.tickScale] if self.tickScale in units else None
     
     def fittedHeight(self):
         """

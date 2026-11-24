@@ -2,6 +2,7 @@ from threading import Thread
 from pathlib import Path
 import io
 from TraceTask import *
+from timeunits import US, MS
 import os
 import HelperFunctions
 import configparser
@@ -159,7 +160,7 @@ def parseTraceEvents(events, filename):
         
         parts = line.split()
 
-        ts = float(parts[0])    # in ns
+        ts = round(float(parts[0]) * US)    # trace.txt has microseconds with fraction, the model nanoseconds
         event = getEvtId(parts[1])
         tid = int(parts[2].split('=')[1])
         cpu = int(parts[3].split('=')[1])
@@ -331,7 +332,7 @@ def extractTraceInfoUserEvents(events, eventFilePath):
                     if evt['type'] == ID_USER_REGISTER_PERIOD:
                         taskId = evt['taskId']
                         task = findTaskById(tasks, taskId)
-                        task.period = int(evt['period'])
+                        task.period = int(evt['period']) * MS      # Registered in milliseconds
                         
                     elif evt['type'] == ID_USER_REGISTER_NAME:
                         taskId = evt['taskId']

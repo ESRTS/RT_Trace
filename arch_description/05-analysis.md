@@ -10,7 +10,7 @@ the GUI, both command lines and `DataExport.exportData()` drive the same runner.
 
 | File | Role |
 | --- | --- |
-| `base.py` | `Analysis` (`name`, `title`, `check`, `run`), `Result`, `Table`, `AnalysisContext` and its helpers. |
+| `base.py` | `Analysis` (`name`, `title`, `inputs`, `check`, `run`), `Input`, `Result`, `Table`, `AnalysisContext` and its helpers. |
 | `report.py` | Runner: catches errors, writes CSV tables, prints in the output-box format. |
 | `registry.py` | Built-in analyses first, then plugin folders (`[analysis] plugin_folders`); `DEFAULT`. |
 | `recording.py` | Context from parsed tasks (GUI) or from a recording folder (CLI). |
@@ -22,6 +22,14 @@ the GUI, both command lines and `DataExport.exportData()` drive the same runner.
 thread on the loaded tasks. Analyses must not change the tasks, because the
 trace view draws them at the same time. Each run imports plugin files again;
 import errors, name clashes and exceptions are reported and never stop loading.
+
+**Inputs.** Additional input (specifications, expected values) is read only
+from the recording folder, so a recording stays self-contained. Analyses declare
+`inputs` (`Input(file, key, required)`). The runner skips an analysis whose
+required file or JSON element is missing and names it. Unreadable files fail
+without a traceback. Each file is parsed once per context, so analyses can share
+one file and take separate elements of it. `discover()` rejects invalid
+declarations.
 
 **Consistency.** `completed_jobs()` excludes jobs that are `incomplete` or
 `uncertain`, and `deadline()` reuses `DataExport.jobDeadline()`. Results

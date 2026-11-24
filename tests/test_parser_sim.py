@@ -13,7 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 from simulator import Simulator, TraceWriter, get_policy, parse_taskset
 from simulator import trace_format as fmt
-from TraceParserSim import SimTraceError, parse_lines, read_trace
+from TraceParserSim import SimTraceError, horizon_ns, parse_lines, read_trace
+from timeunits import US
 
 HEADER = json.dumps({'type': 'header', 'format': fmt.FORMAT, 'version': fmt.VERSION, 'cores': 2,
                      'time_unit': 'us', 'horizon': 100, 'scheduler': 'fp'})
@@ -26,6 +27,11 @@ def simulated(data, horizon):
     stream = io.StringIO()
     Simulator(taskset, get_policy(taskset.scheduler), TraceWriter(stream)).run(horizon)
     return parse_lines(stream.getvalue().splitlines())
+
+
+def us(time):
+    """A time of the trace model (ns) in the microseconds of the simulator."""
+    return None if time is None else time / US
 
 
 def lines(*events):
@@ -41,25 +47,27 @@ class RoundTrip(unittest.TestCase):
         self.assertEqual((header['cores'], warnings), (2, []))
         self.assertEqual([t.name for t in tasks], ['Pinned', 'Mid', 'Low'])
         mid = tasks[1]
-        self.assertEqual((mid.kind, mid.traceFormat, mid.deadlinesExplicit, mid.period), ('task', 3, True, 20))
+        self.assertEqual((mid.kind, mid.traceFormat, mid.deadlinesExplicit, us(mid.period)), ('task', 3, True, 20))
         job = mid.jobs[0]
-        self.assertEqual([(i.core, i.start, i.stop) for i in job.execIntervals], [(0, 0, 1), (1, 1, 4)])
-        self.assertEqual((job.releaseTime, job.deadline, job.completionTime, job.getFinishTime()), (0, 20, 4, 4))
+        self.assertEqual([(i.core, us(i.start), us(i.stop)) for i in job.execIntervals], [(0, 0, 1), (1, 1, 4)])
+        self.assertEqual((us(job.releaseTime), us(job.deadline), us(job.completionTime), us(job.getFinishTime())),
+                         (0, 20, 4, 4))
         self.assertFalse(job.incomplete or job.uncertain)
 
     def test_deadline_miss_overlapping_jobs(self):
         _, (task,), _ = simulated({'cores': 1, 'tasks': [
             {'name': 'Overrun', 'period': 10, 'wcet': 15, 'priority': 1}]}, 40)
-        self.assertEqual([(j.id, j.releaseTime, j.deadline, j.completionTime) for j in task.jobs],
+        self.assertEqual([(j.id, us(j.releaseTime), us(j.deadline), us(j.completionTime)) for j in task.jobs],
                          [(0, 0, 10, 15), (1, 10, 20, 30), (2, 20, 30, None), (3, 30, 40, None)])
-        self.assertEqual(task.getMaxResponseTime(), 20)
+        self.assertEqual(us(task.getMaxResponseTime()), 20)
 
     def test_open_jobs_are_incomplete_at_the_horizon(self):
         _, (task,), _ = simulated({'cores': 1, 'tasks': [
             {'name': 'Long', 'period': 100, 'wcet': 30, 'priority': 1}]}, 20)
         job = task.jobs[0]
         self.assertTrue(job.incomplete)
-        self.assertEqual(([(i.start, i.stop) for i in job.execIntervals], job.getFinishTime()), ([(0, 20)], 20))
+        self.assertEqual(([(us(i.start), us(i.stop)) for i in job.execIntervals], us(job.getFinishTime())),
+                         ([(0, 20)], 20))
 
     def test_tasks_without_jobs_are_dropped(self):
         _, tasks, _ = simulated({'cores': 1, 'tasks': [
@@ -94,7 +102,18 @@ class Malformed(unittest.TestCase):
             {'t': 0, 'type': 'start', 'task': 1, 'job': 0, 'core': 0},
             {'t': 7, 'type': 'release', 'task': 1, 'job': 1, 'deadline': 57}))
         self.assertIn('cut off', warnings[0])
-        self.assertEqual(task.jobs[0].execIntervals[0].stop, 7)
+        self.assertEqual(task.jobs[0].execIntervals[0].stop, 7 * US)
+
+    def test_time_unit_of_the_header(self):
+        # Simulator traces are in us; a trace in ns is read unchanged; other units are rejected.
+        events = [{'t': 3, 'type': 'release', 'task': 1, 'job': 0, 'deadline': 53}, {'t': 100, 'type': 'end'}]
+        self.assertEqual(parse_lines(lines(*events))[1][0].jobs[0].releaseTime, 3 * US)
+        ns = [HEADER.replace('"us"', '"ns"'), TASK] + [json.dumps(e) for e in events]
+        header, (task,), _ = parse_lines(ns)
+        self.assertEqual((task.jobs[0].releaseTime, task.jobs[0].deadline, task.period, horizon_ns(header)),
+                         (3, 53, 50, 100))
+        self.assertEqual(horizon_ns(json.loads(HEADER)), 100 * US)
+        self.check([HEADER.replace('"us"', '"ms"')], "unsupported time unit 'ms'")
 
 
 class SimulatorTarget(unittest.TestCase):
